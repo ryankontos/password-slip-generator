@@ -56,4 +56,4 @@ fi
 if ! .venv/bin/python -c 'import openpyxl, reportlab' >/dev/null 2>&1; then
   .venv/bin/python -m pip install -r requirements.txt
 fi
-exec .venv/bin/python password_slips.py
+exec .venv/bin/python src/password_slips.py

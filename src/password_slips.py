@@ -25,9 +25,10 @@ APP_NAME = "password-slip-generator"
 AUTHOR = "Ryan Kontos"
 YEAR = "2026"
 LICENSE_NAME = "0BSD"
-SCRIPT_DIR = Path(__file__).resolve().parent
-LAYOUT_FILE = SCRIPT_DIR / "layout_settings.json"
-SETTINGS_FILE = SCRIPT_DIR / "settings.json"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+SETTINGS_DIR = ROOT_DIR / "settings"
+LAYOUT_FILE = SETTINGS_DIR / "layout_settings.json"
+SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 MM = 72 / 25.4
 
 
@@ -101,6 +102,7 @@ def read_saved_settings() -> Settings:
 
 
 def ensure_json_files(defaults: Settings) -> None:
+    SETTINGS_DIR.mkdir(exist_ok=True)
     if not LAYOUT_FILE.exists():
         save_layout_file(defaults)
     if not SETTINGS_FILE.exists():

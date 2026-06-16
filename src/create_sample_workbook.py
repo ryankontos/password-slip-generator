@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 
-OUTPUT = Path(__file__).with_name("sample_passwords.xlsx")
+OUTPUT = Path(__file__).resolve().parent.parent / "sample_passwords.xlsx"
 
 workbook = Workbook()
 sheet = workbook.active
