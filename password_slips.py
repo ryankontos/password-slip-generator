@@ -8,6 +8,7 @@ import math
 import shlex
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -38,7 +39,6 @@ class Settings:
     column_numbers: list[int] = field(default_factory=list)
     output_folder: str = ""
     input_folder: str = ""
-    default_action: str = "export"
     workbook_extensions: list[str] = field(default_factory=lambda: [".xlsx", ".xlsm"])
 
     header_height_mm: float = 20.0
@@ -116,10 +116,6 @@ def apply_saved_app_settings(settings: Settings) -> None:
 
     settings.input_folder = str(data.get("input_folder") or "~/Downloads")
     settings.output_folder = str(data.get("output_folder") or "~/Downloads")
-    settings.default_action = str(data.get("default_action") or "export").lower()
-    if settings.default_action not in {"export", "print"}:
-        settings.default_action = "export"
-
     extensions = data.get("workbook_extensions") or [".xlsx", ".xlsm"]
     settings.workbook_extensions = [str(extension).strip().lower() for extension in extensions]
     settings.column_numbers = [int(number) for number in data.get("column_numbers", [])]
@@ -145,7 +141,6 @@ def save_app_settings(settings: Settings) -> None:
         "_help": app_settings_help(),
         "input_folder": settings.input_folder or "~/Downloads",
         "output_folder": settings.output_folder or "~/Downloads",
-        "default_action": settings.default_action,
         "workbook_extensions": settings.workbook_extensions,
         "column_numbers": settings.column_numbers,
     }
@@ -163,7 +158,6 @@ def app_settings_help() -> dict[str, str]:
     return {
         "input_folder": "Folder searched for the latest Excel workbook when you press Enter at the file prompt.",
         "output_folder": "Default folder for generated PDFs.",
-        "default_action": "Default final action. Use export or print.",
         "workbook_extensions": "Excel file extensions to look for in input_folder.",
         "column_numbers": "Last selected column numbers, in the order they should appear on each slip.",
     }
@@ -364,7 +358,7 @@ def output_path(settings: Settings) -> Path:
     return Path(settings.output_folder or downloads_folder()).expanduser() / f"{name} - password slips.pdf"
 
 
-def make_pdf(settings: Settings) -> tuple[int, int]:
+def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, int]:
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
     if not records:
         raise ValueError("No slips to generate.")
@@ -384,7 +378,7 @@ def make_pdf(settings: Settings) -> tuple[int, int]:
     content_width = page_width - side * 2
     column_area = content_width - gap * (len(settings.columns) - 1)
 
-    output = output_path(settings)
+    output = output or output_path(settings)
     output.parent.mkdir(parents=True, exist_ok=True)
     pdf = canvas.Canvas(str(output), pagesize=A4, pageCompression=1)
     pdf.setTitle(APP_NAME)
@@ -426,6 +420,20 @@ end run
     except Exception:
         subprocess.run(["open", str(pdf)], check=False)
         return False
+
+
+def open_in_preview(pdf: Path) -> bool:
+    if not pdf.is_file():
+        return False
+    return subprocess.run(["open", "-a", "Preview", str(pdf)], check=False).returncode == 0
+
+
+def temporary_pdf_path(settings: Settings) -> Path:
+    workbook = Path(settings.workbook)
+    name = workbook.stem if workbook.name else "password-slips"
+    handle = tempfile.NamedTemporaryFile(prefix=f"{name}-", suffix=".pdf", delete=False)
+    handle.close()
+    return Path(handle.name)
 
 
 def draw_cut_ticks(pdf: canvas.Canvas, settings: Settings, page_width: float, page_height: float, per_page: int) -> None:
@@ -613,12 +621,18 @@ def choose_output_folder(default: str) -> str:
         return str(folder)
 
 
-def choose_action(default: str) -> str:
+def choose_action() -> str:
     section("Finish")
-    action = prompt("Action: export or print", default).strip().lower()
+    print("o = open in Preview, e = export PDF, p = print")
+    action = prompt("Action", "open").strip().lower()
+    if action in {"", "o", "open"}:
+        return "open"
+    if action in {"e", "export"}:
+        return "export"
     if action in {"p", "print"}:
         return "print"
-    return "export"
+    print("Using open. Next time enter o, e, or p.")
+    return "open"
 
 
 def preview_records(columns: list[str], records: list[list[str]]) -> None:
@@ -665,29 +679,40 @@ def run_cli() -> None:
 
     headers = workbook_headers(settings.workbook, settings.sheet)
     settings.columns, settings.column_numbers = choose_columns(headers, settings)
-    settings.output_folder = choose_output_folder(settings.output_folder)
 
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
     preview_records(settings.columns, records)
     print_summary(settings, len(records))
 
-    action = choose_action(settings.default_action)
-    settings.default_action = action
+    action = choose_action()
+    if action in {"export", "print"}:
+        settings.output_folder = choose_output_folder(settings.output_folder)
 
     if not Path(settings.workbook).is_file():
         raise ValueError("Choose an Excel workbook.")
     if not settings.columns:
         raise ValueError("Choose at least one column.")
 
-    count, pages = make_pdf(settings)
     save_settings(settings)
-    pdf = output_path(settings)
+    if action == "open":
+        pdf = temporary_pdf_path(settings)
+        count, pages = make_pdf(settings, pdf)
+        opened = open_in_preview(pdf)
+    else:
+        count, pages = make_pdf(settings)
+        pdf = output_path(settings)
+        opened = False
+
     print()
     print("Done")
     print(f"  Created {count} slips across {pages} {plural(pages, 'page')}.")
-    print(f"  PDF: {pdf}")
 
-    if action in {"print", "p"}:
+    if action == "open":
+        print("  Opened in Preview." if opened else f"  Temporary PDF: {pdf}")
+    else:
+        print(f"  PDF: {pdf}")
+
+    if action == "print":
         if open_print_dialog(pdf):
             print("Opened the macOS print dialog.")
         else:
