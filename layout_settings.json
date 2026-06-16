@@ -3,7 +3,7 @@
     "header_height_mm": "Height of the blue header area on each slip.",
     "data_height_mm": "Height of the white data area on each slip.",
     "top_margin_mm": "Blank space at the top of each A4 page.",
-    "bottom_margin_mm": "Blank space at the bottom of each A4 page.",
+    "bottom_margin_mm": "Blank space at the bottom of each A4 page. The footer is drawn inside this area.",
     "side_margin_mm": "Left and right page margin.",
     "column_gap_mm": "Space between fields across the slip.",
     "padding_mm": "Inner text padding inside each field area.",
@@ -11,7 +11,13 @@
     "header_color": "Header colour as a hex value.",
     "header_font_pt": "Maximum header text size.",
     "data_font_pt": "Maximum data text size.",
-    "minimum_font_pt": "Smallest text size allowed when fitting long text."
+    "minimum_font_pt": "Smallest text size allowed when fitting long text.",
+    "show_footer": "Show a small footer in the bottom page margin without changing slip positions.",
+    "show_sheet_name": "Show the Excel sheet name in the footer.",
+    "show_generated_datetime": "Show the generated date and time in the footer.",
+    "show_page_numbers": "Show page numbers as Page X of Y in the footer.",
+    "footer_font_pt": "Footer text size.",
+    "footer_color": "Footer text colour as a hex value."
   },
   "header_height_mm": 20.0,
   "data_height_mm": 20.0,
@@ -24,5 +30,11 @@
   "header_color": "#1769AA",
   "header_font_pt": 11.0,
   "data_font_pt": 12.0,
-  "minimum_font_pt": 4.0
+  "minimum_font_pt": 4.0,
+  "show_footer": true,
+  "show_sheet_name": true,
+  "show_generated_datetime": true,
+  "show_page_numbers": true,
+  "footer_font_pt": 7.5,
+  "footer_color": "#555555"
 }

@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -53,6 +54,13 @@ class Settings:
     header_font_pt: float = 11.0
     data_font_pt: float = 12.0
     minimum_font_pt: float = 4.0
+
+    show_footer: bool = True
+    show_sheet_name: bool = True
+    show_generated_datetime: bool = True
+    show_page_numbers: bool = True
+    footer_font_pt: float = 7.5
+    footer_color: str = "#555555"
 
     @property
     def slip_height_mm(self) -> float:
@@ -162,7 +170,7 @@ def layout_settings_help() -> dict[str, str]:
         "header_height_mm": "Height of the blue header area on each slip.",
         "data_height_mm": "Height of the white data area on each slip.",
         "top_margin_mm": "Blank space at the top of each A4 page.",
-        "bottom_margin_mm": "Blank space at the bottom of each A4 page.",
+        "bottom_margin_mm": "Blank space at the bottom of each A4 page. The footer is drawn inside this area.",
         "side_margin_mm": "Left and right page margin.",
         "column_gap_mm": "Space between fields across the slip.",
         "padding_mm": "Inner text padding inside each field area.",
@@ -171,6 +179,12 @@ def layout_settings_help() -> dict[str, str]:
         "header_font_pt": "Maximum header text size.",
         "data_font_pt": "Maximum data text size.",
         "minimum_font_pt": "Smallest text size allowed when fitting long text.",
+        "show_footer": "Show a small footer in the bottom page margin without changing slip positions.",
+        "show_sheet_name": "Show the Excel sheet name in the footer.",
+        "show_generated_datetime": "Show the generated date and time in the footer.",
+        "show_page_numbers": "Show page numbers as Page X of Y in the footer.",
+        "footer_font_pt": "Footer text size.",
+        "footer_color": "Footer text colour as a hex value.",
     }
 
 
@@ -188,6 +202,12 @@ def layout_field_names() -> tuple[str, ...]:
         "header_font_pt",
         "data_font_pt",
         "minimum_font_pt",
+        "show_footer",
+        "show_sheet_name",
+        "show_generated_datetime",
+        "show_page_numbers",
+        "footer_font_pt",
+        "footer_color",
     )
 
 
@@ -325,8 +345,10 @@ def make_pdf(settings: Settings) -> tuple[int, int]:
     pdf.setTitle(APP_NAME)
 
     pages = page_count(settings, len(records))
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     for page in range(pages):
         draw_cut_ticks(pdf, settings, page_width, page_height, per_page)
+        draw_footer(pdf, settings, page + 1, pages, generated_at, page_width)
         page_records = records[page * per_page:(page + 1) * per_page]
         for slot, record in enumerate(page_records):
             draw_slip(pdf, settings, record, widths, side, page_height - top - slot * slip_height, content_width)
@@ -370,6 +392,32 @@ def draw_cut_ticks(pdf: canvas.Canvas, settings: Settings, page_width: float, pa
         y = page_height - top - boundary * slip_height
         pdf.line(0, y, tick, y)
         pdf.line(page_width - tick, y, page_width, y)
+
+
+def draw_footer(pdf: canvas.Canvas, settings: Settings, page_number: int, page_total: int,
+                generated_at: str, page_width: float) -> None:
+    if not settings.show_footer:
+        return
+
+    parts = []
+    if settings.show_sheet_name and settings.sheet:
+        parts.append(f"Sheet: {settings.sheet}")
+    if settings.show_generated_datetime:
+        parts.append(f"Generated: {generated_at}")
+    if settings.show_page_numbers:
+        parts.append(f"Page {page_number} of {page_total}")
+    if not parts:
+        return
+
+    side = settings.side_margin_mm * MM
+    y = max(3 * MM, settings.bottom_margin_mm * MM / 2)
+    text = "  |  ".join(parts)
+    available_width = page_width - side * 2
+    size = shrink_to_fit(text, "Helvetica", settings.footer_font_pt, settings.minimum_font_pt,
+                         available_width, settings.footer_font_pt * 1.5)
+    pdf.setFillColor(HexColor(settings.footer_color))
+    pdf.setFont("Helvetica", size)
+    pdf.drawCentredString(page_width / 2, y, short_text(text, "Helvetica", size, available_width))
 
 
 def draw_slip(pdf: canvas.Canvas, settings: Settings, record: list[str], widths: list[float],
