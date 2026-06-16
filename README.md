@@ -2,6 +2,6 @@
 
 Download the SharePoint Excel file to `~/Downloads`, then open `run_password_slips.command`.
 
-The app always selects the newest `.xlsx` or `.xlsm` file in Downloads, lets you choose and order the fields, and exports an A4 PDF with identical cut lines on every page.
+The command-line prompts always start with the newest `.xlsx` or `.xlsm` file in Downloads, remember your last settings, and let you choose the sheet, fields, output folder, and print/export action.
 
-Use **Layout and Preview** to adjust slip size, margins, colours, spacing, and text fitting.
+It exports an A4 PDF with identical cut lines on every page, and you can optionally adjust the layout values during a run.

@@ -4,7 +4,7 @@ cd "${0:A:h}"
 
 is_compatible_python() {
   [[ -x "$1" ]] || return 1
-  "$1" -c 'import sys, tkinter; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' \
+  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)' \
     >/dev/null 2>&1
 }
 
@@ -44,7 +44,7 @@ find_python() {
 if ! is_compatible_python .venv/bin/python; then
   PYTHON="$(find_python || true)"
   if [[ -z "$PYTHON" ]]; then
-    MESSAGE="password-slip-generator needs Python 3.9 or newer with Tkinter. Install Xcode Command Line Tools, then open this file again."
+    MESSAGE="password-slip-generator needs Python 3.9 or newer. Install Xcode Command Line Tools, then open this file again."
     /usr/bin/osascript -e "display dialog \"$MESSAGE\" with title \"password-slip-generator\" buttons {\"OK\"} default button \"OK\" with icon stop" 2>/dev/null || true
     print -u2 -- "$MESSAGE"
     exit 1
