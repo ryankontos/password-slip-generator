@@ -2,5 +2,4 @@
 __pycache__/
 tmp/
 .DS_Store
-last_run.json
 settings.json

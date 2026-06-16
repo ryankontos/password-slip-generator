@@ -92,16 +92,15 @@ def ensure_json_files(defaults: Settings) -> None:
     if not LAYOUT_FILE.exists():
         save_layout_file(defaults)
     if not SETTINGS_FILE.exists():
-        data = {"_help": app_settings_help()}
-        data.update(migrate_old_state_file())
-        SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        save_app_settings(defaults)
 
 
 def apply_saved_app_settings(settings: Settings) -> None:
     try:
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     except (OSError, TypeError, ValueError):
-        data = migrate_old_state_file()
+        save_app_settings(settings)
+        data = {}
 
     settings.input_folder = str(data.get("input_folder") or "~/Downloads")
     settings.output_folder = str(data.get("output_folder") or "~/Downloads")
@@ -110,53 +109,19 @@ def apply_saved_app_settings(settings: Settings) -> None:
         settings.default_action = "export"
 
     extensions = data.get("workbook_extensions") or [".xlsx", ".xlsm"]
-    settings.workbook_extensions = [normalise_extension(extension) for extension in extensions]
+    settings.workbook_extensions = [str(extension).strip().lower() for extension in extensions]
     settings.column_numbers = [int(number) for number in data.get("column_numbers", [])]
-
-
-def migrate_old_state_file() -> dict:
-    old_file = SCRIPT_DIR / "last_run.json"
-    try:
-        data = json.loads(old_file.read_text(encoding="utf-8"))
-    except (OSError, TypeError, ValueError):
-        data = {}
-    return {
-        "input_folder": "~/Downloads",
-        "output_folder": "~/Downloads",
-        "default_action": "export",
-        "workbook_extensions": [".xlsx", ".xlsm"],
-        "column_numbers": data.get("column_numbers", []),
-    }
-
-
-def normalise_extension(extension: str) -> str:
-    extension = str(extension).strip().lower()
-    return extension if extension.startswith(".") else "." + extension
 
 
 def apply_saved_layout(settings: Settings) -> None:
     try:
-        data = migrate_layout_settings(json.loads(LAYOUT_FILE.read_text(encoding="utf-8")))
+        data = json.loads(LAYOUT_FILE.read_text(encoding="utf-8"))
         for key, value in data.items():
-            setattr(settings, key, value)
+            if key in layout_field_names():
+                setattr(settings, key, value)
         HexColor(settings.header_color)
     except (OSError, TypeError, ValueError):
         print(f"Could not read {LAYOUT_FILE.name}; using built-in layout defaults.")
-
-
-def migrate_layout_settings(data: dict) -> dict:
-    renamed = dict(data)
-    if "horizontal_padding_mm" in renamed and "padding_mm" not in renamed:
-        renamed["padding_mm"] = renamed.pop("horizontal_padding_mm")
-    if "header_font_max_pt" in renamed and "header_font_pt" not in renamed:
-        renamed["header_font_pt"] = renamed.pop("header_font_max_pt")
-    if "data_font_max_pt" in renamed and "data_font_pt" not in renamed:
-        renamed["data_font_pt"] = renamed.pop("data_font_max_pt")
-    if "font_min_pt" in renamed and "minimum_font_pt" not in renamed:
-        renamed["minimum_font_pt"] = renamed.pop("font_min_pt")
-
-    valid_names = set(layout_field_names())
-    return {key: value for key, value in renamed.items() if key in valid_names}
 
 
 def save_settings(settings: Settings) -> None:
