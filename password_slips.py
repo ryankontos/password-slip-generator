@@ -84,8 +84,6 @@ def read_saved_settings() -> Settings:
 
 def migrate_saved_settings(data: dict) -> dict:
     renamed = dict(data)
-    if "output" in renamed and "output_folder" not in renamed:
-        renamed["output_folder"] = str(Path(renamed["output"]).expanduser().parent)
     if "horizontal_padding_mm" in renamed and "padding_mm" not in renamed:
         renamed["padding_mm"] = renamed.pop("horizontal_padding_mm")
     if "header_font_max_pt" in renamed and "header_font_pt" not in renamed:
@@ -95,13 +93,33 @@ def migrate_saved_settings(data: dict) -> dict:
     if "font_min_pt" in renamed and "minimum_font_pt" not in renamed:
         renamed["minimum_font_pt"] = renamed.pop("font_min_pt")
 
-    valid_names = set(Settings.__dataclass_fields__)
+    valid_names = {"column_numbers", *layout_field_names()}
     return {key: value for key, value in renamed.items() if key in valid_names}
 
 
 def save_settings(settings: Settings) -> None:
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps({"last_run": asdict(settings)}, indent=2), encoding="utf-8")
+    saved = {"column_numbers": settings.column_numbers}
+    for name in layout_field_names():
+        saved[name] = getattr(settings, name)
+    SETTINGS_FILE.write_text(json.dumps({"last_run": saved}, indent=2), encoding="utf-8")
+
+
+def layout_field_names() -> tuple[str, ...]:
+    return (
+        "header_height_mm",
+        "data_height_mm",
+        "top_margin_mm",
+        "bottom_margin_mm",
+        "side_margin_mm",
+        "column_gap_mm",
+        "padding_mm",
+        "cut_tick_mm",
+        "header_color",
+        "header_font_pt",
+        "data_font_pt",
+        "minimum_font_pt",
+    )
 
 
 def workbook_sheet_names(path: str) -> list[str]:
@@ -400,10 +418,6 @@ def remembered_column_numbers(headers: list[str], settings: Settings) -> list[in
     ]
     if numbers:
         return numbers
-
-    columns = [column for column in settings.columns if column in headers]
-    if columns:
-        return [headers.index(column) + 1 for column in columns]
 
     return list(range(1, len(headers) + 1))
 
