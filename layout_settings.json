@@ -1,4 +1,18 @@
 {
+  "_help": {
+    "header_height_mm": "Height of the blue header area on each slip.",
+    "data_height_mm": "Height of the white data area on each slip.",
+    "top_margin_mm": "Blank space at the top of each A4 page.",
+    "bottom_margin_mm": "Blank space at the bottom of each A4 page.",
+    "side_margin_mm": "Left and right page margin.",
+    "column_gap_mm": "Space between fields across the slip.",
+    "padding_mm": "Inner text padding inside each field area.",
+    "cut_tick_mm": "Length of small cut marks at the page edges.",
+    "header_color": "Header colour as a hex value.",
+    "header_font_pt": "Maximum header text size.",
+    "data_font_pt": "Maximum data text size.",
+    "minimum_font_pt": "Smallest text size allowed when fitting long text."
+  },
   "header_height_mm": 20.0,
   "data_height_mm": 20.0,
   "top_margin_mm": 8.0,

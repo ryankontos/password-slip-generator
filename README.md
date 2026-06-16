@@ -8,4 +8,4 @@ It exports an A4 PDF with identical cut lines on every page, and can open the ma
 
 Page layout lives in `layout_settings.json` beside the script. The script creates this file with defaults if it does not exist; edit that file to change slip height, margins, colours, spacing, and font sizes.
 
-The last selected column numbers live in `last_run.json` beside the script. That file is created automatically and is not meant to be edited.
+General app settings live in `settings.json` beside the script. The script creates this file automatically; it stores the input folder, output folder, default action, allowed workbook extensions, and last selected column numbers.

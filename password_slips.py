@@ -22,7 +22,7 @@ from reportlab.pdfgen import canvas
 APP_NAME = "password-slip-generator"
 SCRIPT_DIR = Path(__file__).resolve().parent
 LAYOUT_FILE = SCRIPT_DIR / "layout_settings.json"
-STATE_FILE = SCRIPT_DIR / "last_run.json"
+SETTINGS_FILE = SCRIPT_DIR / "settings.json"
 MM = 72 / 25.4
 
 
@@ -33,6 +33,9 @@ class Settings:
     columns: list[str] = field(default_factory=list)
     column_numbers: list[int] = field(default_factory=list)
     output_folder: str = ""
+    input_folder: str = ""
+    default_action: str = "export"
+    workbook_extensions: list[str] = field(default_factory=lambda: [".xlsx", ".xlsm"])
 
     header_height_mm: float = 20.0
     data_height_mm: float = 20.0
@@ -57,15 +60,16 @@ def downloads_folder() -> Path:
     return Path.home() / "Downloads"
 
 
-def newest_downloaded_workbook() -> Optional[Path]:
-    folder = downloads_folder()
+def newest_workbook(folder: str, extensions: list[str]) -> Optional[Path]:
+    folder = Path(folder).expanduser()
     if not folder.is_dir():
         return None
 
+    allowed = {extension.lower() for extension in extensions}
     files = [
         file for file in folder.iterdir()
         if file.is_file()
-        and file.suffix.lower() in {".xlsx", ".xlsm"}
+        and file.suffix.lower() in allowed
         and not file.name.startswith((".", "~$"))
     ]
     return max(files, key=lambda file: file.stat().st_mtime) if files else None
@@ -74,17 +78,57 @@ def newest_downloaded_workbook() -> Optional[Path]:
 def read_saved_settings() -> Settings:
     settings = Settings()
     ensure_json_files(settings)
+    apply_saved_app_settings(settings)
     apply_saved_layout(settings)
-    apply_saved_state(settings)
-    settings.output_folder = str(downloads_folder())
+    settings.input_folder = settings.input_folder or str(downloads_folder())
+    settings.output_folder = settings.output_folder or str(downloads_folder())
     return settings
 
 
 def ensure_json_files(defaults: Settings) -> None:
     if not LAYOUT_FILE.exists():
         save_layout_file(defaults)
-    if not STATE_FILE.exists():
-        save_state_file([])
+    if not SETTINGS_FILE.exists():
+        data = {"_help": app_settings_help()}
+        data.update(migrate_old_state_file())
+        SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def apply_saved_app_settings(settings: Settings) -> None:
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        data = migrate_old_state_file()
+
+    settings.input_folder = str(data.get("input_folder") or "~/Downloads")
+    settings.output_folder = str(data.get("output_folder") or "~/Downloads")
+    settings.default_action = str(data.get("default_action") or "export").lower()
+    if settings.default_action not in {"export", "print"}:
+        settings.default_action = "export"
+
+    extensions = data.get("workbook_extensions") or [".xlsx", ".xlsm"]
+    settings.workbook_extensions = [normalise_extension(extension) for extension in extensions]
+    settings.column_numbers = [int(number) for number in data.get("column_numbers", [])]
+
+
+def migrate_old_state_file() -> dict:
+    old_file = SCRIPT_DIR / "last_run.json"
+    try:
+        data = json.loads(old_file.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        data = {}
+    return {
+        "input_folder": "~/Downloads",
+        "output_folder": "~/Downloads",
+        "default_action": "export",
+        "workbook_extensions": [".xlsx", ".xlsm"],
+        "column_numbers": data.get("column_numbers", []),
+    }
+
+
+def normalise_extension(extension: str) -> str:
+    extension = str(extension).strip().lower()
+    return extension if extension.startswith(".") else "." + extension
 
 
 def apply_saved_layout(settings: Settings) -> None:
@@ -95,15 +139,6 @@ def apply_saved_layout(settings: Settings) -> None:
         HexColor(settings.header_color)
     except (OSError, TypeError, ValueError):
         print(f"Could not read {LAYOUT_FILE.name}; using built-in layout defaults.")
-
-
-def apply_saved_state(settings: Settings) -> None:
-    try:
-        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        numbers = data.get("column_numbers", [])
-        settings.column_numbers = [int(number) for number in numbers]
-    except (OSError, TypeError, ValueError):
-        settings.column_numbers = []
 
 
 def migrate_layout_settings(data: dict) -> dict:
@@ -122,18 +157,53 @@ def migrate_layout_settings(data: dict) -> dict:
 
 
 def save_settings(settings: Settings) -> None:
-    save_state_file(settings.column_numbers)
+    save_app_settings(settings)
 
 
-def save_state_file(column_numbers: list[int]) -> None:
-    STATE_FILE.write_text(json.dumps({"column_numbers": column_numbers}, indent=2), encoding="utf-8")
+def save_app_settings(settings: Settings) -> None:
+    data = {
+        "_help": app_settings_help(),
+        "input_folder": settings.input_folder or "~/Downloads",
+        "output_folder": settings.output_folder or "~/Downloads",
+        "default_action": settings.default_action,
+        "workbook_extensions": settings.workbook_extensions,
+        "column_numbers": settings.column_numbers,
+    }
+    SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
 def save_layout_file(settings: Settings) -> None:
-    layout = {}
+    layout = {"_help": layout_settings_help()}
     for name in layout_field_names():
         layout[name] = getattr(settings, name)
     LAYOUT_FILE.write_text(json.dumps(layout, indent=2), encoding="utf-8")
+
+
+def app_settings_help() -> dict[str, str]:
+    return {
+        "input_folder": "Folder searched for the latest Excel workbook when you press Enter at the file prompt.",
+        "output_folder": "Default folder for generated PDFs.",
+        "default_action": "Default final action. Use export or print.",
+        "workbook_extensions": "Excel file extensions to look for in input_folder.",
+        "column_numbers": "Last selected column numbers, in the order they should appear on each slip.",
+    }
+
+
+def layout_settings_help() -> dict[str, str]:
+    return {
+        "header_height_mm": "Height of the blue header area on each slip.",
+        "data_height_mm": "Height of the white data area on each slip.",
+        "top_margin_mm": "Blank space at the top of each A4 page.",
+        "bottom_margin_mm": "Blank space at the bottom of each A4 page.",
+        "side_margin_mm": "Left and right page margin.",
+        "column_gap_mm": "Space between fields across the slip.",
+        "padding_mm": "Inner text padding inside each field area.",
+        "cut_tick_mm": "Length of small cut marks at the page edges.",
+        "header_color": "Header colour as a hex value.",
+        "header_font_pt": "Maximum header text size.",
+        "data_font_pt": "Maximum data text size.",
+        "minimum_font_pt": "Smallest text size allowed when fitting long text.",
+    }
 
 
 def layout_field_names() -> tuple[str, ...]:
@@ -370,20 +440,22 @@ def clean_path(value: str) -> str:
         return value.strip("'\"")
 
 
-def choose_workbook(saved_path: str = "") -> str:
-    latest = newest_downloaded_workbook()
+def choose_workbook(settings: Settings) -> str:
+    latest = newest_workbook(settings.input_folder, settings.workbook_extensions)
     if latest:
-        print(f"Latest Excel file in Downloads: {latest}")
-    elif saved_path:
-        print(f"Last workbook: {saved_path}")
+        print(f"Latest Excel file in {settings.input_folder}: {latest}")
+    else:
+        print(f"No Excel files found in {settings.input_folder}.")
 
     while True:
-        default = str(latest) if latest else saved_path
-        label = "Excel file path (Enter = latest Downloads file)" if latest else "Excel file path"
+        default = str(latest) if latest else ""
+        label = "Excel file path (Enter = latest file)" if latest else "Excel file path"
         path = Path(clean_path(prompt(label, default))).expanduser()
-        if path.is_file() and path.suffix.lower() in {".xlsx", ".xlsm"}:
+        if path.is_file() and path.suffix.lower() in set(settings.workbook_extensions):
+            settings.input_folder = str(path.parent)
             return str(path)
-        print("That Excel file is not available. Enter the path to an .xlsx or .xlsm file.")
+        allowed = ", ".join(settings.workbook_extensions)
+        print(f"That Excel file is not available. Enter a path ending in {allowed}.")
 
 
 def choose_from_list(title: str, choices: list[str], default: str = "") -> str:
@@ -463,6 +535,13 @@ def choose_output_folder(default: str) -> str:
         return str(folder)
 
 
+def choose_action(default: str) -> str:
+    action = prompt("Action: export or print", default).strip().lower()
+    if action in {"p", "print"}:
+        return "print"
+    return "export"
+
+
 def preview_records(columns: list[str], records: list[list[str]]) -> None:
     print("\nPreview:")
     if not records:
@@ -496,7 +575,7 @@ def run_cli() -> None:
     settings = read_saved_settings()
 
     while True:
-        settings.workbook = choose_workbook(settings.workbook)
+        settings.workbook = choose_workbook(settings)
         try:
             sheets = workbook_sheet_names(settings.workbook)
             break
@@ -508,16 +587,16 @@ def run_cli() -> None:
 
     headers = workbook_headers(settings.workbook, settings.sheet)
     settings.columns, settings.column_numbers = choose_columns(headers, settings)
-    settings.output_folder = choose_output_folder(str(downloads_folder()))
+    settings.output_folder = choose_output_folder(settings.output_folder)
 
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
     preview_records(settings.columns, records)
     print_summary(settings, len(records))
     print(f"Layout settings: {LAYOUT_FILE}")
+    print(f"App settings: {SETTINGS_FILE}")
 
-    action = prompt("Action: export or print", "export").strip().lower()
-    if action not in {"export", "e", "print", "p"}:
-        action = "export"
+    action = choose_action(settings.default_action)
+    settings.default_action = action
 
     if not Path(settings.workbook).is_file():
         raise ValueError("Choose an Excel workbook.")
