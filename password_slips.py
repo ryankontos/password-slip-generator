@@ -20,6 +20,9 @@ from reportlab.pdfgen import canvas
 
 
 APP_NAME = "password-slip-generator"
+AUTHOR = "Ryan Kontos"
+YEAR = "2026"
+LICENSE_NAME = "0BSD"
 SCRIPT_DIR = Path(__file__).resolve().parent
 LAYOUT_FILE = SCRIPT_DIR / "layout_settings.json"
 SETTINGS_FILE = SCRIPT_DIR / "settings.json"
@@ -432,6 +435,24 @@ def prompt(label: str, default: str = "") -> str:
     return value or default
 
 
+def banner() -> None:
+    line = "=" * 64
+    print()
+    print(line)
+    print(APP_NAME)
+    print(f"Created by {AUTHOR}, {YEAR} | {LICENSE_NAME} licensed")
+    print("Generate cut-aligned A4 password slip PDFs from Excel.")
+    print(line)
+    print("Press Enter to accept the suggested answer.\n")
+
+
+def section(title: str) -> None:
+    print()
+    print("-" * 64)
+    print(title)
+    print("-" * 64)
+
+
 def clean_path(value: str) -> str:
     try:
         parts = shlex.split(value)
@@ -441,6 +462,7 @@ def clean_path(value: str) -> str:
 
 
 def choose_workbook(settings: Settings) -> str:
+    section("1. Workbook")
     latest = newest_workbook(settings.input_folder, settings.workbook_extensions)
     if latest:
         print(f"Latest Excel file in {settings.input_folder}: {latest}")
@@ -461,7 +483,7 @@ def choose_workbook(settings: Settings) -> str:
 def choose_from_list(title: str, choices: list[str], default: str = "") -> str:
     if not choices:
         raise ValueError(f"No {title.lower()} found.")
-    print(f"\n{title}:")
+    section(f"2. {title}")
     for index, choice in enumerate(choices, start=1):
         marker = " *" if choice == default else ""
         print(f"  {index}. {choice}{marker}")
@@ -482,7 +504,7 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
 
     default_numbers = remembered_column_numbers(headers, settings)
 
-    print("\nColumns:")
+    section("3. Columns")
     for index, header in enumerate(headers, start=1):
         marker = " *" if index in default_numbers else ""
         print(f"  {index}. {header}{marker}")
@@ -527,6 +549,7 @@ def column_numbers_from_text(value: str, headers: list[str]) -> list[int]:
 
 
 def choose_output_folder(default: str) -> str:
+    section("4. Output")
     while True:
         folder = Path(clean_path(prompt("Output folder", default or str(downloads_folder())))).expanduser()
         if folder.exists() and not folder.is_dir():
@@ -536,6 +559,7 @@ def choose_output_folder(default: str) -> str:
 
 
 def choose_action(default: str) -> str:
+    section("5. Finish")
     action = prompt("Action: export or print", default).strip().lower()
     if action in {"p", "print"}:
         return "print"
@@ -543,7 +567,7 @@ def choose_action(default: str) -> str:
 
 
 def preview_records(columns: list[str], records: list[list[str]]) -> None:
-    print("\nPreview:")
+    section("Preview")
     if not records:
         print("  No data rows found with those columns.")
         return
@@ -560,8 +584,12 @@ def preview_records(columns: list[str], records: list[list[str]]) -> None:
 def print_summary(settings: Settings, slip_count: int) -> None:
     per_page = slips_per_page(settings)
     pages = page_count(settings, slip_count)
-    print(f"\n{slip_count} slips | {pages} {plural(pages, 'page')} | {per_page} slips per page")
-    print(f"Output: {output_path(settings)}")
+    print()
+    print("Summary")
+    print(f"  Slips: {slip_count}")
+    print(f"  Pages: {pages}")
+    print(f"  Slips per page: {per_page}")
+    print(f"  Output: {output_path(settings)}")
 
 
 def plural(count: int, singular: str) -> str:
@@ -569,8 +597,7 @@ def plural(count: int, singular: str) -> str:
 
 
 def run_cli() -> None:
-    print(f"\n{APP_NAME}")
-    print("Press Enter to use the suggested answer.\n")
+    banner()
 
     settings = read_saved_settings()
 
@@ -592,8 +619,8 @@ def run_cli() -> None:
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
     preview_records(settings.columns, records)
     print_summary(settings, len(records))
-    print(f"Layout settings: {LAYOUT_FILE}")
-    print(f"App settings: {SETTINGS_FILE}")
+    print(f"  Layout settings: {LAYOUT_FILE}")
+    print(f"  App settings: {SETTINGS_FILE}")
 
     action = choose_action(settings.default_action)
     settings.default_action = action
@@ -606,8 +633,10 @@ def run_cli() -> None:
     count, pages = make_pdf(settings)
     save_settings(settings)
     pdf = output_path(settings)
-    print(f"\nCreated {count} slips across {pages} {plural(pages, 'page')}.")
-    print(pdf)
+    print()
+    print("Done")
+    print(f"  Created {count} slips across {pages} {plural(pages, 'page')}.")
+    print(f"  PDF: {pdf}")
 
     if action in {"print", "p"}:
         if open_print_dialog(pdf):
