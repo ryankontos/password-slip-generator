@@ -29,6 +29,7 @@ class Settings:
     workbook: str = ""
     sheet: str = ""
     columns: list[str] = field(default_factory=list)
+    column_numbers: list[int] = field(default_factory=list)
     output_folder: str = ""
 
     header_height_mm: float = 20.0
@@ -78,11 +79,6 @@ def read_saved_settings() -> Settings:
 
     settings.output_folder = settings.output_folder or str(downloads_folder())
 
-    # Downloads always wins on launch. Column choices still persist by name.
-    latest = newest_downloaded_workbook()
-    if latest:
-        settings.workbook = str(latest)
-
     return settings
 
 
@@ -106,11 +102,6 @@ def migrate_saved_settings(data: dict) -> dict:
 def save_settings(settings: Settings) -> None:
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps({"last_run": asdict(settings)}, indent=2), encoding="utf-8")
-
-
-def save_field_choices(settings: Settings, columns: list[str]) -> None:
-    settings.columns = list(columns)
-    save_settings(settings)
 
 
 def workbook_sheet_names(path: str) -> list[str]:
@@ -255,10 +246,15 @@ def make_pdf(settings: Settings) -> tuple[int, int]:
         pdf.showPage()
 
     pdf.save()
+    if not output.is_file():
+        raise ValueError(f"Could not create PDF at {output}")
     return len(records), pages
 
 
 def open_print_dialog(pdf: Path) -> bool:
+    if not pdf.is_file():
+        return False
+
     script = '''
 on run argv
     tell application "Preview"
@@ -312,8 +308,8 @@ def draw_slip(pdf: canvas.Canvas, settings: Settings, record: list[str], widths:
 
 
 def prompt(label: str, default: str = "") -> str:
-    suffix = f" [{default}]" if default else ""
-    value = input(f"{label}{suffix}: ").strip()
+    shown = f" [{default}]" if default else ""
+    value = input(f"{label}{shown}: ").strip()
     return value or default
 
 
@@ -338,12 +334,20 @@ def clean_path(value: str) -> str:
         return value.strip("'\"")
 
 
-def choose_workbook(default: str) -> str:
+def choose_workbook(saved_path: str = "") -> str:
+    latest = newest_downloaded_workbook()
+    if latest:
+        print(f"Latest Excel file in Downloads: {latest}")
+    elif saved_path:
+        print(f"Last workbook: {saved_path}")
+
     while True:
-        path = Path(clean_path(prompt("Workbook", default))).expanduser()
+        default = str(latest) if latest else saved_path
+        label = "Excel file path (Enter = latest Downloads file)" if latest else "Excel file path"
+        path = Path(clean_path(prompt(label, default))).expanduser()
         if path.is_file() and path.suffix.lower() in {".xlsx", ".xlsm"}:
             return str(path)
-        print("Enter the path to an .xlsx or .xlsm workbook.")
+        print("That Excel file is not available. Enter the path to an .xlsx or .xlsm file.")
 
 
 def choose_from_list(title: str, choices: list[str], default: str = "") -> str:
@@ -364,41 +368,58 @@ def choose_from_list(title: str, choices: list[str], default: str = "") -> str:
         print("Choose a number from the list.")
 
 
-def choose_columns(headers: list[str], saved_columns: list[str]) -> list[str]:
-    default = [column for column in saved_columns if column in headers] or list(headers)
-    default_numbers = ",".join(str(headers.index(column) + 1) for column in default)
+def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], list[int]]:
+    if not headers:
+        raise ValueError("No column headings were found in the first row.")
+
+    default_numbers = remembered_column_numbers(headers, settings)
 
     print("\nColumns:")
     for index, header in enumerate(headers, start=1):
-        marker = " *" if header in default else ""
+        marker = " *" if index in default_numbers else ""
         print(f"  {index}. {header}{marker}")
-    print("Enter numbers or names in the order they should appear, or 'all'.")
+    print("Enter column numbers in the order they should appear. Example: 1,3,4")
 
     while True:
-        value = prompt("Columns", default_numbers)
+        value = prompt("Column numbers", ",".join(str(number) for number in default_numbers))
         if value.strip().lower() == "all":
-            return list(headers)
+            numbers = list(range(1, len(headers) + 1))
+            return list(headers), numbers
 
-        selected = []
-        for item in [part.strip() for part in value.split(",") if part.strip()]:
-            column = column_from_token(item, headers)
-            if column and column not in selected:
-                selected.append(column)
+        numbers = column_numbers_from_text(value, headers)
+        if numbers:
+            return [headers[number - 1] for number in numbers], numbers
 
-        if selected:
-            return selected
-        print("Choose at least one column.")
+        print("Choose at least one valid column number.")
 
 
-def column_from_token(token: str, headers: list[str]) -> Optional[str]:
-    if token.isdigit() and 1 <= int(token) <= len(headers):
-        return headers[int(token) - 1]
+def remembered_column_numbers(headers: list[str], settings: Settings) -> list[int]:
+    numbers = [
+        number for number in settings.column_numbers
+        if isinstance(number, int) and 1 <= number <= len(headers)
+    ]
+    if numbers:
+        return numbers
 
-    lowered = token.lower()
-    for header in headers:
-        if header.lower() == lowered:
-            return header
-    return None
+    columns = [column for column in settings.columns if column in headers]
+    if columns:
+        return [headers.index(column) + 1 for column in columns]
+
+    return list(range(1, len(headers) + 1))
+
+
+def column_numbers_from_text(value: str, headers: list[str]) -> list[int]:
+    tokens = value.replace(",", " ").split()
+    numbers = []
+    for token in tokens:
+        if not token.isdigit():
+            return []
+        number = int(token)
+        if not 1 <= number <= len(headers):
+            return []
+        if number not in numbers:
+            numbers.append(number)
+    return numbers
 
 
 def choose_output_folder(default: str) -> str:
@@ -408,6 +429,21 @@ def choose_output_folder(default: str) -> str:
             print("Output folder must be a folder, not a file.")
             continue
         return str(folder)
+
+
+def preview_records(columns: list[str], records: list[list[str]]) -> None:
+    print("\nPreview:")
+    if not records:
+        print("  No data rows found with those columns.")
+        return
+
+    for row_number, row in enumerate(records[:3], start=1):
+        print(f"  Slip {row_number}:")
+        for column, value in zip(columns, row):
+            shown = value if len(value) <= 70 else value[:67] + "..."
+            print(f"    {column}: {shown}")
+    if len(records) > 3:
+        print(f"  ...and {len(records) - 3} more")
 
 
 def prompt_float(label: str, current: float) -> float:
@@ -465,25 +501,37 @@ def edit_layout(settings: Settings) -> Settings:
 def print_summary(settings: Settings, slip_count: int) -> None:
     per_page = slips_per_page(settings)
     pages = page_count(settings, slip_count)
-    print(f"\n{slip_count} slips | {pages} pages | {per_page} slips per page")
+    print(f"\n{slip_count} slips | {pages} {plural(pages, 'page')} | {per_page} slips per page")
     print(f"Output: {output_path(settings)}")
+
+
+def plural(count: int, singular: str) -> str:
+    return singular if count == 1 else singular + "s"
 
 
 def run_cli() -> None:
     print(f"\n{APP_NAME}")
-    print("Press Enter to keep the value in brackets.\n")
+    print("Press Enter to use the suggested answer.\n")
 
     settings = read_saved_settings()
-    settings.workbook = choose_workbook(settings.workbook)
 
-    sheets = workbook_sheet_names(settings.workbook)
+    while True:
+        settings.workbook = choose_workbook(settings.workbook)
+        try:
+            sheets = workbook_sheet_names(settings.workbook)
+            break
+        except Exception as error:
+            print(f"Could not open that workbook: {error}")
+            settings.workbook = ""
+
     settings.sheet = choose_from_list("Sheets", sheets, settings.sheet)
 
     headers = workbook_headers(settings.workbook, settings.sheet)
-    settings.columns = choose_columns(headers, settings.columns)
+    settings.columns, settings.column_numbers = choose_columns(headers, settings)
     settings.output_folder = choose_output_folder(settings.output_folder or str(downloads_folder()))
 
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
+    preview_records(settings.columns, records)
     print_summary(settings, len(records))
 
     settings = edit_layout(settings)
@@ -501,7 +549,7 @@ def run_cli() -> None:
     count, pages = make_pdf(settings)
     save_settings(settings)
     pdf = output_path(settings)
-    print(f"\nCreated {count} slips across {pages} page(s).")
+    print(f"\nCreated {count} slips across {pages} {plural(pages, 'page')}.")
     print(pdf)
 
     if action in {"print", "p"}:

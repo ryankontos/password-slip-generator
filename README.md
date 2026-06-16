@@ -2,6 +2,6 @@
 
 Download the SharePoint Excel file to `~/Downloads`, then open `run_password_slips.command`.
 
-The command-line prompts always start with the newest `.xlsx` or `.xlsm` file in Downloads, remember your last settings, and let you choose the sheet, fields, output folder, and print/export action.
+Press Enter to use the newest Excel file in Downloads, then choose the sheet and column numbers. The script remembers your last column number combo and shows a quick preview before export.
 
-It exports an A4 PDF with identical cut lines on every page, and you can optionally adjust the layout values during a run.
+It exports an A4 PDF with identical cut lines on every page, and can open the macOS print dialog when you choose print.
