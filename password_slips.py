@@ -77,7 +77,7 @@ def read_saved_settings() -> Settings:
     except (OSError, TypeError, ValueError):
         settings = Settings()
 
-    settings.output_folder = settings.output_folder or str(downloads_folder())
+    settings.output_folder = str(downloads_folder())
 
     return settings
 
@@ -528,7 +528,7 @@ def run_cli() -> None:
 
     headers = workbook_headers(settings.workbook, settings.sheet)
     settings.columns, settings.column_numbers = choose_columns(headers, settings)
-    settings.output_folder = choose_output_folder(settings.output_folder or str(downloads_folder()))
+    settings.output_folder = choose_output_folder(str(downloads_folder()))
 
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
     preview_records(settings.columns, records)
