@@ -10,6 +10,8 @@ It exports an A4 PDF with identical cut lines on every page, and can open the ma
 
 Page layout lives in `layout_settings.json` beside the script. The script creates this file with defaults if it does not exist; edit that file to change slip height, margins, colours, spacing, and font sizes.
 
+Field widths are balanced per slip: they stay mostly even, but widen for longer text when needed.
+
 The PDF footer can show the sheet name, generated date/time, and page numbers. These footer options are in `layout_settings.json` and are on by default.
 
 General app settings live in `settings.json` beside the script. The script creates this file automatically; it stores the input folder, output folder, default action, allowed workbook extensions, and last selected column numbers.

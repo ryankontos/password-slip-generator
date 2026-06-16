@@ -17,7 +17,10 @@
     "show_generated_datetime": "Show the generated date and time in the footer.",
     "show_page_numbers": "Show page numbers as Page X of Y in the footer.",
     "footer_font_pt": "Footer text size.",
-    "footer_color": "Footer text colour as a hex value."
+    "footer_color": "Footer text colour as a hex value.",
+    "column_width_evenness": "How evenly fields share width. 1 is equal widths, 0 follows each row's text lengths.",
+    "column_min_width_ratio": "Smallest share of slip width any field should receive.",
+    "column_max_width_ratio": "Largest share of slip width any field should receive."
   },
   "header_height_mm": 20.0,
   "data_height_mm": 20.0,
@@ -27,6 +30,9 @@
   "column_gap_mm": 2.0,
   "padding_mm": 2.0,
   "cut_tick_mm": 4.0,
+  "column_width_evenness": 0.55,
+  "column_min_width_ratio": 0.07,
+  "column_max_width_ratio": 0.45,
   "header_color": "#1769AA",
   "header_font_pt": 11.0,
   "data_font_pt": 12.0,

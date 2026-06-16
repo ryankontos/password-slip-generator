@@ -49,6 +49,9 @@ class Settings:
     column_gap_mm: float = 2.0
     padding_mm: float = 2.0
     cut_tick_mm: float = 4.0
+    column_width_evenness: float = 0.55
+    column_min_width_ratio: float = 0.07
+    column_max_width_ratio: float = 0.45
 
     header_color: str = "#1769AA"
     header_font_pt: float = 11.0
@@ -91,6 +94,7 @@ def read_saved_settings() -> Settings:
     ensure_json_files(settings)
     apply_saved_app_settings(settings)
     apply_saved_layout(settings)
+    save_layout_file(settings)
     settings.input_folder = settings.input_folder or str(downloads_folder())
     settings.output_folder = settings.output_folder or str(downloads_folder())
     return settings
@@ -175,6 +179,9 @@ def layout_settings_help() -> dict[str, str]:
         "column_gap_mm": "Space between fields across the slip.",
         "padding_mm": "Inner text padding inside each field area.",
         "cut_tick_mm": "Length of small cut marks at the page edges.",
+        "column_width_evenness": "How evenly fields share width. 1 is equal widths, 0 follows each row's text lengths.",
+        "column_min_width_ratio": "Smallest share of slip width any field should receive.",
+        "column_max_width_ratio": "Largest share of slip width any field should receive.",
         "header_color": "Header colour as a hex value.",
         "header_font_pt": "Maximum header text size.",
         "data_font_pt": "Maximum data text size.",
@@ -198,6 +205,9 @@ def layout_field_names() -> tuple[str, ...]:
         "column_gap_mm",
         "padding_mm",
         "cut_tick_mm",
+        "column_width_evenness",
+        "column_min_width_ratio",
+        "column_max_width_ratio",
         "header_color",
         "header_font_pt",
         "data_font_pt",
@@ -269,20 +279,56 @@ def page_count(settings: Settings, slip_count: int) -> int:
     return math.ceil(slip_count / per_page) if per_page else 0
 
 
-def column_widths(columns: list[str], records: list[list[str]], available_width: float) -> list[float]:
+def column_widths(columns: list[str], record: list[str], settings: Settings, available_width: float) -> list[float]:
     if not columns:
         return []
 
+    if len(columns) == 1:
+        return [available_width]
+
+    even_width = available_width / len(columns)
+    evenness = clamp(settings.column_width_evenness, 0, 1)
     scores = []
     for index, column in enumerate(columns):
-        lengths = [len(column)] + [len(row[index]) for row in records if index < len(row)]
-        likely = sorted(lengths)[max(0, math.ceil(len(lengths) * 0.85) - 1)]
-        scores.append(max(5, min(32, likely + 1.5)))
+        value = record[index] if index < len(record) else ""
+        header_score = stringWidth(column, "Helvetica-Bold", settings.header_font_pt)
+        value_score = stringWidth(value, "Helvetica", settings.data_font_pt)
+        scores.append(max(1, header_score, value_score))
 
-    minimum = min(available_width * 0.055, available_width / len(columns) * 0.72)
-    leftover = max(0, available_width - minimum * len(columns))
     total = sum(scores)
-    return [minimum + leftover * score / total for score in scores]
+    text_widths = [available_width * score / total for score in scores]
+    widths = [even_width * evenness + text_width * (1 - evenness) for text_width in text_widths]
+
+    minimum = min(even_width, available_width * clamp(settings.column_min_width_ratio, 0, 1))
+    maximum = max(minimum, available_width * clamp(settings.column_max_width_ratio, 0, 1))
+    return fit_widths(widths, minimum, maximum, available_width)
+
+
+def fit_widths(widths: list[float], minimum: float, maximum: float, total_width: float) -> list[float]:
+    widths = [min(max(width, minimum), maximum) for width in widths]
+    difference = total_width - sum(widths)
+
+    for _ in range(len(widths) * 2):
+        if abs(difference) < 0.01:
+            break
+        if difference > 0:
+            adjustable = [index for index, width in enumerate(widths) if width < maximum]
+        else:
+            adjustable = [index for index, width in enumerate(widths) if width > minimum]
+        if not adjustable:
+            break
+        change = difference / len(adjustable)
+        for index in adjustable:
+            widths[index] = min(max(widths[index] + change, minimum), maximum)
+        difference = total_width - sum(widths)
+
+    if widths:
+        widths[-1] += total_width - sum(widths)
+    return widths
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return min(high, max(low, float(value)))
 
 
 def shrink_to_fit(text: str, font: str, maximum: float, minimum: float, width: float, height: float) -> float:
@@ -337,7 +383,6 @@ def make_pdf(settings: Settings) -> tuple[int, int]:
     padding = settings.padding_mm * MM
     content_width = page_width - side * 2
     column_area = content_width - gap * (len(settings.columns) - 1)
-    widths = column_widths(settings.columns, records, column_area)
 
     output = output_path(settings)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -351,6 +396,7 @@ def make_pdf(settings: Settings) -> tuple[int, int]:
         draw_footer(pdf, settings, page + 1, pages, generated_at, page_width)
         page_records = records[page * per_page:(page + 1) * per_page]
         for slot, record in enumerate(page_records):
+            widths = column_widths(settings.columns, record, settings, column_area)
             draw_slip(pdf, settings, record, widths, side, page_height - top - slot * slip_height, content_width)
         pdf.showPage()
 
@@ -449,21 +495,17 @@ def prompt(label: str, default: str = "") -> str:
 
 
 def banner() -> None:
-    line = "=" * 64
     print()
-    print(line)
     print(APP_NAME)
     print(f"Created by {AUTHOR}, {YEAR} | {LICENSE_NAME} licensed")
-    print("Generate cut-aligned A4 password slip PDFs from Excel.")
-    print(line)
-    print("Press Enter to accept the suggested answer.\n")
+    print("Cut-aligned A4 password slip PDFs from Excel.")
+    print("Press Enter to accept a suggestion.")
 
 
 def section(title: str) -> None:
     print()
-    print("-" * 64)
     print(title)
-    print("-" * 64)
+    print("-" * len(title))
 
 
 def clean_path(value: str) -> str:
@@ -475,7 +517,7 @@ def clean_path(value: str) -> str:
 
 
 def choose_workbook(settings: Settings) -> str:
-    section("1. Workbook")
+    section("Workbook")
     latest = newest_workbook(settings.input_folder, settings.workbook_extensions)
     if latest:
         print(f"Latest Excel file in {settings.input_folder}: {latest}")
@@ -496,7 +538,7 @@ def choose_workbook(settings: Settings) -> str:
 def choose_from_list(title: str, choices: list[str], default: str = "") -> str:
     if not choices:
         raise ValueError(f"No {title.lower()} found.")
-    section(f"2. {title}")
+    section(title)
     for index, choice in enumerate(choices, start=1):
         marker = " *" if choice == default else ""
         print(f"  {index}. {choice}{marker}")
@@ -508,7 +550,7 @@ def choose_from_list(title: str, choices: list[str], default: str = "") -> str:
             return choices[int(value) - 1]
         if value in choices:
             return value
-        print("Choose a number from the list.")
+        print("Enter a number from the list.")
 
 
 def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], list[int]]:
@@ -517,11 +559,11 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
 
     default_numbers = remembered_column_numbers(headers, settings)
 
-    section("3. Columns")
+    section("Columns")
     for index, header in enumerate(headers, start=1):
         marker = " *" if index in default_numbers else ""
         print(f"  {index}. {header}{marker}")
-    print("Enter column numbers in the order they should appear. Example: 1,3,4")
+    print("Enter numbers in the order to print them, for example 1,3,4.")
 
     while True:
         value = prompt("Column numbers", ",".join(str(number) for number in default_numbers))
@@ -533,7 +575,7 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
         if numbers:
             return [headers[number - 1] for number in numbers], numbers
 
-        print("Choose at least one valid column number.")
+        print("Enter at least one valid column number.")
 
 
 def remembered_column_numbers(headers: list[str], settings: Settings) -> list[int]:
@@ -562,7 +604,7 @@ def column_numbers_from_text(value: str, headers: list[str]) -> list[int]:
 
 
 def choose_output_folder(default: str) -> str:
-    section("4. Output")
+    section("Output")
     while True:
         folder = Path(clean_path(prompt("Output folder", default or str(downloads_folder())))).expanduser()
         if folder.exists() and not folder.is_dir():
@@ -572,7 +614,7 @@ def choose_output_folder(default: str) -> str:
 
 
 def choose_action(default: str) -> str:
-    section("5. Finish")
+    section("Finish")
     action = prompt("Action: export or print", default).strip().lower()
     if action in {"p", "print"}:
         return "print"
@@ -598,11 +640,7 @@ def print_summary(settings: Settings, slip_count: int) -> None:
     per_page = slips_per_page(settings)
     pages = page_count(settings, slip_count)
     print()
-    print("Summary")
-    print(f"  Slips: {slip_count}")
-    print(f"  Pages: {pages}")
-    print(f"  Slips per page: {per_page}")
-    print(f"  Output: {output_path(settings)}")
+    print(f"Ready: {slip_count} slips, {pages} {plural(pages, 'page')}, {per_page} slips per page.")
 
 
 def plural(count: int, singular: str) -> str:
@@ -632,8 +670,6 @@ def run_cli() -> None:
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
     preview_records(settings.columns, records)
     print_summary(settings, len(records))
-    print(f"  Layout settings: {LAYOUT_FILE}")
-    print(f"  App settings: {SETTINGS_FILE}")
 
     action = choose_action(settings.default_action)
     settings.default_action = action
