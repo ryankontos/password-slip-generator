@@ -8,7 +8,7 @@ import math
 import shlex
 import subprocess
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -20,7 +20,9 @@ from reportlab.pdfgen import canvas
 
 
 APP_NAME = "password-slip-generator"
-SETTINGS_FILE = Path.home() / "Library" / "Application Support" / "Password Slips" / "settings.json"
+SCRIPT_DIR = Path(__file__).resolve().parent
+LAYOUT_FILE = SCRIPT_DIR / "layout_settings.json"
+STATE_FILE = SCRIPT_DIR / "last_run.json"
 MM = 72 / 25.4
 
 
@@ -70,19 +72,41 @@ def newest_downloaded_workbook() -> Optional[Path]:
 
 
 def read_saved_settings() -> Settings:
-    try:
-        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        saved = data.get("last_run") or (data.get("recent_runs") or [None])[0]
-        settings = Settings(**migrate_saved_settings(saved or {}))
-    except (OSError, TypeError, ValueError):
-        settings = Settings()
-
+    settings = Settings()
+    ensure_json_files(settings)
+    apply_saved_layout(settings)
+    apply_saved_state(settings)
     settings.output_folder = str(downloads_folder())
-
     return settings
 
 
-def migrate_saved_settings(data: dict) -> dict:
+def ensure_json_files(defaults: Settings) -> None:
+    if not LAYOUT_FILE.exists():
+        save_layout_file(defaults)
+    if not STATE_FILE.exists():
+        save_state_file([])
+
+
+def apply_saved_layout(settings: Settings) -> None:
+    try:
+        data = migrate_layout_settings(json.loads(LAYOUT_FILE.read_text(encoding="utf-8")))
+        for key, value in data.items():
+            setattr(settings, key, value)
+        HexColor(settings.header_color)
+    except (OSError, TypeError, ValueError):
+        print(f"Could not read {LAYOUT_FILE.name}; using built-in layout defaults.")
+
+
+def apply_saved_state(settings: Settings) -> None:
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        numbers = data.get("column_numbers", [])
+        settings.column_numbers = [int(number) for number in numbers]
+    except (OSError, TypeError, ValueError):
+        settings.column_numbers = []
+
+
+def migrate_layout_settings(data: dict) -> dict:
     renamed = dict(data)
     if "horizontal_padding_mm" in renamed and "padding_mm" not in renamed:
         renamed["padding_mm"] = renamed.pop("horizontal_padding_mm")
@@ -93,16 +117,23 @@ def migrate_saved_settings(data: dict) -> dict:
     if "font_min_pt" in renamed and "minimum_font_pt" not in renamed:
         renamed["minimum_font_pt"] = renamed.pop("font_min_pt")
 
-    valid_names = {"column_numbers", *layout_field_names()}
+    valid_names = set(layout_field_names())
     return {key: value for key, value in renamed.items() if key in valid_names}
 
 
 def save_settings(settings: Settings) -> None:
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    saved = {"column_numbers": settings.column_numbers}
+    save_state_file(settings.column_numbers)
+
+
+def save_state_file(column_numbers: list[int]) -> None:
+    STATE_FILE.write_text(json.dumps({"column_numbers": column_numbers}, indent=2), encoding="utf-8")
+
+
+def save_layout_file(settings: Settings) -> None:
+    layout = {}
     for name in layout_field_names():
-        saved[name] = getattr(settings, name)
-    SETTINGS_FILE.write_text(json.dumps({"last_run": saved}, indent=2), encoding="utf-8")
+        layout[name] = getattr(settings, name)
+    LAYOUT_FILE.write_text(json.dumps(layout, indent=2), encoding="utf-8")
 
 
 def layout_field_names() -> tuple[str, ...]:
@@ -331,19 +362,6 @@ def prompt(label: str, default: str = "") -> str:
     return value or default
 
 
-def prompt_yes_no(label: str, default: bool = False) -> bool:
-    shown = "Y/n" if default else "y/N"
-    while True:
-        value = input(f"{label} [{shown}]: ").strip().lower()
-        if not value:
-            return default
-        if value in {"y", "yes"}:
-            return True
-        if value in {"n", "no"}:
-            return False
-        print("Please enter y or n.")
-
-
 def clean_path(value: str) -> str:
     try:
         parts = shlex.split(value)
@@ -460,58 +478,6 @@ def preview_records(columns: list[str], records: list[list[str]]) -> None:
         print(f"  ...and {len(records) - 3} more")
 
 
-def prompt_float(label: str, current: float) -> float:
-    while True:
-        value = prompt(label, format_number(current))
-        try:
-            number = float(value)
-            if number > 0:
-                return number
-        except ValueError:
-            pass
-        print("Enter a positive number.")
-
-
-def format_number(value: float) -> str:
-    return str(int(value)) if float(value).is_integer() else str(value)
-
-
-def edit_layout(settings: Settings) -> Settings:
-    if not prompt_yes_no("\nChange layout settings?", False):
-        return settings
-
-    edited = Settings(**asdict(settings))
-    fields = [
-        ("Header height mm", "header_height_mm"),
-        ("Data height mm", "data_height_mm"),
-        ("Top margin mm", "top_margin_mm"),
-        ("Bottom margin mm", "bottom_margin_mm"),
-        ("Side margin mm", "side_margin_mm"),
-        ("Column gap mm", "column_gap_mm"),
-        ("Text padding mm", "padding_mm"),
-        ("Cut tick length mm", "cut_tick_mm"),
-        ("Header font pt", "header_font_pt"),
-        ("Data font pt", "data_font_pt"),
-        ("Minimum font pt", "minimum_font_pt"),
-    ]
-    for label, name in fields:
-        setattr(edited, name, prompt_float(label, getattr(edited, name)))
-
-    while True:
-        color = prompt("Header colour", edited.header_color).strip()
-        try:
-            HexColor(color)
-            edited.header_color = color
-            break
-        except ValueError:
-            print("Enter a hex colour like #1769AA.")
-
-    if slips_per_page(edited) < 1:
-        print("Those layout settings do not fit on A4, keeping previous layout.")
-        return settings
-    return edited
-
-
 def print_summary(settings: Settings, slip_count: int) -> None:
     per_page = slips_per_page(settings)
     pages = page_count(settings, slip_count)
@@ -547,9 +513,7 @@ def run_cli() -> None:
     records = workbook_records(settings.workbook, settings.sheet, settings.columns)
     preview_records(settings.columns, records)
     print_summary(settings, len(records))
-
-    settings = edit_layout(settings)
-    print_summary(settings, len(records))
+    print(f"Layout settings: {LAYOUT_FILE}")
 
     action = prompt("Action: export or print", "export").strip().lower()
     if action not in {"export", "e", "print", "p"}:
