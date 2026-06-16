@@ -9,7 +9,8 @@ import subprocess
 import tkinter as tk
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from tkinter import colorchooser, filedialog, messagebox, ttk
+from tkinter import colorchooser, filedialog, messagebox
+from typing import Optional
 
 from openpyxl import load_workbook
 from reportlab.lib.colors import HexColor
@@ -53,7 +54,7 @@ def downloads_folder() -> Path:
     return Path.home() / "Downloads"
 
 
-def newest_downloaded_workbook() -> Path | None:
+def newest_downloaded_workbook() -> Optional[Path]:
     folder = downloads_folder()
     if not folder.is_dir():
         return None
@@ -317,6 +318,7 @@ class LayoutWindow(tk.Toplevel):
         self.title("Layout and Preview")
         self.geometry("780x600")
         self.transient(app.root)
+        self.configure(bg="#F4F6F8")
 
         self.vars: dict[str, tk.StringVar] = {}
         self.color = tk.StringVar(value=app.settings.header_color)
@@ -324,14 +326,17 @@ class LayoutWindow(tk.Toplevel):
         self.preview()
 
     def build(self) -> None:
-        body = ttk.Frame(self, padding=16)
+        body = tk.Frame(self, bg="#F4F6F8", padx=16, pady=16)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
-        body.rowconfigure(2, weight=1)
+        body.rowconfigure(3, weight=1)
 
-        ttk.Label(body, text="Layout and Preview", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        tk.Label(
+            body, text="Layout and Preview", bg="#F4F6F8", fg="#111827",
+            font=("Helvetica", 20, "bold")
+        ).grid(row=0, column=0, sticky="w")
 
-        controls = ttk.Frame(body)
+        controls = tk.Frame(body, bg="#F4F6F8")
         controls.grid(row=1, column=0, sticky="ew", pady=(10, 10))
         controls.columnconfigure(0, weight=1)
         controls.columnconfigure(1, weight=1)
@@ -355,14 +360,14 @@ class LayoutWindow(tk.Toplevel):
             ("Text padding", "padding_mm"),
         ])
 
-        color_row = ttk.Frame(body)
+        color_row = tk.Frame(body, bg="#F4F6F8")
         color_row.grid(row=2, column=0, sticky="new", pady=(0, 10))
-        ttk.Label(color_row, text="Header colour").pack(side="left")
-        ttk.Entry(color_row, textvariable=self.color, width=10).pack(side="left", padx=8)
-        ttk.Button(color_row, text="Choose...", command=self.choose_color).pack(side="left")
+        tk.Label(color_row, text="Header colour", bg="#F4F6F8", fg="#111827").pack(side="left")
+        tk.Entry(color_row, textvariable=self.color, width=10, bg="white", fg="#111827").pack(side="left", padx=8)
+        tk.Button(color_row, text="Choose...", command=self.choose_color).pack(side="left")
         self.color.trace_add("write", lambda *_: self.preview())
 
-        preview_box = ttk.LabelFrame(body, text="Preview", padding=12)
+        preview_box = tk.LabelFrame(body, text="Preview", bg="#FFFFFF", fg="#111827", padx=12, pady=12)
         preview_box.grid(row=3, column=0, sticky="nsew")
         preview_box.columnconfigure(0, weight=1)
         preview_box.rowconfigure(0, weight=1)
@@ -370,18 +375,26 @@ class LayoutWindow(tk.Toplevel):
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.canvas.bind("<Configure>", lambda _: self.preview())
 
-        buttons = ttk.Frame(body)
+        buttons = tk.Frame(body, bg="#F4F6F8")
         buttons.grid(row=4, column=0, sticky="ew", pady=(12, 0))
-        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(buttons, text="Apply", style="Primary.TButton", command=self.apply).pack(side="right", padx=(0, 8))
+        tk.Button(buttons, text="Cancel", command=self.destroy, padx=12, pady=5).pack(side="right")
+        tk.Button(
+            buttons, text="Apply", command=self.apply, padx=18, pady=5,
+            bg="#1769AA", fg="white", activebackground="#0F578F", activeforeground="white"
+        ).pack(side="right", padx=(0, 8))
 
-    def group(self, parent: ttk.Frame, column: int, title: str, rows: list[tuple[str, str]]) -> None:
-        box = ttk.LabelFrame(parent, text=title, padding=10)
+    def group(self, parent: tk.Widget, column: int, title: str, rows: list[tuple[str, str]]) -> None:
+        box = tk.LabelFrame(parent, text=title, bg="#FFFFFF", fg="#111827", padx=10, pady=10)
         box.grid(row=0, column=column, sticky="new", padx=(0 if column == 0 else 8, 0))
         for row, (label, name) in enumerate(rows):
             self.vars[name] = tk.StringVar(value=str(getattr(self.app.settings, name)))
-            ttk.Label(box, text=f"{label} (mm)" if "font" not in name else f"{label} (pt)").grid(row=row, column=0, sticky="w", pady=3)
-            ttk.Entry(box, textvariable=self.vars[name], width=8).grid(row=row, column=1, sticky="e", padx=(8, 0), pady=3)
+            tk.Label(
+                box, bg="#FFFFFF", fg="#111827",
+                text=f"{label} (mm)" if "font" not in name else f"{label} (pt)"
+            ).grid(row=row, column=0, sticky="w", pady=3)
+            tk.Entry(
+                box, textvariable=self.vars[name], width=8, bg="white", fg="#111827"
+            ).grid(row=row, column=1, sticky="e", padx=(8, 0), pady=3)
             self.vars[name].trace_add("write", lambda *_: self.preview())
 
     def choose_color(self) -> None:
@@ -389,7 +402,7 @@ class LayoutWindow(tk.Toplevel):
         if picked[1]:
             self.color.set(picked[1].upper())
 
-    def read(self) -> Settings | None:
+    def read(self) -> Optional[Settings]:
         try:
             settings = Settings(**asdict(self.app.settings))
             for name, variable in self.vars.items():
@@ -430,6 +443,7 @@ class App:
     def __init__(self, root: tk.Tk, settings: Settings):
         self.root = root
         self.root.title(APP_NAME)
+        self.root.configure(bg="#F4F6F8")
         self.settings = settings
         self.headers: list[str] = []
         self.records: list[list[str]] = []
@@ -438,28 +452,23 @@ class App:
         self.sheet = tk.StringVar(value=settings.sheet)
         self.output_folder = tk.StringVar(value=settings.output_folder or str(downloads_folder()))
         self.summary = tk.StringVar(value="0 slips | 0 pages")
+        self.sheet_menu: Optional[tk.OptionMenu] = None
 
-        self.style()
         self.build()
         self.load_workbook_if_present()
 
-    def style(self) -> None:
-        style = ttk.Style(self.root)
-        style.configure("Title.TLabel", font=("Helvetica", 22, "bold"))
-        style.configure("Muted.TLabel", foreground="#8A8A8A")
-        style.configure("Credit.TLabel", foreground="#8A8A8A", font=("Helvetica", 9))
-        style.configure("Summary.TLabel", font=("Helvetica", 15, "bold"))
-        style.configure("Primary.TButton", font=("Helvetica", 12, "bold"), padding=(18, 9))
-
     def build(self) -> None:
-        main = ttk.Frame(self.root, padding=(22, 12))
+        main = tk.Frame(self.root, bg="#F4F6F8", padx=22, pady=12)
         main.pack(fill="both", expand=True)
         main.columnconfigure(0, weight=1)
         main.rowconfigure(1, weight=1)
 
-        ttk.Label(main, text=APP_NAME, style="Title.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        tk.Label(
+            main, text=APP_NAME, bg="#F4F6F8", fg="#111827",
+            font=("Helvetica", 22, "bold")
+        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
 
-        content = ttk.Frame(main)
+        content = tk.Frame(main, bg="#F4F6F8")
         content.grid(row=1, column=0, sticky="nsew")
         content.columnconfigure(0, weight=1)
         content.rowconfigure(1, weight=1)
@@ -468,76 +477,95 @@ class App:
         self.fields_section(content)
         self.output_section(content)
 
-        footer = ttk.Frame(main)
+        footer = tk.Frame(main, bg="#F4F6F8")
         footer.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        ttk.Button(footer, text="Layout and Preview...", command=self.open_layout).pack(side="left")
-        ttk.Label(footer, text="Created by Ryan Kontos", style="Credit.TLabel").pack(side="left", padx=(10, 0))
-        ttk.Button(footer, text="Export PDF", style="Primary.TButton", command=self.generate).pack(side="right")
-        ttk.Button(footer, text="Print...", command=self.print_slips).pack(side="right", padx=(0, 8))
+        tk.Button(footer, text="Layout and Preview...", command=self.open_layout, padx=12, pady=5).pack(side="left")
+        tk.Label(
+            footer, text="Created by Ryan Kontos", bg="#F4F6F8", fg="#8A8A8A",
+            font=("Helvetica", 9)
+        ).pack(side="left", padx=(10, 0))
+        tk.Button(
+            footer, text="Export PDF", command=self.generate, padx=18, pady=7,
+            bg="#1769AA", fg="white", activebackground="#0F578F", activeforeground="white"
+        ).pack(side="right")
+        tk.Button(footer, text="Print...", command=self.print_slips, padx=14, pady=7).pack(side="right", padx=(0, 8))
 
-    def source_section(self, parent: ttk.Frame) -> None:
-        box = ttk.LabelFrame(parent, text="Source", padding=12)
+    def source_section(self, parent: tk.Widget) -> None:
+        box = tk.LabelFrame(parent, text="Source", bg="#FFFFFF", fg="#111827", padx=12, pady=12)
         box.grid(row=0, column=0, sticky="ew")
         box.columnconfigure(1, weight=1)
-        ttk.Label(box, text="Workbook").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=3)
-        ttk.Entry(box, textvariable=self.workbook).grid(row=0, column=1, sticky="ew", pady=3)
-        ttk.Button(box, text="Choose...", command=self.choose_workbook).grid(row=0, column=2, padx=(10, 0), pady=3)
-        ttk.Label(box, text="Sheet").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
-        self.sheet_box = ttk.Combobox(box, textvariable=self.sheet, state="readonly")
-        self.sheet_box.grid(row=1, column=1, sticky="ew", pady=3)
-        self.sheet_box.bind("<<ComboboxSelected>>", lambda _: self.load_columns())
+        self.label(box, "Workbook").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=3)
+        tk.Entry(box, textvariable=self.workbook, bg="white", fg="#111827").grid(row=0, column=1, sticky="ew", pady=3)
+        tk.Button(box, text="Choose...", command=self.choose_workbook).grid(row=0, column=2, padx=(10, 0), pady=3)
+        self.label(box, "Sheet").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=3)
+        self.sheet_menu = tk.OptionMenu(box, self.sheet, "")
+        self.sheet_menu.configure(bg="white", fg="#111827", activebackground="#E8EEF5", highlightthickness=0)
+        self.sheet_menu.grid(row=1, column=1, sticky="ew", pady=3)
 
-    def fields_section(self, parent: ttk.Frame) -> None:
-        box = ttk.LabelFrame(parent, text="Fields and order", padding=12)
+    def fields_section(self, parent: tk.Widget) -> None:
+        box = tk.LabelFrame(parent, text="Fields and order", bg="#FFFFFF", fg="#111827", padx=12, pady=12)
         box.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         box.columnconfigure(0, weight=1)
         box.columnconfigure(2, weight=1)
         box.rowconfigure(1, weight=1)
-        ttk.Label(box, text="Available", style="Muted.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(box, text="Included (left to right)", style="Muted.TLabel").grid(row=0, column=2, sticky="w")
+        self.label(box, "Available", muted=True).grid(row=0, column=0, sticky="w")
+        self.label(box, "Included (left to right)", muted=True).grid(row=0, column=2, sticky="w")
 
         self.available = self.listbox(box, 1, 0)
         self.available.bind("<Double-Button-1>", lambda _: self.add_fields())
 
-        buttons = ttk.Frame(box)
+        buttons = tk.Frame(box, bg="#FFFFFF")
         buttons.grid(row=1, column=1, padx=12)
-        ttk.Button(buttons, text="Add  >", width=9, command=self.add_fields).pack(pady=5)
-        ttk.Button(buttons, text="<  Remove", width=9, command=self.remove_fields).pack(pady=5)
+        tk.Button(buttons, text="Add  >", width=9, command=self.add_fields).pack(pady=5)
+        tk.Button(buttons, text="<  Remove", width=9, command=self.remove_fields).pack(pady=5)
 
-        included_frame = ttk.Frame(box)
+        included_frame = tk.Frame(box, bg="#FFFFFF")
         included_frame.grid(row=1, column=2, sticky="nsew", pady=(5, 0))
         included_frame.columnconfigure(0, weight=1)
         included_frame.rowconfigure(0, weight=1)
-        self.included = tk.Listbox(included_frame, selectmode="extended", exportselection=False, height=6)
+        self.included = tk.Listbox(
+            included_frame, selectmode="extended", exportselection=False, height=6,
+            bg="white", fg="#111827", selectbackground="#1769AA", selectforeground="white"
+        )
         self.included.grid(row=0, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(included_frame, command=self.included.yview)
+        scroll = tk.Scrollbar(included_frame, command=self.included.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         self.included.configure(yscrollcommand=scroll.set)
         self.included.bind("<Double-Button-1>", lambda _: self.remove_fields())
 
-        move = ttk.Frame(included_frame)
+        move = tk.Frame(included_frame, bg="#FFFFFF")
         move.grid(row=0, column=2, sticky="n", padx=(8, 0))
-        ttk.Button(move, text="Move up", width=9, command=lambda: self.move_field(-1)).pack(pady=(0, 5))
-        ttk.Button(move, text="Move down", width=9, command=lambda: self.move_field(1)).pack(pady=5)
+        tk.Button(move, text="Move up", width=9, command=lambda: self.move_field(-1)).pack(pady=(0, 5))
+        tk.Button(move, text="Move down", width=9, command=lambda: self.move_field(1)).pack(pady=5)
 
-    def output_section(self, parent: ttk.Frame) -> None:
-        box = ttk.LabelFrame(parent, text="Output", padding=12)
+    def output_section(self, parent: tk.Widget) -> None:
+        box = tk.LabelFrame(parent, text="Output", bg="#FFFFFF", fg="#111827", padx=12, pady=12)
         box.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         box.columnconfigure(1, weight=1)
-        ttk.Label(box, textvariable=self.summary, style="Summary.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
-        ttk.Label(box, text="Folder").grid(row=1, column=0, sticky="w", padx=(0, 10))
-        ttk.Entry(box, textvariable=self.output_folder).grid(row=1, column=1, sticky="ew")
-        ttk.Button(box, text="Choose...", command=self.choose_output_folder).grid(row=1, column=2, padx=(10, 0))
+        tk.Label(
+            box, textvariable=self.summary, bg="#FFFFFF", fg="#111827",
+            font=("Helvetica", 15, "bold")
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        self.label(box, "Folder").grid(row=1, column=0, sticky="w", padx=(0, 10))
+        tk.Entry(box, textvariable=self.output_folder, bg="white", fg="#111827").grid(row=1, column=1, sticky="ew")
+        tk.Button(box, text="Choose...", command=self.choose_output_folder).grid(row=1, column=2, padx=(10, 0))
 
     @staticmethod
-    def listbox(parent: ttk.Frame, row: int, column: int) -> tk.Listbox:
-        frame = ttk.Frame(parent)
+    def label(parent: tk.Widget, text: str, muted: bool = False) -> tk.Label:
+        return tk.Label(parent, text=text, bg="#FFFFFF", fg="#8A8A8A" if muted else "#111827")
+
+    @staticmethod
+    def listbox(parent: tk.Widget, row: int, column: int) -> tk.Listbox:
+        frame = tk.Frame(parent, bg="#FFFFFF")
         frame.grid(row=row, column=column, sticky="nsew", pady=(5, 0))
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
-        box = tk.Listbox(frame, selectmode="extended", exportselection=False, height=6)
+        box = tk.Listbox(
+            frame, selectmode="extended", exportselection=False, height=6,
+            bg="white", fg="#111827", selectbackground="#1769AA", selectforeground="white"
+        )
         box.grid(row=0, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(frame, command=box.yview)
+        scroll = tk.Scrollbar(frame, command=box.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         box.configure(yscrollcommand=scroll.set)
         return box
@@ -561,12 +589,24 @@ class App:
     def load_sheets(self) -> None:
         try:
             sheets = workbook_sheet_names(self.workbook.get())
-            self.sheet_box["values"] = sheets
+            self.update_sheet_menu(sheets)
             if self.sheet.get() not in sheets:
                 self.sheet.set(sheets[0])
             self.load_columns()
         except Exception as error:
             messagebox.showerror(APP_NAME, f"Could not open workbook:\n{error}")
+
+    def update_sheet_menu(self, sheets: list[str]) -> None:
+        if self.sheet_menu is None:
+            return
+        menu = self.sheet_menu["menu"]
+        menu.delete(0, "end")
+        for sheet in sheets:
+            menu.add_command(label=sheet, command=lambda value=sheet: self.choose_sheet(value))
+
+    def choose_sheet(self, sheet: str) -> None:
+        self.sheet.set(sheet)
+        self.load_columns()
 
     def load_columns(self) -> None:
         try:
