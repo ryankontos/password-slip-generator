@@ -12,7 +12,7 @@ Row filters are optional. Press Enter for no row rule, enter saved rule numbers 
 
 At the finish step, press Enter or type `o` to open a temporary PDF in Preview, type `e` to export a saved PDF, or type `p` to export and print.
 
-Page layout lives in `settings/layout_settings.json`. The script creates this file with defaults if it does not exist; edit that file to change slip height, margins, colours, spacing, and font sizes.
+Page layout lives in `settings/layout_settings.json`. The script creates this file with defaults if it does not exist; edit that file to change slip height, slip padding, margins, colours, spacing, and font sizes.
 
 Field widths are balanced per slip: they stay mostly even, but widen for longer text when needed.
 

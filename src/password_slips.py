@@ -47,6 +47,7 @@ class Settings:
 
     header_height_mm: float = 20.0
     data_height_mm: float = 20.0
+    slip_padding_mm: float = 0.0
     top_margin_mm: float = 8.0
     bottom_margin_mm: float = 8.0
     side_margin_mm: float = 5.0
@@ -73,7 +74,7 @@ class Settings:
 
     @property
     def slip_height_mm(self) -> float:
-        return self.header_height_mm + self.data_height_mm
+        return self.header_height_mm + self.data_height_mm + self.slip_padding_mm
 
 
 def downloads_folder() -> Path:
@@ -183,6 +184,7 @@ def layout_settings_help() -> dict[str, str]:
     return {
         "header_height_mm": "Height of the blue header area on each slip.",
         "data_height_mm": "Height of the white data area on each slip.",
+        "slip_padding_mm": "White space below each slip before the next slip starts.",
         "top_margin_mm": "Blank space at the top of each A4 page.",
         "bottom_margin_mm": "Blank space at the bottom of each A4 page. The footer is drawn inside this area.",
         "side_margin_mm": "Left and right page margin.",
@@ -211,6 +213,7 @@ def layout_field_names() -> tuple[str, ...]:
     return (
         "header_height_mm",
         "data_height_mm",
+        "slip_padding_mm",
         "top_margin_mm",
         "bottom_margin_mm",
         "side_margin_mm",

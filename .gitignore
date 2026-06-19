@@ -3,3 +3,4 @@ __pycache__/
 tmp/
 .DS_Store
 settings/settings.json
+settings/layout_settings.json
