@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shlex
 import subprocess
 import sys
@@ -43,6 +44,7 @@ class Settings:
     row_filters: list[dict[str, object]] = field(default_factory=list)
     selected_row_filters: list[dict[str, object]] = field(default_factory=list)
     manual_row_numbers: list[int] = field(default_factory=list)
+    blank_slips: int = 0
     output_folder: str = ""
     input_folder: str = ""
     workbook_extensions: list[str] = field(default_factory=lambda: [".xlsx", ".xlsm"])
@@ -133,6 +135,7 @@ def apply_saved_app_settings(settings: Settings) -> None:
     settings.truncate_column_numbers = clean_number_list(data.get("truncate_column_numbers", []))
     settings.row_filters = clean_row_filters(data.get("row_filters", []))
     settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
+    settings.blank_slips = clean_whole_number(data.get("blank_slips", 0), 0)
 
 
 def apply_saved_layout(settings: Settings) -> None:
@@ -186,6 +189,7 @@ def save_app_settings(settings: Settings) -> None:
         "truncate_column_numbers": settings.truncate_column_numbers,
         "row_filters": settings.row_filters,
         "selected_row_filters": settings.selected_row_filters,
+        "blank_slips": settings.blank_slips,
     }
     SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -209,6 +213,14 @@ def clean_number_list(value) -> list[int]:
     return numbers
 
 
+def clean_whole_number(value, default: int = 0) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, number)
+
+
 def app_settings_help() -> dict[str, str]:
     return {
         "input_folder": "Folder searched for the latest Excel workbook when you press Enter at the file prompt.",
@@ -219,6 +231,7 @@ def app_settings_help() -> dict[str, str]:
         "truncate_column_numbers": "Selected columns that may truncate instead of shrinking text. Add - after a column letter when choosing columns.",
         "row_filters": "Saved row filters. Each one matches or excludes rows where one column equals one text value.",
         "selected_row_filters": "Row filters selected on the last run. These are marked with a star next time.",
+        "blank_slips": "Extra blank slips to add after the workbook rows. Press Enter at the prompt to reuse this number.",
     }
 
 
@@ -310,17 +323,35 @@ def workbook_records(path: str, sheet_name: str, columns: list[str],
         headers = unique_labels(next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), ()))
         indexes = [headers.index(column) for column in columns]
         records = []
-        for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        if wanted_rows:
+            row_numbers = sorted(wanted_rows)
+        else:
+            row_numbers = None
+
+        for row_number, row in worksheet_rows(sheet, row_numbers, max(indexes) + 1):
             if wanted_rows and row_number not in wanted_rows:
                 continue
             if not wanted_rows and not row_matches_filters(row, row_filters):
                 continue
             values = ["" if index >= len(row) or row[index] is None else str(row[index]) for index in indexes]
-            if any(value.strip() for value in values):
+            if wanted_rows or any(value.strip() for value in values):
                 records.append(values)
         return records
     finally:
         workbook.close()
+
+
+def worksheet_rows(sheet, row_numbers, max_col: int):
+    if row_numbers is None:
+        yield from enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2)
+        return
+
+    for row_number in row_numbers:
+        row = next(
+            sheet.iter_rows(min_row=row_number, max_row=row_number, max_col=max_col, values_only=True),
+            (),
+        )
+        yield row_number, row
 
 
 def workbook_column_values(path: str, sheet_name: str, column_number: int) -> list[str]:
@@ -514,7 +545,7 @@ def output_path(settings: Settings) -> Path:
     return Path(settings.output_folder or downloads_folder()).expanduser() / f"{name} - password slips.pdf"
 
 
-def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, int]:
+def selected_records(settings: Settings) -> list[list[str]]:
     records = workbook_records(
         settings.workbook,
         settings.sheet,
@@ -522,6 +553,16 @@ def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, in
         settings.selected_row_filters,
         settings.manual_row_numbers,
     )
+    records.extend(blank_records(settings))
+    return records
+
+
+def blank_records(settings: Settings) -> list[list[str]]:
+    return [[""] * len(settings.columns) for _ in range(clean_whole_number(settings.blank_slips, 0))]
+
+
+def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, int]:
+    records = selected_records(settings)
     if not records:
         raise ValueError("No slips to generate.")
 
@@ -903,6 +944,21 @@ def choose_row_filters(headers: list[str], settings: Settings) -> list[dict[str,
         print("Enter 0, a saved rule number, n, or c.")
 
 
+def choose_blank_slips(settings: Settings) -> int:
+    while True:
+        value = prompt("Extra blank slips", str(settings.blank_slips)).strip()
+        if value == "":
+            return clean_whole_number(settings.blank_slips, 0)
+        try:
+            number = int(value)
+        except ValueError:
+            print("Enter 0 or a whole number.")
+            continue
+        if number >= 0:
+            return number
+        print("Enter 0 or a whole number.")
+
+
 def usable_row_filters(headers: list[str], filters: list[dict[str, object]]) -> list[dict[str, object]]:
     return [
         rule for rule in clean_row_filters(filters)
@@ -920,16 +976,31 @@ def row_filter_selected_numbers(saved: list[dict[str, object]], selected: list[d
 
 def choose_manual_row_numbers() -> list[int]:
     while True:
-        value = prompt("Spreadsheet row numbers to include, separated by commas").strip()
+        value = prompt("Spreadsheet row numbers to include, separated by commas or ranges").strip()
         numbers = row_numbers_from_text(value)
         if numbers:
             return numbers
-        print("Enter row numbers 2 or higher, for example 2,5,9.")
+        print("Enter row numbers 2 or higher, for example 2,5,9 or 10-15.")
 
 
 def row_numbers_from_text(value: str) -> list[int]:
     numbers = []
-    for token in value.replace(",", " ").split():
+    value = re.sub(r"\s*-\s*", "-", value.strip())
+    for token in re.split(r"[\s,]+", value):
+        if not token:
+            continue
+        if "-" in token:
+            start_text, end_text = token.split("-", 1)
+            if not start_text.isdigit() or not end_text.isdigit():
+                return []
+            start = int(start_text)
+            end = int(end_text)
+            if start < 2 or end < start:
+                return []
+            for number in range(start, end + 1):
+                if number not in numbers:
+                    numbers.append(number)
+            continue
         if not token.isdigit():
             return []
         number = int(token)
@@ -1051,6 +1122,11 @@ def preview_records(columns: list[str], records: list[list[str]]) -> None:
         print(f"  ...and {len(records) - 3} more")
 
 
+def preview_blank_slips(count: int) -> None:
+    if count:
+        print(f"  Plus {count} blank {plural(count, 'slip')}.")
+
+
 def print_summary(settings: Settings, slip_count: int) -> None:
     per_page = slips_per_page(settings)
     pages = page_count(settings, slip_count)
@@ -1086,18 +1162,21 @@ def run_cli() -> None:
         settings.truncate_column_numbers,
     ) = choose_columns(headers, settings)
     settings.selected_row_filters = choose_row_filters(headers, settings)
+    settings.blank_slips = choose_blank_slips(settings)
 
-    records = workbook_records(
+    workbook_rows = workbook_records(
         settings.workbook,
         settings.sheet,
         settings.columns,
         settings.selected_row_filters,
         settings.manual_row_numbers,
     )
-    preview_records(settings.columns, records)
+    records = workbook_rows + blank_records(settings)
+    preview_records(settings.columns, workbook_rows)
+    preview_blank_slips(settings.blank_slips)
     print_summary(settings, len(records))
     if not records:
-        raise ValueError("No rows matched. Choose no row rule, a different rule, or different row numbers.")
+        raise ValueError("No slips to generate. Choose matching rows or add blank slips.")
 
     action = choose_action()
     if action in {"export", "print"}:
