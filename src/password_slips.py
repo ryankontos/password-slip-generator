@@ -39,6 +39,7 @@ class Settings:
     columns: list[str] = field(default_factory=list)
     column_numbers: list[int] = field(default_factory=list)
     password_column_numbers: list[int] = field(default_factory=list)
+    truncate_column_numbers: list[int] = field(default_factory=list)
     row_filters: list[dict[str, object]] = field(default_factory=list)
     selected_row_filters: list[dict[str, object]] = field(default_factory=list)
     output_folder: str = ""
@@ -128,6 +129,7 @@ def apply_saved_app_settings(settings: Settings) -> None:
     settings.workbook_extensions = [str(extension).strip().lower() for extension in extensions]
     settings.column_numbers = [int(number) for number in data.get("column_numbers", [])]
     settings.password_column_numbers = [int(number) for number in data.get("password_column_numbers", [])]
+    settings.truncate_column_numbers = [int(number) for number in data.get("truncate_column_numbers", [])]
     settings.row_filters = clean_row_filters(data.get("row_filters", []))
     settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
 
@@ -155,6 +157,7 @@ def save_app_settings(settings: Settings) -> None:
         "workbook_extensions": settings.workbook_extensions,
         "column_numbers": settings.column_numbers,
         "password_column_numbers": settings.password_column_numbers,
+        "truncate_column_numbers": settings.truncate_column_numbers,
         "row_filters": settings.row_filters,
         "selected_row_filters": settings.selected_row_filters,
     }
@@ -175,6 +178,7 @@ def app_settings_help() -> dict[str, str]:
         "workbook_extensions": "Excel file extensions to look for in input_folder.",
         "column_numbers": "Last selected column numbers, in the order they should appear on each slip.",
         "password_column_numbers": "Selected columns that should use password_font. Add * after a column letter when choosing columns.",
+        "truncate_column_numbers": "Selected columns that may truncate instead of shrinking text. Add - after a column letter when choosing columns.",
         "row_filters": "Saved row filters. Each one matches or excludes rows where one column equals one text value.",
         "selected_row_filters": "Row filters selected on the last run. These are marked with a star next time.",
     }
@@ -452,8 +456,11 @@ def short_text(text: str, font: str, size: float, width: float) -> str:
 
 
 def draw_pdf_text(pdf: canvas.Canvas, text: str, font: str, maximum: float, minimum: float,
-                  x: float, y: float, width: float, height: float, color) -> None:
-    size = shrink_to_fit(text, font, maximum, minimum, width, height)
+                  x: float, y: float, width: float, height: float, color, shrink: bool = True) -> None:
+    if shrink:
+        size = shrink_to_fit(text, font, maximum, minimum, width, height)
+    else:
+        size = min(maximum, height / 1.15)
     pdf.setFillColor(color)
     pdf.setFont(font, size)
     pdf.drawCentredString(x + width / 2, y + (height - size) / 2 + size * 0.18, short_text(text, font, size, width))
@@ -599,7 +606,8 @@ def draw_slip(pdf: canvas.Canvas, settings: Settings, record: list[str], widths:
         draw_pdf_text(pdf, settings.columns[index], "Helvetica-Bold", settings.header_font_pt,
                       settings.minimum_font_pt, x + padding, header_y, text_width, header_height, HexColor("#FFFFFF"))
         draw_pdf_text(pdf, record[index], data_font_for_column(settings, index), settings.data_font_pt, settings.minimum_font_pt,
-                      x + padding, data_y, text_width, data_height, HexColor("#000000"))
+                      x + padding, data_y, text_width, data_height, HexColor("#000000"),
+                      shrink=not column_may_truncate(settings, index))
         x += width + gap
 
 
@@ -607,6 +615,11 @@ def data_font_for_column(settings: Settings, index: int) -> str:
     column_number = settings.column_numbers[index] if index < len(settings.column_numbers) else index + 1
     font = settings.password_font if column_number in settings.password_column_numbers else settings.data_font
     return usable_font(font, "Helvetica-Bold")
+
+
+def column_may_truncate(settings: Settings, index: int) -> bool:
+    column_number = settings.column_numbers[index] if index < len(settings.column_numbers) else index + 1
+    return column_number in settings.truncate_column_numbers
 
 
 def usable_font(font: str, fallback: str) -> str:
@@ -684,31 +697,33 @@ def choose_from_list(title: str, choices: list[str], default: str = "", reverse:
         print("Enter a number from the list.")
 
 
-def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], list[int], list[int]]:
+def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], list[int], list[int], list[int]]:
     if not headers:
         raise ValueError("No column headings were found in the first row.")
 
     default_numbers = remembered_column_numbers(headers, settings)
     default_password_numbers = remembered_password_column_numbers(default_numbers, settings)
+    default_truncate_numbers = remembered_truncate_column_numbers(default_numbers, settings)
 
     section("Columns")
     for index, header in enumerate(headers, start=1):
         marker = " *" if index in default_numbers else ""
         password_marker = " password font" if index in default_password_numbers else ""
-        print(f"  {column_letter(index)}. {header}{marker}{password_marker}")
+        truncate_marker = " may truncate" if index in default_truncate_numbers else ""
+        print(f"  {column_letter(index)}. {header}{marker}{password_marker}{truncate_marker}")
     print("Enter letters in the order to print them, for example A,C,D.")
-    print("Add * after a letter to use password_font, for example A,B*,C.")
+    print("Add * for password_font and - to allow truncation, for example A,B*-,C-.")
 
     while True:
-        default = column_letters_for_prompt(default_numbers, default_password_numbers)
+        default = column_letters_for_prompt(default_numbers, default_password_numbers, default_truncate_numbers)
         value = prompt("Column letters", default)
         if value.strip().lower() == "all":
             numbers = list(range(1, len(headers) + 1))
-            return list(headers), numbers, []
+            return list(headers), numbers, [], []
 
-        numbers, password_numbers = column_numbers_from_text(value, headers)
+        numbers, password_numbers, truncate_numbers = column_numbers_from_text(value, headers)
         if numbers:
-            return [headers[number - 1] for number in numbers], numbers, password_numbers
+            return [headers[number - 1] for number in numbers], numbers, password_numbers, truncate_numbers
 
         print("Enter at least one valid column letter.")
 
@@ -731,30 +746,56 @@ def remembered_password_column_numbers(column_numbers: list[int], settings: Sett
     ]
 
 
-def column_letters_for_prompt(column_numbers: list[int], password_column_numbers: list[int]) -> str:
+def remembered_truncate_column_numbers(column_numbers: list[int], settings: Settings) -> list[int]:
+    return [
+        number for number in settings.truncate_column_numbers
+        if number in column_numbers
+    ]
+
+
+def column_letters_for_prompt(column_numbers: list[int], password_column_numbers: list[int],
+                              truncate_column_numbers: list[int]) -> str:
     return ",".join(
-        column_letter(number) + ("*" if number in password_column_numbers else "")
+        column_letter(number)
+        + ("*" if number in password_column_numbers else "")
+        + ("-" if number in truncate_column_numbers else "")
         for number in column_numbers
     )
 
 
-def column_numbers_from_text(value: str, headers: list[str]) -> tuple[list[int], list[int]]:
+def column_numbers_from_text(value: str, headers: list[str]) -> tuple[list[int], list[int], list[int]]:
     tokens = value.replace(",", " ").split()
     numbers = []
     password_numbers = []
+    truncate_numbers = []
     for token in tokens:
-        is_password = token.endswith("*")
-        token = token.rstrip("*")
+        token, is_password, may_truncate = split_column_token(token)
         number = column_number_from_text(token)
         if number is None:
-            return [], []
+            return [], [], []
         if not 1 <= number <= len(headers):
-            return [], []
+            return [], [], []
         if number not in numbers:
             numbers.append(number)
         if is_password and number not in password_numbers:
             password_numbers.append(number)
-    return numbers, password_numbers
+        if may_truncate and number not in truncate_numbers:
+            truncate_numbers.append(number)
+    return numbers, password_numbers, truncate_numbers
+
+
+def split_column_token(token: str) -> tuple[str, bool, bool]:
+    token = token.strip()
+    is_password = False
+    may_truncate = False
+    while token and token[-1] in {"*", "-"}:
+        marker = token[-1]
+        token = token[:-1]
+        if marker == "*":
+            is_password = True
+        if marker == "-":
+            may_truncate = True
+    return token, is_password, may_truncate
 
 
 def column_letter(number: int) -> str:
@@ -975,7 +1016,12 @@ def run_cli() -> None:
     settings.sheet = choose_from_list("Sheets", sheets, settings.sheet, reverse=True)
 
     headers = workbook_headers(settings.workbook, settings.sheet)
-    settings.columns, settings.column_numbers, settings.password_column_numbers = choose_columns(headers, settings)
+    (
+        settings.columns,
+        settings.column_numbers,
+        settings.password_column_numbers,
+        settings.truncate_column_numbers,
+    ) = choose_columns(headers, settings)
     settings.selected_row_filters = choose_row_filters(headers, settings)
 
     records = workbook_records(settings.workbook, settings.sheet, settings.columns, settings.selected_row_filters)
