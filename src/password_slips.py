@@ -42,6 +42,7 @@ class Settings:
     truncate_column_numbers: list[int] = field(default_factory=list)
     row_filters: list[dict[str, object]] = field(default_factory=list)
     selected_row_filters: list[dict[str, object]] = field(default_factory=list)
+    manual_row_numbers: list[int] = field(default_factory=list)
     output_folder: str = ""
     input_folder: str = ""
     workbook_extensions: list[str] = field(default_factory=lambda: [".xlsx", ".xlsm"])
@@ -59,7 +60,7 @@ class Settings:
     column_min_width_ratio: float = 0.07
     column_max_width_ratio: float = 0.45
 
-    header_color: str = "#1769AA"
+    header_color: str = "#0F4C81"
     data_font: str = "Helvetica-Bold"
     password_font: str = "Courier-Bold"
     header_font_pt: float = 11.0
@@ -127,9 +128,9 @@ def apply_saved_app_settings(settings: Settings) -> None:
     settings.output_folder = str(data.get("output_folder") or "~/Downloads")
     extensions = data.get("workbook_extensions") or [".xlsx", ".xlsm"]
     settings.workbook_extensions = [str(extension).strip().lower() for extension in extensions]
-    settings.column_numbers = [int(number) for number in data.get("column_numbers", [])]
-    settings.password_column_numbers = [int(number) for number in data.get("password_column_numbers", [])]
-    settings.truncate_column_numbers = [int(number) for number in data.get("truncate_column_numbers", [])]
+    settings.column_numbers = clean_number_list(data.get("column_numbers", []))
+    settings.password_column_numbers = clean_number_list(data.get("password_column_numbers", []))
+    settings.truncate_column_numbers = clean_number_list(data.get("truncate_column_numbers", []))
     settings.row_filters = clean_row_filters(data.get("row_filters", []))
     settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
 
@@ -139,10 +140,35 @@ def apply_saved_layout(settings: Settings) -> None:
         data = json.loads(LAYOUT_FILE.read_text(encoding="utf-8"))
         for key, value in data.items():
             if key in layout_field_names():
-                setattr(settings, key, value)
-        HexColor(settings.header_color)
+                setattr(settings, key, clean_layout_value(settings, key, value))
     except (OSError, TypeError, ValueError):
         print(f"Could not read {LAYOUT_FILE.name}; using built-in layout defaults.")
+
+
+def clean_layout_value(settings: Settings, key: str, value):
+    current = getattr(settings, key)
+    if key.endswith("_color"):
+        try:
+            HexColor(str(value))
+            return str(value)
+        except (TypeError, ValueError):
+            return current
+    if isinstance(current, bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in {"true", "yes", "1"}:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {"false", "no", "0"}:
+            return False
+        return current
+    if isinstance(current, float):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return current
+    if isinstance(current, str):
+        return str(value)
+    return value
 
 
 def save_settings(settings: Settings) -> None:
@@ -169,6 +195,18 @@ def save_layout_file(settings: Settings) -> None:
     for name in layout_field_names():
         layout[name] = getattr(settings, name)
     LAYOUT_FILE.write_text(json.dumps(layout, indent=2), encoding="utf-8")
+
+
+def clean_number_list(value) -> list[int]:
+    numbers = []
+    for item in value if isinstance(value, list) else []:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in numbers:
+            numbers.append(number)
+    return numbers
 
 
 def app_settings_help() -> dict[str, str]:
@@ -260,18 +298,22 @@ def workbook_headers(path: str, sheet_name: str) -> list[str]:
 
 
 def workbook_records(path: str, sheet_name: str, columns: list[str],
-                     row_filters: Optional[list[dict[str, object]]] = None) -> list[list[str]]:
+                     row_filters: Optional[list[dict[str, object]]] = None,
+                     row_numbers: Optional[list[int]] = None) -> list[list[str]]:
     if not columns:
         return []
 
+    wanted_rows = set(row_numbers or [])
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         sheet = workbook[sheet_name]
         headers = unique_labels(next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), ()))
         indexes = [headers.index(column) for column in columns]
         records = []
-        for row in sheet.iter_rows(min_row=2, values_only=True):
-            if not row_matches_filters(row, row_filters):
+        for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+            if wanted_rows and row_number not in wanted_rows:
+                continue
+            if not wanted_rows and not row_matches_filters(row, row_filters):
                 continue
             values = ["" if index >= len(row) or row[index] is None else str(row[index]) for index in indexes]
             if any(value.strip() for value in values):
@@ -473,7 +515,13 @@ def output_path(settings: Settings) -> Path:
 
 
 def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, int]:
-    records = workbook_records(settings.workbook, settings.sheet, settings.columns, settings.selected_row_filters)
+    records = workbook_records(
+        settings.workbook,
+        settings.sheet,
+        settings.columns,
+        settings.selected_row_filters,
+        settings.manual_row_numbers,
+    )
     if not records:
         raise ValueError("No slips to generate.")
 
@@ -823,30 +871,36 @@ def choose_row_filters(headers: list[str], settings: Settings) -> list[dict[str,
     while True:
         saved = usable_row_filters(headers, settings.row_filters)
         selected_numbers = row_filter_selected_numbers(saved, settings.selected_row_filters)
-        create_number = len(saved) + 1
 
         section("Rows")
-        print("Select row inclusion/exclusion rule(s). Press Enter for no rule.")
+        print("Select row inclusion/exclusion rule.")
+        print("  0. No row rule")
         for index, rule in enumerate(saved, start=1):
             marker = " *" if index in selected_numbers else ""
             print(f"  {index}. {row_filter_description(rule, headers)}{marker}")
-        print(f"  {create_number}. Create a new rule")
+        print("  n. Create a new rule")
+        print("  c. Choose spreadsheet row numbers manually")
 
-        value = prompt("Rule numbers separated by commas").strip().lower()
-        if not value:
+        value = prompt("Choice", "0").strip().lower()
+        if value == "0":
             settings.selected_row_filters = []
+            settings.manual_row_numbers = []
             return []
-        if value in {"new", "n"} or value == str(create_number):
+        if value in {"new", "n"}:
             create_row_filter(headers, settings)
             continue
+        if value in {"custom", "c"}:
+            settings.selected_row_filters = []
+            settings.manual_row_numbers = choose_manual_row_numbers()
+            return []
 
-        numbers = row_filter_numbers_from_text(value, len(saved))
-        if numbers:
-            rules = [saved[number - 1] for number in numbers]
-            settings.selected_row_filters = rules
-            return rules
+        if value.isdigit() and 1 <= int(value) <= len(saved):
+            rule = saved[int(value) - 1]
+            settings.selected_row_filters = [rule]
+            settings.manual_row_numbers = []
+            return [rule]
 
-        print(f"Enter saved rule numbers like 1,3, or {create_number} to create a new rule.")
+        print("Enter 0, a saved rule number, n, or c.")
 
 
 def usable_row_filters(headers: list[str], filters: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -864,13 +918,22 @@ def row_filter_selected_numbers(saved: list[dict[str, object]], selected: list[d
     }
 
 
-def row_filter_numbers_from_text(value: str, saved_count: int) -> list[int]:
+def choose_manual_row_numbers() -> list[int]:
+    while True:
+        value = prompt("Spreadsheet row numbers to include, separated by commas").strip()
+        numbers = row_numbers_from_text(value)
+        if numbers:
+            return numbers
+        print("Enter row numbers 2 or higher, for example 2,5,9.")
+
+
+def row_numbers_from_text(value: str) -> list[int]:
     numbers = []
     for token in value.replace(",", " ").split():
         if not token.isdigit():
             return []
         number = int(token)
-        if not 1 <= number <= saved_count:
+        if number < 2:
             return []
         if number not in numbers:
             numbers.append(number)
@@ -1024,11 +1087,17 @@ def run_cli() -> None:
     ) = choose_columns(headers, settings)
     settings.selected_row_filters = choose_row_filters(headers, settings)
 
-    records = workbook_records(settings.workbook, settings.sheet, settings.columns, settings.selected_row_filters)
+    records = workbook_records(
+        settings.workbook,
+        settings.sheet,
+        settings.columns,
+        settings.selected_row_filters,
+        settings.manual_row_numbers,
+    )
     preview_records(settings.columns, records)
     print_summary(settings, len(records))
     if not records:
-        raise ValueError("No rows matched. Choose no row rules or different row rules.")
+        raise ValueError("No rows matched. Choose no row rule, a different rule, or different row numbers.")
 
     action = choose_action()
     if action in {"export", "print"}:
