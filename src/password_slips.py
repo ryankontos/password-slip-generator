@@ -38,6 +38,9 @@ class Settings:
     sheet: str = ""
     columns: list[str] = field(default_factory=list)
     column_numbers: list[int] = field(default_factory=list)
+    password_column_numbers: list[int] = field(default_factory=list)
+    row_filters: list[dict[str, object]] = field(default_factory=list)
+    selected_row_filters: list[dict[str, object]] = field(default_factory=list)
     output_folder: str = ""
     input_folder: str = ""
     workbook_extensions: list[str] = field(default_factory=lambda: [".xlsx", ".xlsm"])
@@ -55,6 +58,8 @@ class Settings:
     column_max_width_ratio: float = 0.45
 
     header_color: str = "#1769AA"
+    data_font: str = "Helvetica-Bold"
+    password_font: str = "Courier-Bold"
     header_font_pt: float = 11.0
     data_font_pt: float = 12.0
     minimum_font_pt: float = 4.0
@@ -121,6 +126,9 @@ def apply_saved_app_settings(settings: Settings) -> None:
     extensions = data.get("workbook_extensions") or [".xlsx", ".xlsm"]
     settings.workbook_extensions = [str(extension).strip().lower() for extension in extensions]
     settings.column_numbers = [int(number) for number in data.get("column_numbers", [])]
+    settings.password_column_numbers = [int(number) for number in data.get("password_column_numbers", [])]
+    settings.row_filters = clean_row_filters(data.get("row_filters", []))
+    settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
 
 
 def apply_saved_layout(settings: Settings) -> None:
@@ -145,6 +153,9 @@ def save_app_settings(settings: Settings) -> None:
         "output_folder": settings.output_folder or "~/Downloads",
         "workbook_extensions": settings.workbook_extensions,
         "column_numbers": settings.column_numbers,
+        "password_column_numbers": settings.password_column_numbers,
+        "row_filters": settings.row_filters,
+        "selected_row_filters": settings.selected_row_filters,
     }
     SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -162,6 +173,9 @@ def app_settings_help() -> dict[str, str]:
         "output_folder": "Default folder for generated PDFs.",
         "workbook_extensions": "Excel file extensions to look for in input_folder.",
         "column_numbers": "Last selected column numbers, in the order they should appear on each slip.",
+        "password_column_numbers": "Selected columns that should use password_font. Add * after a column letter when choosing columns.",
+        "row_filters": "Saved row filters. Each one matches or excludes rows where one column equals one text value.",
+        "selected_row_filters": "Row filters selected on the last run. These are marked with a star next time.",
     }
 
 
@@ -179,6 +193,8 @@ def layout_settings_help() -> dict[str, str]:
         "column_min_width_ratio": "Smallest share of slip width any field should receive.",
         "column_max_width_ratio": "Largest share of slip width any field should receive.",
         "header_color": "Header colour as a hex value.",
+        "data_font": "Font used for normal data values.",
+        "password_font": "Font used for columns marked with * when choosing columns.",
         "header_font_pt": "Maximum header text size.",
         "data_font_pt": "Maximum data text size.",
         "minimum_font_pt": "Smallest text size allowed when fitting long text.",
@@ -205,6 +221,8 @@ def layout_field_names() -> tuple[str, ...]:
         "column_min_width_ratio",
         "column_max_width_ratio",
         "header_color",
+        "data_font",
+        "password_font",
         "header_font_pt",
         "data_font_pt",
         "minimum_font_pt",
@@ -234,7 +252,8 @@ def workbook_headers(path: str, sheet_name: str) -> list[str]:
         workbook.close()
 
 
-def workbook_records(path: str, sheet_name: str, columns: list[str]) -> list[list[str]]:
+def workbook_records(path: str, sheet_name: str, columns: list[str],
+                     row_filters: Optional[list[dict[str, object]]] = None) -> list[list[str]]:
     if not columns:
         return []
 
@@ -245,10 +264,28 @@ def workbook_records(path: str, sheet_name: str, columns: list[str]) -> list[lis
         indexes = [headers.index(column) for column in columns]
         records = []
         for row in sheet.iter_rows(min_row=2, values_only=True):
+            if not row_matches_filters(row, row_filters):
+                continue
             values = ["" if index >= len(row) or row[index] is None else str(row[index]) for index in indexes]
             if any(value.strip() for value in values):
                 records.append(values)
         return records
+    finally:
+        workbook.close()
+
+
+def workbook_column_values(path: str, sheet_name: str, column_number: int) -> list[str]:
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook[sheet_name]
+        values = []
+        seen = set()
+        for row in sheet.iter_rows(min_row=2, min_col=column_number, max_col=column_number, values_only=True):
+            value = "" if row[0] is None else str(row[0]).strip()
+            if value and value not in seen:
+                values.append(value)
+                seen.add(value)
+        return values
     finally:
         workbook.close()
 
@@ -261,6 +298,70 @@ def unique_labels(values) -> list[str]:
         counts[label] = counts.get(label, 0) + 1
         labels.append(label if counts[label] == 1 else f"{label} ({counts[label]})")
     return labels
+
+
+def clean_row_filters(value) -> list[dict[str, object]]:
+    filters = []
+    for item in value if isinstance(value, list) else []:
+        rule = clean_row_filter(item)
+        if rule and rule_key(rule) not in {rule_key(existing) for existing in filters}:
+            filters.append(rule)
+    return filters
+
+
+def clean_row_filter(value) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+
+    mode = str(value.get("mode", "include")).strip().lower()
+    if mode not in {"include", "exclude"}:
+        mode = "include"
+
+    try:
+        column_number = int(value.get("column_number", 0))
+    except (TypeError, ValueError):
+        return {}
+
+    text = str(value.get("value", "")).strip()
+    if column_number < 1 or not text:
+        return {}
+
+    return {
+        "mode": mode,
+        "column_number": column_number,
+        "value": text,
+    }
+
+
+def row_matches_filters(row, row_filters: Optional[list[dict[str, object]]]) -> bool:
+    rules = clean_row_filters(row_filters)
+    if not rules:
+        return True
+
+    include_rules = [rule for rule in rules if rule["mode"] == "include"]
+    exclude_rules = [rule for rule in rules if rule["mode"] == "exclude"]
+
+    if any(row_matches_rule(row, rule) for rule in exclude_rules):
+        return False
+
+    if include_rules:
+        return any(row_matches_rule(row, rule) for rule in include_rules)
+
+    return True
+
+
+def row_matches_rule(row, rule: dict[str, object]) -> bool:
+    index = int(rule["column_number"]) - 1
+    cell = "" if index >= len(row) or row[index] is None else str(row[index])
+    return cell.strip() == str(rule["value"])
+
+
+def rule_key(rule: dict[str, object]) -> tuple[str, int, str]:
+    return (
+        str(rule.get("mode", "include")),
+        int(rule.get("column_number", 0)),
+        str(rule.get("value", "")),
+    )
 
 
 def slips_per_page(settings: Settings) -> int:
@@ -288,7 +389,8 @@ def column_widths(columns: list[str], record: list[str], settings: Settings, ava
     for index, column in enumerate(columns):
         value = record[index] if index < len(record) else ""
         header_score = stringWidth(column, "Helvetica-Bold", settings.header_font_pt)
-        value_score = stringWidth(value, "Helvetica", settings.data_font_pt)
+        font = data_font_for_column(settings, index)
+        value_score = stringWidth(value, font, settings.data_font_pt)
         scores.append(max(1, header_score, value_score))
 
     total = sum(scores)
@@ -361,7 +463,7 @@ def output_path(settings: Settings) -> Path:
 
 
 def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, int]:
-    records = workbook_records(settings.workbook, settings.sheet, settings.columns)
+    records = workbook_records(settings.workbook, settings.sheet, settings.columns, settings.selected_row_filters)
     if not records:
         raise ValueError("No slips to generate.")
 
@@ -493,9 +595,23 @@ def draw_slip(pdf: canvas.Canvas, settings: Settings, record: list[str], widths:
         text_width = max(1, width - padding * 2)
         draw_pdf_text(pdf, settings.columns[index], "Helvetica-Bold", settings.header_font_pt,
                       settings.minimum_font_pt, x + padding, header_y, text_width, header_height, HexColor("#FFFFFF"))
-        draw_pdf_text(pdf, record[index], "Helvetica", settings.data_font_pt, settings.minimum_font_pt,
+        draw_pdf_text(pdf, record[index], data_font_for_column(settings, index), settings.data_font_pt, settings.minimum_font_pt,
                       x + padding, data_y, text_width, data_height, HexColor("#000000"))
         x += width + gap
+
+
+def data_font_for_column(settings: Settings, index: int) -> str:
+    column_number = settings.column_numbers[index] if index < len(settings.column_numbers) else index + 1
+    font = settings.password_font if column_number in settings.password_column_numbers else settings.data_font
+    return usable_font(font, "Helvetica-Bold")
+
+
+def usable_font(font: str, fallback: str) -> str:
+    try:
+        stringWidth("test", font, 10)
+        return font
+    except Exception:
+        return fallback
 
 
 def prompt(label: str, default: str = "") -> str:
@@ -545,47 +661,53 @@ def choose_workbook(settings: Settings) -> str:
         print(f"That Excel file is not available. Enter a path ending in {allowed}.")
 
 
-def choose_from_list(title: str, choices: list[str], default: str = "") -> str:
+def choose_from_list(title: str, choices: list[str], default: str = "", reverse: bool = False) -> str:
     if not choices:
         raise ValueError(f"No {title.lower()} found.")
+
+    shown_choices = list(reversed(choices)) if reverse else choices
     section(title)
-    for index, choice in enumerate(choices, start=1):
+    for index, choice in enumerate(shown_choices, start=1):
         marker = " *" if choice == default else ""
         print(f"  {index}. {choice}{marker}")
 
-    default_index = str(choices.index(default) + 1) if default in choices else "1"
+    default_index = str(shown_choices.index(default) + 1) if default in shown_choices else "1"
     while True:
         value = prompt(f"Choose {title.lower()} number", default_index)
-        if value.isdigit() and 1 <= int(value) <= len(choices):
-            return choices[int(value) - 1]
+        if value.isdigit() and 1 <= int(value) <= len(shown_choices):
+            return shown_choices[int(value) - 1]
         if value in choices:
             return value
         print("Enter a number from the list.")
 
 
-def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], list[int]]:
+def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], list[int], list[int]]:
     if not headers:
         raise ValueError("No column headings were found in the first row.")
 
     default_numbers = remembered_column_numbers(headers, settings)
+    default_password_numbers = remembered_password_column_numbers(default_numbers, settings)
 
     section("Columns")
     for index, header in enumerate(headers, start=1):
         marker = " *" if index in default_numbers else ""
-        print(f"  {index}. {header}{marker}")
-    print("Enter numbers in the order to print them, for example 1,3,4.")
+        password_marker = " password font" if index in default_password_numbers else ""
+        print(f"  {column_letter(index)}. {header}{marker}{password_marker}")
+    print("Enter letters in the order to print them, for example A,C,D.")
+    print("Add * after a letter to use password_font, for example A,B*,C.")
 
     while True:
-        value = prompt("Column numbers", ",".join(str(number) for number in default_numbers))
+        default = column_letters_for_prompt(default_numbers, default_password_numbers)
+        value = prompt("Column letters", default)
         if value.strip().lower() == "all":
             numbers = list(range(1, len(headers) + 1))
-            return list(headers), numbers
+            return list(headers), numbers, []
 
-        numbers = column_numbers_from_text(value, headers)
+        numbers, password_numbers = column_numbers_from_text(value, headers)
         if numbers:
-            return [headers[number - 1] for number in numbers], numbers
+            return [headers[number - 1] for number in numbers], numbers, password_numbers
 
-        print("Enter at least one valid column number.")
+        print("Enter at least one valid column letter.")
 
 
 def remembered_column_numbers(headers: list[str], settings: Settings) -> list[int]:
@@ -599,18 +721,188 @@ def remembered_column_numbers(headers: list[str], settings: Settings) -> list[in
     return list(range(1, len(headers) + 1))
 
 
-def column_numbers_from_text(value: str, headers: list[str]) -> list[int]:
+def remembered_password_column_numbers(column_numbers: list[int], settings: Settings) -> list[int]:
+    return [
+        number for number in settings.password_column_numbers
+        if number in column_numbers
+    ]
+
+
+def column_letters_for_prompt(column_numbers: list[int], password_column_numbers: list[int]) -> str:
+    return ",".join(
+        column_letter(number) + ("*" if number in password_column_numbers else "")
+        for number in column_numbers
+    )
+
+
+def column_numbers_from_text(value: str, headers: list[str]) -> tuple[list[int], list[int]]:
     tokens = value.replace(",", " ").split()
     numbers = []
+    password_numbers = []
     for token in tokens:
+        is_password = token.endswith("*")
+        token = token.rstrip("*")
+        number = column_number_from_text(token)
+        if number is None:
+            return [], []
+        if not 1 <= number <= len(headers):
+            return [], []
+        if number not in numbers:
+            numbers.append(number)
+        if is_password and number not in password_numbers:
+            password_numbers.append(number)
+    return numbers, password_numbers
+
+
+def column_letter(number: int) -> str:
+    letters = ""
+    while number > 0:
+        number, remainder = divmod(number - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def column_number_from_text(value: str) -> Optional[int]:
+    value = value.strip().upper()
+    if value.isdigit():
+        return int(value)
+    if not value.isalpha():
+        return None
+
+    number = 0
+    for letter in value:
+        number = number * 26 + ord(letter) - 64
+    return number
+
+
+def choose_row_filters(headers: list[str], settings: Settings) -> list[dict[str, object]]:
+    while True:
+        saved = usable_row_filters(headers, settings.row_filters)
+        selected_numbers = row_filter_selected_numbers(saved, settings.selected_row_filters)
+        create_number = len(saved) + 1
+
+        section("Rows")
+        print("Select row inclusion/exclusion rule(s). Press Enter for no rule.")
+        for index, rule in enumerate(saved, start=1):
+            marker = " *" if index in selected_numbers else ""
+            print(f"  {index}. {row_filter_description(rule, headers)}{marker}")
+        print(f"  {create_number}. Create a new rule")
+
+        value = prompt("Rule numbers separated by commas").strip().lower()
+        if not value:
+            settings.selected_row_filters = []
+            return []
+        if value in {"new", "n"} or value == str(create_number):
+            create_row_filter(headers, settings)
+            continue
+
+        numbers = row_filter_numbers_from_text(value, len(saved))
+        if numbers:
+            rules = [saved[number - 1] for number in numbers]
+            settings.selected_row_filters = rules
+            return rules
+
+        print(f"Enter saved rule numbers like 1,3, or {create_number} to create a new rule.")
+
+
+def usable_row_filters(headers: list[str], filters: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        rule for rule in clean_row_filters(filters)
+        if int(rule["column_number"]) <= len(headers)
+    ]
+
+
+def row_filter_selected_numbers(saved: list[dict[str, object]], selected: list[dict[str, object]]) -> set[int]:
+    selected_keys = {rule_key(rule) for rule in clean_row_filters(selected)}
+    return {
+        index for index, rule in enumerate(saved, start=1)
+        if rule_key(rule) in selected_keys
+    }
+
+
+def row_filter_numbers_from_text(value: str, saved_count: int) -> list[int]:
+    numbers = []
+    for token in value.replace(",", " ").split():
         if not token.isdigit():
             return []
         number = int(token)
-        if not 1 <= number <= len(headers):
+        if not 1 <= number <= saved_count:
             return []
         if number not in numbers:
             numbers.append(number)
     return numbers
+
+
+def create_row_filter(headers: list[str], settings: Settings) -> dict[str, object]:
+    print("Create a filter like: only rows where B equals BFS.")
+
+    while True:
+        column = prompt("Filter column letter").strip()
+        number = column_number_from_text(column)
+        if number is not None and 1 <= number <= len(headers):
+            break
+        print(f"Enter a column from A to {column_letter(len(headers))}.")
+
+    text = choose_filter_value(settings, number)
+
+    mode_text = prompt("Use matches only, or exclude matches? (only/exclude)", "only").strip().lower()
+    mode = "exclude" if mode_text.startswith("e") else "include"
+    rule = {
+        "mode": mode,
+        "column_number": number,
+        "value": text,
+    }
+    remember_row_filter(settings, rule)
+    return rule
+
+
+def choose_filter_value(settings: Settings, column_number: int) -> str:
+    values = workbook_column_values(settings.workbook, settings.sheet, column_number)
+
+    if values:
+        print("Choose a value from that column:")
+        for index, value in enumerate(values, start=1):
+            shown = value if len(value) <= 70 else value[:67] + "..."
+            print(f"  {index}. {shown}")
+        print("  custom. Type a different value")
+
+        while True:
+            choice = prompt("Value", "1").strip()
+            if choice.isdigit() and 1 <= int(choice) <= len(values):
+                return values[int(choice) - 1]
+            if choice.lower() in {"custom", "c"}:
+                break
+            print("Enter a value number, or custom.")
+    else:
+        print("No existing values found in that column.")
+
+    while True:
+        text = prompt("Custom text to match exactly").strip()
+        if text:
+            return text
+        print("Enter the text to match.")
+
+
+def remember_row_filter(settings: Settings, rule: dict[str, object]) -> None:
+    rule = clean_row_filter(rule)
+    if not rule:
+        return
+
+    filters = [
+        existing for existing in clean_row_filters(settings.row_filters)
+        if rule_key(existing) != rule_key(rule)
+    ]
+    filters.insert(0, rule)
+    settings.row_filters = filters[:20]
+
+
+def row_filter_description(rule: dict[str, object], headers: list[str]) -> str:
+    rule = clean_row_filter(rule)
+    number = int(rule["column_number"])
+    header = headers[number - 1] if 1 <= number <= len(headers) else f"Column {column_letter(number)}"
+    action = "Only rows where" if rule["mode"] == "include" else "Exclude rows where"
+    value = str(rule["value"])
+    return f'{action} {column_letter(number)} ({header}) = "{value}"'
 
 
 def choose_output_folder(default: str) -> str:
@@ -677,14 +969,17 @@ def run_cli() -> None:
             print(f"Could not open that workbook: {error}")
             settings.workbook = ""
 
-    settings.sheet = choose_from_list("Sheets", sheets, settings.sheet)
+    settings.sheet = choose_from_list("Sheets", sheets, settings.sheet, reverse=True)
 
     headers = workbook_headers(settings.workbook, settings.sheet)
-    settings.columns, settings.column_numbers = choose_columns(headers, settings)
+    settings.columns, settings.column_numbers, settings.password_column_numbers = choose_columns(headers, settings)
+    settings.selected_row_filters = choose_row_filters(headers, settings)
 
-    records = workbook_records(settings.workbook, settings.sheet, settings.columns)
+    records = workbook_records(settings.workbook, settings.sheet, settings.columns, settings.selected_row_filters)
     preview_records(settings.columns, records)
     print_summary(settings, len(records))
+    if not records:
+        raise ValueError("No rows matched. Choose no row rules or different row rules.")
 
     action = choose_action()
     if action in {"export", "print"}:

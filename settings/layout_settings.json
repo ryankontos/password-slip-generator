@@ -20,7 +20,9 @@
     "footer_color": "Footer text colour as a hex value.",
     "column_width_evenness": "How evenly fields share width. 1 is equal widths, 0 follows each row's text lengths.",
     "column_min_width_ratio": "Smallest share of slip width any field should receive.",
-    "column_max_width_ratio": "Largest share of slip width any field should receive."
+    "column_max_width_ratio": "Largest share of slip width any field should receive.",
+    "data_font": "Font used for normal data values.",
+    "password_font": "Font used for columns marked with * when choosing columns."
   },
   "header_height_mm": 20.0,
   "data_height_mm": 20.0,
@@ -34,6 +36,8 @@
   "column_min_width_ratio": 0.07,
   "column_max_width_ratio": 0.45,
   "header_color": "#1769AA",
+  "data_font": "Helvetica-Bold",
+  "password_font": "Courier-Bold",
   "header_font_pt": 11.0,
   "data_font_pt": 12.0,
   "minimum_font_pt": 4.0,

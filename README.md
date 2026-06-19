@@ -6,7 +6,9 @@ Download the SharePoint Excel file to `~/Downloads`, then open `run_password_sli
 
 The `.command` launcher lives at the project root, source code is in `src`, and editable JSON files are in `settings`.
 
-Press Enter to use the newest Excel file in Downloads, then choose the sheet and column numbers. The script remembers your last column number combo and shows a quick preview.
+Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a column letter, such as `B*`, to print that column with `password_font`. The script remembers your last column combo, saved row filters, and shows a quick preview.
+
+Row filters are optional. Press Enter for no row rule, enter saved rule numbers separated by commas, or create a new rule such as only rows where column `B` equals `BFS`. When creating a rule, the script lists existing values from that column so you can choose one quickly.
 
 At the finish step, press Enter or type `o` to open a temporary PDF in Preview, type `e` to export a saved PDF, or type `p` to export and print.
 
