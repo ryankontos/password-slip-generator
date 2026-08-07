@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.password_slips import (
     Settings,
+    apply_env_settings,
     automatic_blank_slips,
     choose_action,
     choose_columns,
@@ -90,6 +91,27 @@ class PasswordSlipGenerationTests(unittest.TestCase):
     def test_email_address_comes_from_environment(self):
         with patch.dict("os.environ", {"PASSWORD_SLIPS_EMAIL_ADDRESS": "staff@example.com"}, clear=True):
             self.assertEqual(configured_email_address(), "staff@example.com")
+
+    def test_env_overrides_application_and_layout_settings(self):
+        settings = Settings()
+        values = {
+            "PASSWORD_SLIPS_INPUT_FOLDER": "/tmp/input",
+            "PASSWORD_SLIPS_COLUMN_NUMBERS": "[2, 4]",
+            "PASSWORD_SLIPS_INCLUDE_SUMMARY_PAGE": "true",
+            "PASSWORD_SLIPS_HEADER_HEIGHT_MM": "24.5",
+            "PASSWORD_SLIPS_HEADER_COLOR": "#123456",
+            "PASSWORD_SLIPS_SHOW_FOOTER": "false",
+        }
+
+        with patch.dict("os.environ", values, clear=True):
+            apply_env_settings(settings)
+
+        self.assertEqual(settings.input_folder, "/tmp/input")
+        self.assertEqual(settings.column_numbers, [2, 4])
+        self.assertTrue(settings.include_summary_page)
+        self.assertEqual(settings.header_height_mm, 24.5)
+        self.assertEqual(settings.header_color, "#123456")
+        self.assertFalse(settings.show_footer)
 
     def test_email_draft_uses_pdf_name_as_subject(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

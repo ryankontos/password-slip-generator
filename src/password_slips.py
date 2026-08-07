@@ -120,6 +120,7 @@ def read_saved_settings() -> Settings:
     ensure_json_files(settings)
     apply_saved_app_settings(settings)
     apply_saved_layout(settings)
+    apply_env_settings(settings)
     save_layout_file(settings)
     settings.input_folder = settings.input_folder or str(downloads_folder())
     settings.output_folder = settings.output_folder or str(downloads_folder())
@@ -167,6 +168,75 @@ def apply_saved_layout(settings: Settings) -> None:
                 setattr(settings, key, clean_layout_value(settings, key, value))
     except (OSError, TypeError, ValueError):
         print(f"Could not read {LAYOUT_FILE.name}; using built-in layout defaults.")
+
+
+def apply_env_settings(settings: Settings) -> None:
+    """Apply optional PASSWORD_SLIPS_* values over JSON settings."""
+    settings.input_folder = env_text("INPUT_FOLDER", settings.input_folder)
+    settings.output_folder = env_text("OUTPUT_FOLDER", settings.output_folder)
+    settings.workbook_extensions = env_json_list(
+        "WORKBOOK_EXTENSIONS", settings.workbook_extensions
+    )
+    settings.column_numbers = env_json_numbers("COLUMN_NUMBERS", settings.column_numbers)
+    settings.password_column_numbers = env_json_numbers(
+        "PASSWORD_COLUMN_NUMBERS", settings.password_column_numbers
+    )
+    settings.truncate_column_numbers = env_json_numbers(
+        "TRUNCATE_COLUMN_NUMBERS", settings.truncate_column_numbers
+    )
+    settings.row_filters = clean_row_filters(
+        env_json("ROW_FILTERS", settings.row_filters)
+    )
+    settings.selected_row_filters = clean_row_filters(
+        env_json("SELECTED_ROW_FILTERS", settings.selected_row_filters)
+    )
+    settings.blank_slips = env_int("BLANK_SLIPS", settings.blank_slips)
+    settings.include_summary_page = env_bool(
+        "INCLUDE_SUMMARY_PAGE", settings.include_summary_page
+    )
+    settings.email_pdf = env_bool("EMAIL_PDF", settings.email_pdf)
+    settings.email_address = configured_email_address()
+
+    for name in layout_field_names():
+        value = os.environ.get(f"PASSWORD_SLIPS_{name.upper()}")
+        if value is not None:
+            setattr(settings, name, clean_layout_value(settings, name, value))
+
+
+def env_text(name: str, default: str) -> str:
+    value = os.environ.get(f"PASSWORD_SLIPS_{name}")
+    return default if value is None else value.strip()
+
+
+def env_json(name: str, default):
+    value = os.environ.get(f"PASSWORD_SLIPS_{name}")
+    if value is None:
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def env_json_list(name: str, default: list[str]) -> list[str]:
+    value = env_json(name, default)
+    if not isinstance(value, list):
+        return default
+    return [str(item).strip().lower() for item in value if str(item).strip()]
+
+
+def env_json_numbers(name: str, default: list[int]) -> list[int]:
+    return clean_number_list(env_json(name, default))
+
+
+def env_int(name: str, default: int) -> int:
+    value = os.environ.get(f"PASSWORD_SLIPS_{name}")
+    return clean_whole_number(value, default) if value is not None else default
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(f"PASSWORD_SLIPS_{name}")
+    return clean_bool(value, default) if value is not None else default
 
 
 def clean_layout_value(settings: Settings, key: str, value):
