@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -14,8 +15,10 @@ from src.password_slips import (
     make_pdf,
     open_email_draft,
     row_numbers_from_text,
+    save_app_settings,
     summary_page_count,
 )
+from src.migrate_settings_to_env import migrate_settings_to_env
 
 
 class PasswordSlipGenerationTests(unittest.TestCase):
@@ -128,6 +131,63 @@ class PasswordSlipGenerationTests(unittest.TestCase):
         self.assertIn("Microsoft Outlook", command[2])
         self.assertIn("subjectLine", command[2])
         self.assertEqual(command[5], "staff slips.pdf")
+
+    def test_saved_settings_use_column_letters_and_row_filter_letters(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings_path = Path(temporary_directory) / "settings.json"
+            settings = Settings(
+                column_numbers=[1, 3],
+                password_column_numbers=[3],
+                row_filters=[{"mode": "include", "column_number": 2, "value": "BFS"}],
+            )
+
+            with patch("src.password_slips.SETTINGS_FILE", settings_path):
+                save_app_settings(settings)
+
+            saved = json.loads(settings_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(saved["column_letters"], ["A", "C"])
+        self.assertEqual(saved["password_column_letters"], ["C"])
+        self.assertEqual(saved["row_filters"][0]["column_letter"], "B")
+        self.assertNotIn("column_numbers", saved)
+
+    def test_migration_converts_columns_and_preserves_extra_env_fields(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            settings_path = directory / "settings.json"
+            layout_path = directory / "layout_settings.json"
+            env_path = directory / ".env"
+            settings_path.write_text(
+                json.dumps({
+                    "column_numbers": [1, 3],
+                    "password_column_numbers": [3],
+                    "row_filters": [
+                        {"mode": "include", "column_number": 2, "value": "BFS"}
+                    ],
+                    "blank_slips": 2,
+                }),
+                encoding="utf-8",
+            )
+            layout_path.write_text(json.dumps({"header_height_mm": 24.0}), encoding="utf-8")
+            env_path.write_text(
+                "\n".join([
+                    "PASSWORD_SLIPS_EMAIL_ADDRESS=keep@example.com",
+                    "PASSWORD_SLIPS_CUSTOM_SETTING=keep-me",
+                    "PASSWORD_SLIPS_INCLUDE_SUMMARY_PAGE=true",
+                ]) + "\n",
+                encoding="utf-8",
+            )
+
+            migrate_settings_to_env(settings_path, layout_path, env_path)
+            migrated = env_path.read_text(encoding="utf-8")
+
+        self.assertIn('PASSWORD_SLIPS_COLUMN_LETTERS=["A","C"]', migrated)
+        self.assertIn('PASSWORD_SLIPS_PASSWORD_COLUMN_LETTERS=["C"]', migrated)
+        self.assertIn('"column_letter":"B"', migrated)
+        self.assertIn("PASSWORD_SLIPS_EMAIL_ADDRESS=keep@example.com", migrated)
+        self.assertIn("PASSWORD_SLIPS_CUSTOM_SETTING=keep-me", migrated)
+        self.assertIn("PASSWORD_SLIPS_INCLUDE_SUMMARY_PAGE=true", migrated)
+        self.assertIn("PASSWORD_SLIPS_HEADER_HEIGHT_MM=24.0", migrated)
 
 
 if __name__ == "__main__":

@@ -146,9 +146,13 @@ def apply_saved_app_settings(settings: Settings) -> None:
     settings.output_folder = str(data.get("output_folder") or "~/Downloads")
     extensions = data.get("workbook_extensions") or [".xlsx", ".xlsm"]
     settings.workbook_extensions = [str(extension).strip().lower() for extension in extensions]
-    settings.column_numbers = clean_number_list(data.get("column_numbers", []))
-    settings.password_column_numbers = clean_number_list(data.get("password_column_numbers", []))
-    settings.truncate_column_numbers = clean_number_list(data.get("truncate_column_numbers", []))
+    settings.column_numbers = saved_column_numbers(data, "column_letters", "column_numbers")
+    settings.password_column_numbers = saved_column_numbers(
+        data, "password_column_letters", "password_column_numbers"
+    )
+    settings.truncate_column_numbers = saved_column_numbers(
+        data, "truncate_column_letters", "truncate_column_numbers"
+    )
     settings.row_filters = clean_row_filters(data.get("row_filters", []))
     settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
     settings.blank_slips = clean_whole_number(data.get("blank_slips", 0), 0)
@@ -177,12 +181,18 @@ def apply_env_settings(settings: Settings) -> None:
     settings.workbook_extensions = env_json_list(
         "WORKBOOK_EXTENSIONS", settings.workbook_extensions
     )
-    settings.column_numbers = env_json_numbers("COLUMN_NUMBERS", settings.column_numbers)
-    settings.password_column_numbers = env_json_numbers(
-        "PASSWORD_COLUMN_NUMBERS", settings.password_column_numbers
+    settings.column_numbers = env_column_numbers(
+        "COLUMN_LETTERS", settings.column_numbers, "COLUMN_NUMBERS"
     )
-    settings.truncate_column_numbers = env_json_numbers(
-        "TRUNCATE_COLUMN_NUMBERS", settings.truncate_column_numbers
+    settings.password_column_numbers = env_column_numbers(
+        "PASSWORD_COLUMN_LETTERS",
+        settings.password_column_numbers,
+        "PASSWORD_COLUMN_NUMBERS",
+    )
+    settings.truncate_column_numbers = env_column_numbers(
+        "TRUNCATE_COLUMN_LETTERS",
+        settings.truncate_column_numbers,
+        "TRUNCATE_COLUMN_NUMBERS",
     )
     settings.row_filters = clean_row_filters(
         env_json("ROW_FILTERS", settings.row_filters)
@@ -225,8 +235,11 @@ def env_json_list(name: str, default: list[str]) -> list[str]:
     return [str(item).strip().lower() for item in value if str(item).strip()]
 
 
-def env_json_numbers(name: str, default: list[int]) -> list[int]:
-    return clean_number_list(env_json(name, default))
+def env_column_numbers(name: str, default: list[int], legacy_name: str) -> list[int]:
+    env_name = f"PASSWORD_SLIPS_{name}"
+    if env_name in os.environ:
+        return clean_column_values(env_json(name, default))
+    return clean_column_values(env_json(legacy_name, default))
 
 
 def env_int(name: str, default: int) -> int:
@@ -275,11 +288,11 @@ def save_app_settings(settings: Settings) -> None:
         "input_folder": settings.input_folder or "~/Downloads",
         "output_folder": settings.output_folder or "~/Downloads",
         "workbook_extensions": settings.workbook_extensions,
-        "column_numbers": settings.column_numbers,
-        "password_column_numbers": settings.password_column_numbers,
-        "truncate_column_numbers": settings.truncate_column_numbers,
-        "row_filters": settings.row_filters,
-        "selected_row_filters": settings.selected_row_filters,
+        "column_letters": column_letters_from_numbers(settings.column_numbers),
+        "password_column_letters": column_letters_from_numbers(settings.password_column_numbers),
+        "truncate_column_letters": column_letters_from_numbers(settings.truncate_column_numbers),
+        "row_filters": serialized_row_filters(settings.row_filters),
+        "selected_row_filters": serialized_row_filters(settings.selected_row_filters),
         "blank_slips": settings.blank_slips,
         "include_summary_page": settings.include_summary_page,
         "email_pdf": settings.email_pdf,
@@ -304,6 +317,24 @@ def clean_number_list(value) -> list[int]:
         if number > 0 and number not in numbers:
             numbers.append(number)
     return numbers
+
+
+def saved_column_numbers(data: dict, new_key: str, legacy_key: str) -> list[int]:
+    value = data[new_key] if new_key in data else data.get(legacy_key, [])
+    return clean_column_values(value)
+
+
+def clean_column_values(value) -> list[int]:
+    numbers = []
+    for item in value if isinstance(value, list) else []:
+        number = column_number_from_text(str(item))
+        if number and number not in numbers:
+            numbers.append(number)
+    return numbers
+
+
+def column_letters_from_numbers(numbers: list[int]) -> list[str]:
+    return [column_letter(number) for number in clean_number_list(numbers)]
 
 
 def clean_whole_number(value, default: int = 0) -> int:
@@ -339,9 +370,9 @@ def app_settings_help() -> dict[str, str]:
         "input_folder": "Folder searched for the latest Excel workbook when you press Enter at the file prompt.",
         "output_folder": "Default folder for generated PDFs.",
         "workbook_extensions": "Excel file extensions to look for in input_folder.",
-        "column_numbers": "Last selected column numbers, in the order they should appear on each slip.",
-        "password_column_numbers": "Selected columns that should use password_font. Add * after a column letter when choosing columns.",
-        "truncate_column_numbers": "Selected columns that may truncate instead of shrinking text. Add - after a column letter when choosing columns.",
+        "column_letters": "Last selected column letters, in the order they should appear on each slip.",
+        "password_column_letters": "Selected column letters that should use password_font. Add * after a column letter when choosing columns.",
+        "truncate_column_letters": "Selected column letters that may truncate instead of shrinking text. Add - after a column letter when choosing columns.",
         "row_filters": "Saved row filters. Each one matches or excludes rows where one column equals one text value.",
         "selected_row_filters": "Row filters selected on the last run. These are marked with a star next time.",
         "blank_slips": "Extra blank slips to add after the automatically filled last slip page. Press Enter at the prompt to reuse this number.",
@@ -512,9 +543,9 @@ def clean_row_filter(value) -> dict[str, object]:
     if mode not in {"include", "exclude"}:
         mode = "include"
 
-    try:
-        column_number = int(value.get("column_number", 0))
-    except (TypeError, ValueError):
+    column_value = value.get("column_letter", value.get("column_number", 0))
+    column_number = column_number_from_text(str(column_value))
+    if column_number is None:
         return {}
 
     text = str(value.get("value", "")).strip()
@@ -526,6 +557,15 @@ def clean_row_filter(value) -> dict[str, object]:
         "column_number": column_number,
         "value": text,
     }
+
+
+def serialized_row_filters(filters: list[dict[str, object]]) -> list[dict[str, object]]:
+    serialized = []
+    for rule in clean_row_filters(filters):
+        output = dict(rule)
+        output["column_letter"] = column_letter(int(output.pop("column_number")))
+        serialized.append(output)
+    return serialized
 
 
 def row_matches_filters(row, row_filters: Optional[list[dict[str, object]]]) -> bool:

@@ -4,7 +4,7 @@ Created by Ryan Kontos, 2026. Licensed under the 0BSD licence.
 
 Download the SharePoint Excel file to `~/Downloads`, then open `run_password_slips.command`.
 
-The `.command` launcher lives at the project root, source code is in `src`, editable JSON files are in `settings`, and all application/layout overrides can be set in `.env`.
+The `.command` launchers live at the project root, source code is in `src`, editable JSON files are in `settings`, and all application/layout overrides can be set in `.env`.
 
 Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a column letter, such as `B*`, to print that column with `password_font`; add `-`, such as `C-`, when that column can be truncated instead of shrunk. The script previews the selected header names in print order so you can confirm or rechoose them. It remembers your last column combo, saved row filters, and shows a quick data preview.
 
@@ -20,6 +20,8 @@ Field widths are balanced per slip: they stay mostly even, but widen for longer 
 
 The PDF footer can show the sheet name, generated date/time, and page numbers. These footer options are in `settings/layout_settings.json` and are on by default.
 
-General app settings live in `settings/settings.json`, and layout defaults live in `settings/layout_settings.json`. Both files are generated automatically for backward compatibility and to remember interactive choices. Copy `.env.example` to `.env` to configure every application and layout setting explicitly; `PASSWORD_SLIPS_*` values override the JSON values. Keep the email recipient in `.env` as `PASSWORD_SLIPS_EMAIL_ADDRESS`.
+General app settings live in `settings/settings.json`, and layout defaults live in `settings/layout_settings.json`. Both files are generated automatically for backward compatibility and to remember interactive choices. Copy `.env.example` to `.env` to configure every application and layout setting explicitly; `PASSWORD_SLIPS_*` values override the JSON values. Column selections are stored as letters, such as `["A","C"]`, and row-filter column references are stored as letters too.
+
+If you have an older JSON configuration, open `migrate_settings_to_env.command`. It merges the old app and layout settings into `.env`, converts numeric column references to letters, and preserves existing `.env` fields that were not present in the old JSON format. Use `--dry-run` to preview the migration.
 
 0BSD is a very permissive open-source licence. See `LICENSE` for the full text.
