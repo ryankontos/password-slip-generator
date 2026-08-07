@@ -2,26 +2,24 @@
 
 Created by Ryan Kontos, 2026. Licensed under the 0BSD licence.
 
-Download the SharePoint Excel file to `~/Downloads`, then open `run_password_slips.command`.
+Download the SharePoint Excel file to `~/Downloads`, then open `run_password_slips.command`. The launcher uses the Python included with macOS, creates a local `.venv`, and installs the two required PDF/Excel packages automatically.
 
-The `.command` launchers live at the project root, source code is in `src`, editable JSON files are in `settings`, and all application/layout overrides can be set in `.env`.
+Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a letter, such as `B*`, to print that column with `password_font`; add `-`, such as `C-`, when that column may truncate instead of shrinking. The selected header names and options are previewed in print order, with options shown in brackets, so they can be confirmed or reselected.
 
-Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a column letter, such as `B*`, to print that column with `password_font`; add `-`, such as `C-`, when that column can be truncated instead of shrunk. The script previews the selected header names in print order so you can confirm or rechoose them. It remembers your last column combo, saved row filters, and shows a quick data preview.
+Row selection is optional. Choose all rows, a saved quick rule set, create a new rule set, or enter specific spreadsheet rows such as `2,5,9` or `10-15`. A rule set can contain several rules, applied together with AND, and can be named for one-step reuse on later runs.
 
-Row filters are optional. Choose `0` for no row rule, a saved rule number, `n` to create a rule, or `c` to manually enter spreadsheet row numbers such as `2,5,9` or a range like `10-15`. When creating a rule, the script lists existing values from that column so you can choose one quickly.
+After row selection, the script reports the blanks needed to finish the last slip page and asks only for any additional blank slips. The PDF is then written automatically to Downloads. Set `PASSWORD_SLIPS_OUTPUT_FOLDER` in `.env` to use another folder; there is no output-folder prompt.
 
-After the rows are selected, the script tells you how many blank slips will automatically finish the last slip page. You can then enter an extra blank-slip count; extra slips start after that completed page and can add new page(s). Press Enter to reuse the last extra-slip count.
+A compact summary is always appended to the PDF and contains the selected workbook rows, excluding automatic and extra blank slips. Extra titled blank columns can be added for handwritten notes with one JSON array:
 
-At the finish step, choose whether to save the PDF only or save it and open an email draft. Email delivery uses the address in `.env`; copy `.env.example` to `.env` and set `PASSWORD_SLIPS_EMAIL_ADDRESS`. On macOS the script tries Outlook for Mac, then Apple Mail, to create a draft with the PDF attached. If attachment automation is unavailable, it opens the default mail app and leaves the PDF ready to attach. The subject is the generated PDF filename. The final prompt asks whether to add an optional summary page. It is appended to the same PDF, has a title with the sheet name and generated date/time, and lists the selected workbook rows in a compact table for staff reference. Automatic and extra blank slips are not included in the summary.
+```dotenv
+PASSWORD_SLIPS_EXTRA_SUMMARY_COLUMNS=["Notes","Follow-up"]
+```
 
-Page layout lives in `settings/layout_settings.json`. The script creates this file with defaults if it does not exist; edit that file to change slip height, slip padding, margins, colours, spacing, and font sizes.
+If `PASSWORD_SLIPS_EMAIL_ADDRESS` is set, the script asks after exporting whether to open a draft in the default mail app. The draft is addressed to that email and has a subject like `Generated Password Slips: Staff — 2026-08-07 14:30`. macOS does not attach the PDF automatically, so the generated path remains visible for manual attachment.
 
-Field widths are balanced per slip: they stay mostly even, but widen for longer text when needed.
+Copy `.env.example` to `.env` for the complete configuration template. Non-blank `PASSWORD_SLIPS_*` values override generated JSON settings. Interactive choices are remembered in `settings/settings.json`; layout defaults are in `settings/layout_settings.json` and can also be overridden by `.env`. Column selections and rule references are stored as letters, such as `A` and `C`, rather than numbers.
 
-The PDF footer can show the sheet name, generated date/time, and page numbers. These footer options are in `settings/layout_settings.json` and are on by default.
+For an older JSON configuration, open `migrate_settings_to_env.command`. It merges the old app and layout settings into `.env`, converts numeric column references to letters, and preserves `.env` fields that do not exist in the old format. Run it with `--dry-run` from Terminal to preview the migration.
 
-General app settings live in `settings/settings.json`, and layout defaults live in `settings/layout_settings.json`. Both files are generated automatically for backward compatibility and to remember interactive choices. Copy `.env.example` to `.env` to configure every application and layout setting explicitly; `PASSWORD_SLIPS_*` values override the JSON values. Column selections are stored as letters, such as `["A","C"]`, and row-filter column references are stored as letters too.
-
-If you have an older JSON configuration, open `migrate_settings_to_env.command`. It merges the old app and layout settings into `.env`, converts numeric column references to letters, and preserves existing `.env` fields that were not present in the old JSON format. Use `--dry-run` to preview the migration.
-
-0BSD is a very permissive open-source licence. See `LICENSE` for the full text.
+See `LICENSE` for the full licence text.

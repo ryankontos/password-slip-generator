@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from dotenv import load_dotenv
 from openpyxl import load_workbook
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
@@ -35,7 +34,40 @@ SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 MM = 72 / 25.4
 ENV_FILE = ROOT_DIR / ".env"
 
-load_dotenv(ENV_FILE)
+
+def load_env_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            if value[0] == '"':
+                try:
+                    value = json.loads(value)
+                except (TypeError, ValueError):
+                    value = value[1:-1]
+            else:
+                value = value[1:-1]
+        else:
+            value = re.split(r"\s+#", value, maxsplit=1)[0].rstrip()
+        os.environ.setdefault(key, value)
+
+
+load_env_file(ENV_FILE)
 
 SUMMARY_TITLE_HEIGHT_MM = 15.0
 SUMMARY_HEADER_HEIGHT_MM = 7.0
@@ -53,12 +85,12 @@ class Settings:
     column_numbers: list[int] = field(default_factory=list)
     password_column_numbers: list[int] = field(default_factory=list)
     truncate_column_numbers: list[int] = field(default_factory=list)
-    row_filters: list[dict[str, object]] = field(default_factory=list)
+    saved_row_filter_sets: list[dict[str, object]] = field(default_factory=list)
     selected_row_filters: list[dict[str, object]] = field(default_factory=list)
     manual_row_numbers: list[int] = field(default_factory=list)
     blank_slips: int = 0
-    include_summary_page: bool = False
-    email_pdf: bool = False
+    email_draft: bool = False
+    extra_summary_columns: list[str] = field(default_factory=list)
     email_address: str = ""
     output_folder: str = ""
     input_folder: str = ""
@@ -143,7 +175,7 @@ def apply_saved_app_settings(settings: Settings) -> None:
         data = {}
 
     settings.input_folder = str(data.get("input_folder") or "~/Downloads")
-    settings.output_folder = str(data.get("output_folder") or "~/Downloads")
+    settings.output_folder = str(downloads_folder())
     extensions = data.get("workbook_extensions") or [".xlsx", ".xlsm"]
     settings.workbook_extensions = [str(extension).strip().lower() for extension in extensions]
     settings.column_numbers = saved_column_numbers(data, "column_letters", "column_numbers")
@@ -153,14 +185,13 @@ def apply_saved_app_settings(settings: Settings) -> None:
     settings.truncate_column_numbers = saved_column_numbers(
         data, "truncate_column_letters", "truncate_column_numbers"
     )
-    settings.row_filters = clean_row_filters(data.get("row_filters", []))
+    settings.saved_row_filter_sets = saved_row_filter_sets(data)
     settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
     settings.blank_slips = clean_whole_number(data.get("blank_slips", 0), 0)
-    settings.include_summary_page = clean_bool(
-        data.get("include_summary_page", data.get("summary_page", False)),
+    settings.email_draft = clean_bool(
+        data.get("email_draft", data.get("email_pdf", False)),
         False,
     )
-    settings.email_pdf = clean_bool(data.get("email_pdf", False), False)
     settings.email_address = configured_email_address()
 
 
@@ -177,7 +208,7 @@ def apply_saved_layout(settings: Settings) -> None:
 def apply_env_settings(settings: Settings) -> None:
     """Apply optional PASSWORD_SLIPS_* values over JSON settings."""
     settings.input_folder = env_text("INPUT_FOLDER", settings.input_folder)
-    settings.output_folder = env_text("OUTPUT_FOLDER", settings.output_folder)
+    settings.output_folder = env_text("OUTPUT_FOLDER", str(downloads_folder()))
     settings.workbook_extensions = env_json_list(
         "WORKBOOK_EXTENSIONS", settings.workbook_extensions
     )
@@ -194,18 +225,13 @@ def apply_env_settings(settings: Settings) -> None:
         settings.truncate_column_numbers,
         "TRUNCATE_COLUMN_NUMBERS",
     )
-    settings.row_filters = clean_row_filters(
-        env_json("ROW_FILTERS", settings.row_filters)
-    )
+    settings.saved_row_filter_sets = env_row_filter_sets(settings.saved_row_filter_sets)
     settings.selected_row_filters = clean_row_filters(
         env_json("SELECTED_ROW_FILTERS", settings.selected_row_filters)
     )
     settings.blank_slips = env_int("BLANK_SLIPS", settings.blank_slips)
-    settings.include_summary_page = env_bool(
-        "INCLUDE_SUMMARY_PAGE", settings.include_summary_page
-    )
-    settings.email_pdf = env_bool("EMAIL_PDF", settings.email_pdf)
     settings.email_address = configured_email_address()
+    settings.extra_summary_columns = configured_extra_summary_columns()
 
     for name in layout_field_names():
         value = os.environ.get(f"PASSWORD_SLIPS_{name.upper()}")
@@ -244,12 +270,7 @@ def env_column_numbers(name: str, default: list[int], legacy_name: str) -> list[
 
 def env_int(name: str, default: int) -> int:
     value = os.environ.get(f"PASSWORD_SLIPS_{name}")
-    return clean_whole_number(value, default) if value is not None else default
-
-
-def env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(f"PASSWORD_SLIPS_{name}")
-    return clean_bool(value, default) if value is not None else default
+    return clean_whole_number(value, default) if value is not None and value.strip() else default
 
 
 def clean_layout_value(settings: Settings, key: str, value):
@@ -286,16 +307,14 @@ def save_app_settings(settings: Settings) -> None:
     data = {
         "_help": app_settings_help(),
         "input_folder": settings.input_folder or "~/Downloads",
-        "output_folder": settings.output_folder or "~/Downloads",
         "workbook_extensions": settings.workbook_extensions,
         "column_letters": column_letters_from_numbers(settings.column_numbers),
         "password_column_letters": column_letters_from_numbers(settings.password_column_numbers),
         "truncate_column_letters": column_letters_from_numbers(settings.truncate_column_numbers),
-        "row_filters": serialized_row_filters(settings.row_filters),
+        "saved_row_filter_sets": serialized_row_filter_sets(settings.saved_row_filter_sets),
         "selected_row_filters": serialized_row_filters(settings.selected_row_filters),
         "blank_slips": settings.blank_slips,
-        "include_summary_page": settings.include_summary_page,
-        "email_pdf": settings.email_pdf,
+        "email_draft": settings.email_draft,
     }
     SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -365,19 +384,31 @@ def configured_email_address() -> str:
     return ""
 
 
+def configured_extra_summary_columns() -> list[str]:
+    value = env_json("EXTRA_SUMMARY_COLUMNS", [])
+    if not isinstance(value, list):
+        return []
+    columns = []
+    for item in value:
+        title = str(item).strip()
+        if not title:
+            continue
+        if title not in columns:
+            columns.append(title)
+    return columns
+
+
 def app_settings_help() -> dict[str, str]:
     return {
         "input_folder": "Folder searched for the latest Excel workbook when you press Enter at the file prompt.",
-        "output_folder": "Default folder for generated PDFs.",
         "workbook_extensions": "Excel file extensions to look for in input_folder.",
         "column_letters": "Last selected column letters, in the order they should appear on each slip.",
         "password_column_letters": "Selected column letters that should use password_font. Add * after a column letter when choosing columns.",
         "truncate_column_letters": "Selected column letters that may truncate instead of shrinking text. Add - after a column letter when choosing columns.",
-        "row_filters": "Saved row filters. Each one matches or excludes rows where one column equals one text value.",
-        "selected_row_filters": "Row filters selected on the last run. These are marked with a star next time.",
+        "saved_row_filter_sets": "Named quick sets of one or more row rules. Rules in a set are chained with AND.",
+        "selected_row_filters": "Rules selected on the last run. The matching quick set is marked next time.",
         "blank_slips": "Extra blank slips to add after the automatically filled last slip page. Press Enter at the prompt to reuse this number.",
-        "include_summary_page": "Whether to offer a compact staff-reference summary page at the finish step.",
-        "email_pdf": "Whether to offer email delivery as the default finish action.",
+        "email_draft": "Last answer to the optional post-export email draft prompt. This is remembered by the app rather than configured in .env.",
     }
 
 
@@ -535,6 +566,45 @@ def clean_row_filters(value) -> list[dict[str, object]]:
     return filters
 
 
+def clean_row_filter_sets(value) -> list[dict[str, object]]:
+    sets = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        rules = clean_row_filters(item.get("rules", []))
+        if not rules:
+            continue
+        name = str(item.get("name", "")).strip()
+        rule_set = {"name": name, "rules": rules}
+        if row_filter_set_key(rule_set) not in {
+            row_filter_set_key(existing) for existing in sets
+        }:
+            sets.append(rule_set)
+    return sets
+
+
+def saved_row_filter_sets(data: dict) -> list[dict[str, object]]:
+    if "saved_row_filter_sets" in data:
+        return clean_row_filter_sets(data["saved_row_filter_sets"])
+    legacy_rules = clean_row_filters(data.get("row_filters", []))
+    return [
+        {"name": f"Saved rule {index}", "rules": [rule]}
+        for index, rule in enumerate(legacy_rules, start=1)
+    ]
+
+
+def env_row_filter_sets(default: list[dict[str, object]]) -> list[dict[str, object]]:
+    if "PASSWORD_SLIPS_SAVED_ROW_FILTER_SETS" in os.environ:
+        return clean_row_filter_sets(env_json("SAVED_ROW_FILTER_SETS", default))
+    if "PASSWORD_SLIPS_ROW_FILTERS" in os.environ:
+        legacy_rules = clean_row_filters(env_json("ROW_FILTERS", []))
+        return [
+            {"name": f"Saved rule {index}", "rules": [rule]}
+            for index, rule in enumerate(legacy_rules, start=1)
+        ]
+    return clean_row_filter_sets(default)
+
+
 def clean_row_filter(value) -> dict[str, object]:
     if not isinstance(value, dict):
         return {}
@@ -568,21 +638,26 @@ def serialized_row_filters(filters: list[dict[str, object]]) -> list[dict[str, o
     return serialized
 
 
+def serialized_row_filter_sets(value: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {
+            "name": str(rule_set.get("name", "")).strip(),
+            "rules": serialized_row_filters(rule_set.get("rules", [])),
+        }
+        for rule_set in clean_row_filter_sets(value)
+    ]
+
+
 def row_matches_filters(row, row_filters: Optional[list[dict[str, object]]]) -> bool:
     rules = clean_row_filters(row_filters)
     if not rules:
         return True
-
-    include_rules = [rule for rule in rules if rule["mode"] == "include"]
-    exclude_rules = [rule for rule in rules if rule["mode"] == "exclude"]
-
-    if any(row_matches_rule(row, rule) for rule in exclude_rules):
-        return False
-
-    if include_rules:
-        return any(row_matches_rule(row, rule) for rule in include_rules)
-
-    return True
+    return all(
+        row_matches_rule(row, rule)
+        if rule["mode"] == "include"
+        else not row_matches_rule(row, rule)
+        for rule in rules
+    )
 
 
 def row_matches_rule(row, rule: dict[str, object]) -> bool:
@@ -597,6 +672,10 @@ def rule_key(rule: dict[str, object]) -> tuple[str, int, str]:
         int(rule.get("column_number", 0)),
         str(rule.get("value", "")),
     )
+
+
+def row_filter_set_key(rule_set: dict[str, object]) -> tuple[tuple[str, int, str], ...]:
+    return tuple(rule_key(rule) for rule in clean_row_filters(rule_set.get("rules", [])))
 
 
 def slips_per_page(settings: Settings) -> int:
@@ -750,8 +829,6 @@ def summary_rows_per_page(settings: Settings) -> int:
 
 
 def summary_page_count(settings: Settings, row_count: int) -> int:
-    if not settings.include_summary_page:
-        return 0
     if row_count <= 0:
         return 1
     return math.ceil(row_count / summary_rows_per_page(settings))
@@ -779,6 +856,16 @@ def summary_column_widths(columns: list[str], records: list[list[str]], settings
     minimum = min(even_width, available_width * 0.05)
     maximum = max(minimum, available_width * 0.45)
     return fit_widths(widths, minimum, maximum, available_width)
+
+
+def summary_table(settings: Settings, records: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    extra_columns = list(settings.extra_summary_columns)
+    columns = list(settings.columns) + extra_columns
+    table_records = [
+        list(record) + [""] * len(extra_columns)
+        for record in records
+    ]
+    return columns, table_records
 
 
 def make_pdf(settings: Settings, output: Optional[Path] = None,
@@ -841,67 +928,21 @@ def make_pdf(settings: Settings, output: Optional[Path] = None,
     return len(records), pages
 
 
-def open_email_draft(pdf: Path, email_address: str) -> tuple[bool, bool]:
-    """Open a draft with the PDF attached when the macOS mail app supports it.
-
-    Returns a pair: (opened, attached). The default-mail fallback can open a
-    draft but cannot reliably add an attachment through a mailto URL.
-    """
-    if not pdf.is_file() or not email_address.strip():
-        return False, False
-
-    script = '''
-on run argv
-    set pdfPath to item 1 of argv
-    set recipientAddress to item 2 of argv
-    set subjectLine to item 3 of argv
-
-    try
-        tell application "Microsoft Outlook"
-            activate
-            set newMessage to make new outgoing message with properties {subject:subjectLine, content:""}
-            make new recipient at newMessage with properties {email address:{address:recipientAddress}}
-            make new attachment at newMessage with properties {file name:(POSIX file pdfPath)}
-            open newMessage
-            return "outlook"
-        end tell
-    end try
-
-    try
-        tell application "Mail"
-            activate
-            set newMessage to make new outgoing message with properties {subject:subjectLine, content:""}
-            tell newMessage
-                make new to recipient at end of to recipients with properties {address:recipientAddress}
-                make new attachment with properties {file name:(POSIX file pdfPath)} at after the last paragraph
-            end tell
-            open newMessage
-            return "mail"
-        end tell
-    end try
-
-    return "default"
-end run
-'''
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", script, str(pdf), email_address, pdf.name],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        mail_app = result.stdout.strip().lower()
-        if mail_app in {"outlook", "mail"}:
-            return True, True
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-    mailto = f"mailto:{quote(email_address, safe='@')}?subject={quote(pdf.name)}"
+def open_email_draft(email_address: str, subject: str) -> bool:
+    if not email_address.strip():
+        return False
+    mailto = f"mailto:{quote(email_address, safe='@')}?subject={quote(subject)}"
     try:
         subprocess.run(["open", mailto], check=True)
-        return True, False
+        return True
     except (OSError, subprocess.SubprocessError):
-        return False, False
+        return False
+
+
+def email_subject(settings: Settings, generated_at: Optional[datetime] = None) -> str:
+    generated_at = generated_at or datetime.now()
+    sheet = settings.sheet or "Workbook"
+    return f"Generated Password Slips: {sheet} — {generated_at:%Y-%m-%d %H:%M}"
 
 
 def draw_cut_ticks(pdf: canvas.Canvas, settings: Settings, page_width: float, page_height: float, per_page: int) -> None:
@@ -961,11 +1002,12 @@ def draw_summary_page(pdf: canvas.Canvas, settings: Settings, records: list[list
     header_height = SUMMARY_HEADER_HEIGHT_MM * MM
     row_height = SUMMARY_ROW_HEIGHT_MM * MM
     padding = SUMMARY_CELL_PADDING_MM * MM
-    widths = summary_column_widths(settings.columns, records, settings, content_width)
+    table_columns, table_records = summary_table(settings, records)
+    widths = summary_column_widths(table_columns, table_records, settings, content_width)
     rows_per_page = summary_rows_per_page(settings)
-    page_records = records[summary_page * rows_per_page:(summary_page + 1) * rows_per_page]
+    page_records = table_records[summary_page * rows_per_page:(summary_page + 1) * rows_per_page]
 
-    if not settings.columns:
+    if not table_columns:
         pdf.setFillColor(HexColor("#333333"))
         pdf.setFont("Helvetica", 10)
         pdf.drawString(side, table_top - 10 * MM, "No columns were selected.")
@@ -981,7 +1023,7 @@ def draw_summary_page(pdf: canvas.Canvas, settings: Settings, records: list[list
         pdf.rect(x, header_y, width, header_height, stroke=1, fill=1)
         draw_summary_cell(
             pdf,
-            settings.columns[index],
+            table_columns[index],
             "Helvetica-Bold",
             SUMMARY_HEADER_FONT_PT,
             x + padding,
@@ -1076,6 +1118,17 @@ def prompt(label: str, default: str = "") -> str:
     return value or default
 
 
+def prompt_yes_no(label: str, default: bool = False) -> bool:
+    shown_default = "y" if default else "n"
+    while True:
+        value = prompt(f"{label} (y/n)", shown_default).strip().lower()
+        if value in {"y", "yes", "1", "true"}:
+            return True
+        if value in {"n", "no", "0", "false"}:
+            return False
+        print("Enter y or n.")
+
+
 def banner() -> None:
     print()
     print(APP_NAME)
@@ -1148,9 +1201,13 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
     section("Columns")
     for index, header in enumerate(headers, start=1):
         marker = " *" if index in default_numbers else ""
-        password_marker = " password font" if index in default_password_numbers else ""
-        truncate_marker = " may truncate" if index in default_truncate_numbers else ""
-        print(f"  {column_letter(index)}. {header}{marker}{password_marker}{truncate_marker}")
+        annotations = []
+        if index in default_password_numbers:
+            annotations.append("password font")
+        if index in default_truncate_numbers:
+            annotations.append("allows truncation")
+        annotation = f" [{', '.join(annotations)}]" if annotations else ""
+        print(f"  {column_letter(index)}. {header}{marker}{annotation}")
     print("Enter letters in the order to print them, for example A,C,D.")
     print("Add * for password_font and - to allow truncation, for example A,B*-,C-.")
 
@@ -1171,12 +1228,13 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
         selected_headers = [headers[number - 1] for number in numbers]
         print("Selected columns, in print order:")
         for number, header in zip(numbers, selected_headers):
-            markers = ""
+            annotations = []
             if number in password_numbers:
-                markers += " password font"
+                annotations.append("password font")
             if number in truncate_numbers:
-                markers += " may truncate"
-            print(f"  {column_letter(number)}. {header}{markers}")
+                annotations.append("allows truncation")
+            annotation = f" [{', '.join(annotations)}]" if annotations else ""
+            print(f"  {column_letter(number)}. {header}{annotation}")
 
         confirmation = prompt("Use these columns? (y/n)", "y").strip().lower()
         if confirmation in {"", "y", "yes"}:
@@ -1278,38 +1336,42 @@ def column_number_from_text(value: str) -> Optional[int]:
 
 def choose_row_filters(headers: list[str], settings: Settings) -> list[dict[str, object]]:
     while True:
-        saved = usable_row_filters(headers, settings.row_filters)
-        selected_numbers = row_filter_selected_numbers(saved, settings.selected_row_filters)
+        saved = usable_row_filter_sets(headers, settings.saved_row_filter_sets)
+        selected_number = selected_row_filter_set_number(saved, settings.selected_row_filters)
 
         section("Rows")
-        print("Select row inclusion/exclusion rule.")
-        print("  0. No row rule")
-        for index, rule in enumerate(saved, start=1):
-            marker = " *" if index in selected_numbers else ""
-            print(f"  {index}. {row_filter_description(rule, headers)}{marker}")
-        print("  n. Create a new rule")
-        print("  c. Choose spreadsheet row numbers manually")
+        print("Choose a saved rule set, create one, or use specific spreadsheet rows.")
+        print("  0. All workbook rows")
+        for index, rule_set in enumerate(saved, start=1):
+            marker = " *" if index == selected_number else ""
+            print(f"  {index}. {row_filter_set_description(rule_set, headers)}{marker}")
+        print("  n. New rule set")
+        print("  r. Specific spreadsheet row numbers")
 
-        value = prompt("Choice", "0").strip().lower()
+        default = str(selected_number or 0)
+        value = prompt("Row choice", default).strip().lower()
         if value == "0":
             settings.selected_row_filters = []
             settings.manual_row_numbers = []
             return []
         if value in {"new", "n"}:
-            create_row_filter(headers, settings)
-            continue
-        if value in {"custom", "c"}:
+            rule_set = create_row_filter_set(headers, settings)
+            remember_row_filter_set(settings, rule_set)
+            settings.selected_row_filters = list(rule_set["rules"])
+            settings.manual_row_numbers = []
+            return settings.selected_row_filters
+        if value in {"rows", "r", "custom", "c"}:
             settings.selected_row_filters = []
             settings.manual_row_numbers = choose_manual_row_numbers()
             return []
 
         if value.isdigit() and 1 <= int(value) <= len(saved):
-            rule = saved[int(value) - 1]
-            settings.selected_row_filters = [rule]
+            rule_set = saved[int(value) - 1]
+            settings.selected_row_filters = list(rule_set["rules"])
             settings.manual_row_numbers = []
-            return [rule]
+            return settings.selected_row_filters
 
-        print("Enter 0, a saved rule number, n, or c.")
+        print("Enter 0, a saved set number, n, or r.")
 
 
 def choose_blank_slips(settings: Settings, row_count: int) -> int:
@@ -1344,19 +1406,22 @@ def choose_blank_slips(settings: Settings, row_count: int) -> int:
         print("Enter 0 or a whole number.")
 
 
-def usable_row_filters(headers: list[str], filters: list[dict[str, object]]) -> list[dict[str, object]]:
+def usable_row_filter_sets(headers: list[str], value: list[dict[str, object]]) -> list[dict[str, object]]:
     return [
-        rule for rule in clean_row_filters(filters)
-        if int(rule["column_number"]) <= len(headers)
+        rule_set for rule_set in clean_row_filter_sets(value)
+        if all(int(rule["column_number"]) <= len(headers) for rule in rule_set["rules"])
     ]
 
 
-def row_filter_selected_numbers(saved: list[dict[str, object]], selected: list[dict[str, object]]) -> set[int]:
-    selected_keys = {rule_key(rule) for rule in clean_row_filters(selected)}
-    return {
-        index for index, rule in enumerate(saved, start=1)
-        if rule_key(rule) in selected_keys
-    }
+def selected_row_filter_set_number(saved: list[dict[str, object]],
+                                   selected: list[dict[str, object]]) -> int:
+    selected_key = tuple(rule_key(rule) for rule in clean_row_filters(selected))
+    if not selected_key:
+        return 0
+    for index, rule_set in enumerate(saved, start=1):
+        if row_filter_set_key(rule_set) == selected_key:
+            return index
+    return 0
 
 
 def choose_manual_row_numbers() -> list[int]:
@@ -1396,46 +1461,65 @@ def row_numbers_from_text(value: str) -> list[int]:
     return numbers
 
 
-def create_row_filter(headers: list[str], settings: Settings) -> dict[str, object]:
-    print("Create a filter like: only rows where B equals BFS.")
-
+def create_row_filter_set(headers: list[str], settings: Settings) -> dict[str, object]:
+    section("New rule set")
+    print("Rules are applied together: every rule must match.")
+    rules = []
     while True:
-        column = prompt("Filter column letter").strip()
+        rule = create_row_rule(headers, settings, len(rules) + 1)
+        rules.append(rule)
+        print(f"  Added: {row_filter_description(rule, headers)}")
+        if not prompt_yes_no("Add another rule", False):
+            break
+
+    default_name = " + ".join(short_rule_description(rule, headers) for rule in rules)
+    if len(default_name) > 60:
+        default_name = default_name[:57] + "..."
+    name = prompt("Save this quick set as", default_name or "My rules").strip()
+    return {"name": name, "rules": rules}
+
+
+def create_row_rule(headers: list[str], settings: Settings, rule_number: int) -> dict[str, object]:
+    print()
+    print(f"Rule {rule_number}")
+    for index, header in enumerate(headers, start=1):
+        print(f"  {column_letter(index)}. {header}")
+    while True:
+        column = prompt("Column letter").strip()
         number = column_number_from_text(column)
         if number is not None and 1 <= number <= len(headers):
             break
         print(f"Enter a column from A to {column_letter(len(headers))}.")
 
+    print("  1. is")
+    print("  2. is not")
+    mode_text = prompt("Comparison", "1").strip().lower()
+    mode = "exclude" if mode_text in {"2", "not", "is not", "exclude"} else "include"
     text = choose_filter_value(settings, number)
-
-    mode_text = prompt("Use matches only, or exclude matches? (only/exclude)", "only").strip().lower()
-    mode = "exclude" if mode_text.startswith("e") else "include"
-    rule = {
+    return {
         "mode": mode,
         "column_number": number,
         "value": text,
     }
-    remember_row_filter(settings, rule)
-    return rule
 
 
 def choose_filter_value(settings: Settings, column_number: int) -> str:
     values = workbook_column_values(settings.workbook, settings.sheet, column_number)
 
     if values:
-        print("Choose a value from that column:")
-        for index, value in enumerate(values, start=1):
+        shown_values = values[:20]
+        print("Choose a value number, or type a value directly:")
+        for index, value in enumerate(shown_values, start=1):
             shown = value if len(value) <= 70 else value[:67] + "..."
             print(f"  {index}. {shown}")
-        print("  custom. Type a different value")
+        if len(values) > len(shown_values):
+            print(f"  ...and {len(values) - len(shown_values)} more; type one directly if needed.")
 
-        while True:
-            choice = prompt("Value", "1").strip()
-            if choice.isdigit() and 1 <= int(choice) <= len(values):
-                return values[int(choice) - 1]
-            if choice.lower() in {"custom", "c"}:
-                break
-            print("Enter a value number, or custom.")
+        choice = prompt("Value", "1").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(shown_values):
+            return shown_values[int(choice) - 1]
+        if choice:
+            return choice
     else:
         print("No existing values found in that column.")
 
@@ -1446,79 +1530,53 @@ def choose_filter_value(settings: Settings, column_number: int) -> str:
         print("Enter the text to match.")
 
 
-def remember_row_filter(settings: Settings, rule: dict[str, object]) -> None:
-    rule = clean_row_filter(rule)
-    if not rule:
+def remember_row_filter_set(settings: Settings, rule_set: dict[str, object]) -> None:
+    cleaned = clean_row_filter_sets([rule_set])
+    if not cleaned:
         return
-
-    filters = [
-        existing for existing in clean_row_filters(settings.row_filters)
-        if rule_key(existing) != rule_key(rule)
+    new_set = cleaned[0]
+    saved = [
+        existing for existing in clean_row_filter_sets(settings.saved_row_filter_sets)
+        if row_filter_set_key(existing) != row_filter_set_key(new_set)
     ]
-    filters.insert(0, rule)
-    settings.row_filters = filters[:20]
+    saved.insert(0, new_set)
+    settings.saved_row_filter_sets = saved[:20]
 
 
 def row_filter_description(rule: dict[str, object], headers: list[str]) -> str:
     rule = clean_row_filter(rule)
     number = int(rule["column_number"])
     header = headers[number - 1] if 1 <= number <= len(headers) else f"Column {column_letter(number)}"
-    action = "Only rows where" if rule["mode"] == "include" else "Exclude rows where"
+    action = "is" if rule["mode"] == "include" else "is not"
     value = str(rule["value"])
-    return f'{action} {column_letter(number)} ({header}) = "{value}"'
+    return f'{column_letter(number)} ({header}) {action} "{value}"'
 
 
-def choose_output_folder(default: str) -> str:
-    section("Output")
-    while True:
-        folder = Path(clean_path(prompt("Output folder", default or str(downloads_folder())))).expanduser()
-        if folder.exists() and not folder.is_dir():
-            print("Output folder must be a folder, not a file.")
-            continue
-        return str(folder)
+def short_rule_description(rule: dict[str, object], headers: list[str]) -> str:
+    rule = clean_row_filter(rule)
+    number = int(rule["column_number"])
+    header = headers[number - 1] if 1 <= number <= len(headers) else column_letter(number)
+    comparison = "=" if rule["mode"] == "include" else "≠"
+    return f'{header} {comparison} {rule["value"]}'
 
 
-def choose_action(settings: Settings) -> str:
-    section("Finish")
-    print("The PDF will be exported to the output folder.")
-    print("1. Save the PDF only")
-    print("2. Save the PDF and open an email draft with it attached")
-    default = "2" if settings.email_pdf else "1"
-    action = prompt("Choose action (1/2)", default).strip().lower()
-    if action in {"", "1", "e", "export", "save"}:
-        settings.email_pdf = False
-        return "export"
-    if action in {"2", "m", "mail", "email"}:
-        if not settings.email_address:
-            print("Email is unavailable because PASSWORD_SLIPS_EMAIL_ADDRESS is not set in .env.")
-            print("Saving the PDF only this time.")
-            settings.email_pdf = False
-            return "export"
-        settings.email_pdf = True
-        return "email"
-    print("Saving the PDF only. Choose 1 or 2 next time.")
-    settings.email_pdf = False
-    return "export"
+def row_filter_set_description(rule_set: dict[str, object], headers: list[str]) -> str:
+    cleaned = clean_row_filter_sets([rule_set])
+    if not cleaned:
+        return "Invalid rule set"
+    rule_set = cleaned[0]
+    name = str(rule_set.get("name", "")).strip()
+    rules = " AND ".join(
+        row_filter_description(rule, headers) for rule in rule_set["rules"]
+    )
+    return f"{name}: {rules}" if name else rules
 
 
-def choose_summary_page(settings: Settings, row_count: int) -> bool:
-    section("Summary page")
-    print("Add a compact staff-reference page after the password slips?")
-    print("It will list the selected workbook rows in a simple table.")
-    print("Automatic and extra blank slips are not included in the summary.")
-    if row_count:
-        print(f"The summary will contain {row_count} {plural(row_count, 'row')}.")
-    else:
-        print("There are no selected workbook rows to list.")
-
-    default = "y" if settings.include_summary_page else "n"
-    while True:
-        value = prompt("Add summary page? (y/n)", default).strip().lower()
-        if value in {"y", "yes", "on", "1"}:
-            return True
-        if value in {"", "n", "no", "off", "0"}:
-            return False
-        print("Enter y or n.")
+def choose_email_draft(settings: Settings) -> bool:
+    section("Email")
+    print(f"Create a draft email to {settings.email_address}?")
+    print("The PDF has been exported and can be attached from the path shown above.")
+    return prompt_yes_no("Open draft", settings.email_draft)
 
 
 def preview_records(columns: list[str], records: list[list[str]]) -> None:
@@ -1614,12 +1672,6 @@ def run_cli() -> None:
     if not records:
         raise ValueError("No slips to generate. Choose matching rows or add blank slips.")
 
-    settings.output_folder = choose_output_folder(settings.output_folder)
-    action = choose_action(settings)
-
-    settings.include_summary_page = choose_summary_page(settings, len(workbook_rows))
-    print_summary(settings, len(workbook_rows), len(records))
-
     if not Path(settings.workbook).is_file():
         raise ValueError("Choose an Excel workbook.")
     if not settings.columns:
@@ -1632,21 +1684,21 @@ def run_cli() -> None:
     print()
     print("Done")
     print(f"  Created {count} slips across {pages} {plural(pages, 'page')}.")
-    if settings.include_summary_page:
-        print("  The final page(s) contain the compact summary.")
+    print("  The final page(s) contain the compact summary.")
     print(f"  PDF: {pdf}")
 
-    if action == "email":
-        opened, attached = open_email_draft(pdf, settings.email_address)
-        if attached:
-            print(f"  Opened an email draft addressed to {settings.email_address}.")
-            print(f"  Subject: {pdf.name}")
-            print("  The generated PDF is attached.")
-        elif opened:
-            print(f"  Opened the default mail app for {settings.email_address}.")
-            print("  Add the generated PDF manually; automatic attachment was unavailable.")
+    if settings.email_address:
+        settings.email_draft = choose_email_draft(settings)
+        save_settings(settings)
+        if settings.email_draft:
+            subject = email_subject(settings)
+            if open_email_draft(settings.email_address, subject):
+                print(f"  Opened a draft addressed to {settings.email_address}.")
+                print(f"  Subject: {subject}")
+            else:
+                print("  Could not open the default mail app.")
         else:
-            print("  Could not open the default mail app. The PDF is ready to attach manually.")
+            print("  Email draft skipped.")
 
 
 def main() -> None:

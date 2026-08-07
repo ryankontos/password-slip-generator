@@ -94,6 +94,20 @@ def migrated_row_filters(value: Any) -> list[dict[str, Any]]:
     return migrated
 
 
+def migrated_row_filter_sets(value: Any) -> list[dict[str, Any]]:
+    migrated = []
+    for index, item in enumerate(value if isinstance(value, list) else [], start=1):
+        if not isinstance(item, dict):
+            continue
+        rules = migrated_row_filters(item.get("rules", []))
+        if rules:
+            migrated.append({
+                "name": str(item.get("name", "")).strip() or f"Saved rule {index}",
+                "rules": rules,
+            })
+    return migrated
+
+
 def read_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}
@@ -121,7 +135,6 @@ def settings_updates(settings: dict[str, Any], layout: dict[str, Any]) -> dict[s
         "output_folder": "PASSWORD_SLIPS_OUTPUT_FOLDER",
         "workbook_extensions": "PASSWORD_SLIPS_WORKBOOK_EXTENSIONS",
         "blank_slips": "PASSWORD_SLIPS_BLANK_SLIPS",
-        "email_pdf": "PASSWORD_SLIPS_EMAIL_PDF",
     }
     for old_key, env_key in direct_fields.items():
         if old_key in settings:
@@ -137,17 +150,21 @@ def settings_updates(settings: dict[str, Any], layout: dict[str, Any]) -> dict[s
         if found:
             updates[env_key] = column_letters(value)
 
-    rule_fields = (
-        ("row_filters", "PASSWORD_SLIPS_ROW_FILTERS"),
-        ("selected_row_filters", "PASSWORD_SLIPS_SELECTED_ROW_FILTERS"),
-    )
-    for old_key, env_key in rule_fields:
-        if old_key in settings:
-            updates[env_key] = migrated_row_filters(settings[old_key])
+    if "saved_row_filter_sets" in settings:
+        updates["PASSWORD_SLIPS_SAVED_ROW_FILTER_SETS"] = migrated_row_filter_sets(
+            settings["saved_row_filter_sets"]
+        )
+    elif "row_filters" in settings:
+        legacy_rules = migrated_row_filters(settings["row_filters"])
+        updates["PASSWORD_SLIPS_SAVED_ROW_FILTER_SETS"] = [
+            {"name": f"Saved rule {index}", "rules": [rule]}
+            for index, rule in enumerate(legacy_rules, start=1)
+        ]
 
-    found, value = value_from(settings, "include_summary_page", "summary_page")
-    if found:
-        updates["PASSWORD_SLIPS_INCLUDE_SUMMARY_PAGE"] = value
+    if "selected_row_filters" in settings:
+        updates["PASSWORD_SLIPS_SELECTED_ROW_FILTERS"] = migrated_row_filters(
+            settings["selected_row_filters"]
+        )
 
     if "email_address" in settings:
         updates["PASSWORD_SLIPS_EMAIL_ADDRESS"] = settings["email_address"]
