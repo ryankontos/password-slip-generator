@@ -12,6 +12,7 @@ from src.password_slips import (
     apply_env_settings,
     automatic_blank_slips,
     choose_columns,
+    clean_path,
     configured_email_address,
     configured_extra_summary_columns,
     email_subject,
@@ -173,6 +174,21 @@ class PasswordSlipGenerationTests(unittest.TestCase):
         self.assertEqual(command[0], "open")
         self.assertTrue(command[1].startswith("mailto:staff@example.com?subject="))
         self.assertNotIn("attachment", command[1].lower())
+
+    def test_email_draft_uses_windows_default_mail_app(self):
+        with patch("src.password_slips.sys.platform", "win32"), patch(
+            "src.password_slips.os.startfile", create=True
+        ) as startfile:
+            opened = open_email_draft("staff@example.com", "Password slips")
+
+        self.assertTrue(opened)
+        self.assertTrue(startfile.call_args.args[0].startswith("mailto:staff@example.com?subject="))
+
+    def test_windows_paths_keep_their_backslashes(self):
+        with patch("src.password_slips.sys.platform", "win32"):
+            path = clean_path(r'"C:\Users\Ryan\Downloads\staff slips.xlsx"')
+
+        self.assertEqual(path, r"C:\Users\Ryan\Downloads\staff slips.xlsx")
 
     def test_email_subject_has_sheet_and_current_date_time(self):
         subject = email_subject(

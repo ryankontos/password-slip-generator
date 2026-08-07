@@ -933,10 +933,20 @@ def open_email_draft(email_address: str, subject: str) -> bool:
         return False
     mailto = f"mailto:{quote(email_address, safe='@')}?subject={quote(subject)}"
     try:
-        subprocess.run(["open", mailto], check=True)
+        open_default_application(mailto)
         return True
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def open_default_application(target: str) -> None:
+    """Open a URL or file with the operating system's default application."""
+    if sys.platform.startswith("win"):
+        os.startfile(target)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.run(["open", target], check=True)
+    else:
+        subprocess.run(["xdg-open", target], check=True)
 
 
 def email_subject(settings: Settings, generated_at: Optional[datetime] = None) -> str:
@@ -1145,8 +1155,8 @@ def section(title: str) -> None:
 
 def clean_path(value: str) -> str:
     try:
-        parts = shlex.split(value)
-        return parts[0] if len(parts) == 1 else value
+        parts = shlex.split(value, posix=not sys.platform.startswith("win"))
+        return parts[0].strip("'\"") if len(parts) == 1 else value
     except ValueError:
         return value.strip("'\"")
 
