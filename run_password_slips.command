@@ -53,7 +53,7 @@ if ! is_compatible_python .venv/bin/python; then
   "$PYTHON" -m venv .venv
 fi
 
-if ! .venv/bin/python -c 'import openpyxl, reportlab' >/dev/null 2>&1; then
+if ! .venv/bin/python -c 'import dotenv, openpyxl, reportlab' >/dev/null 2>&1; then
   .venv/bin/python -m pip install -r requirements.txt
 fi
 exec .venv/bin/python src/password_slips.py

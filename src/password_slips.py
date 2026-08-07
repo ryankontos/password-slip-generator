@@ -5,16 +5,18 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import shlex
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
+from dotenv import load_dotenv
 from openpyxl import load_workbook
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
@@ -31,6 +33,16 @@ SETTINGS_DIR = ROOT_DIR / "settings"
 LAYOUT_FILE = SETTINGS_DIR / "layout_settings.json"
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 MM = 72 / 25.4
+ENV_FILE = ROOT_DIR / ".env"
+
+load_dotenv(ENV_FILE)
+
+SUMMARY_TITLE_HEIGHT_MM = 15.0
+SUMMARY_HEADER_HEIGHT_MM = 7.0
+SUMMARY_ROW_HEIGHT_MM = 6.5
+SUMMARY_CELL_PADDING_MM = 1.2
+SUMMARY_HEADER_FONT_PT = 8.5
+SUMMARY_DATA_FONT_PT = 8.0
 
 
 @dataclass
@@ -45,6 +57,9 @@ class Settings:
     selected_row_filters: list[dict[str, object]] = field(default_factory=list)
     manual_row_numbers: list[int] = field(default_factory=list)
     blank_slips: int = 0
+    include_summary_page: bool = False
+    email_pdf: bool = False
+    email_address: str = ""
     output_folder: str = ""
     input_folder: str = ""
     workbook_extensions: list[str] = field(default_factory=lambda: [".xlsx", ".xlsm"])
@@ -136,6 +151,12 @@ def apply_saved_app_settings(settings: Settings) -> None:
     settings.row_filters = clean_row_filters(data.get("row_filters", []))
     settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
     settings.blank_slips = clean_whole_number(data.get("blank_slips", 0), 0)
+    settings.include_summary_page = clean_bool(
+        data.get("include_summary_page", data.get("summary_page", False)),
+        False,
+    )
+    settings.email_pdf = clean_bool(data.get("email_pdf", False), False)
+    settings.email_address = configured_email_address()
 
 
 def apply_saved_layout(settings: Settings) -> None:
@@ -190,6 +211,8 @@ def save_app_settings(settings: Settings) -> None:
         "row_filters": settings.row_filters,
         "selected_row_filters": settings.selected_row_filters,
         "blank_slips": settings.blank_slips,
+        "include_summary_page": settings.include_summary_page,
+        "email_pdf": settings.email_pdf,
     }
     SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -221,6 +244,26 @@ def clean_whole_number(value, default: int = 0) -> int:
     return max(0, number)
 
 
+def clean_bool(value, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value in {"true", "yes", "1", "y", "on"}:
+            return True
+        if value in {"false", "no", "0", "n", "off"}:
+            return False
+    return default
+
+
+def configured_email_address() -> str:
+    for key in ("PASSWORD_SLIPS_EMAIL_ADDRESS", "EMAIL_ADDRESS"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
 def app_settings_help() -> dict[str, str]:
     return {
         "input_folder": "Folder searched for the latest Excel workbook when you press Enter at the file prompt.",
@@ -231,7 +274,9 @@ def app_settings_help() -> dict[str, str]:
         "truncate_column_numbers": "Selected columns that may truncate instead of shrinking text. Add - after a column letter when choosing columns.",
         "row_filters": "Saved row filters. Each one matches or excludes rows where one column equals one text value.",
         "selected_row_filters": "Row filters selected on the last run. These are marked with a star next time.",
-        "blank_slips": "Extra blank slips to add after the workbook rows. Press Enter at the prompt to reuse this number.",
+        "blank_slips": "Extra blank slips to add after the automatically filled last slip page. Press Enter at the prompt to reuse this number.",
+        "include_summary_page": "Whether to offer a compact staff-reference summary page at the finish step.",
+        "email_pdf": "Whether to offer email delivery as the default finish action.",
     }
 
 
@@ -545,24 +590,91 @@ def output_path(settings: Settings) -> Path:
     return Path(settings.output_folder or downloads_folder()).expanduser() / f"{name} - password slips.pdf"
 
 
-def selected_records(settings: Settings) -> list[list[str]]:
-    records = workbook_records(
+def selected_data_records(settings: Settings) -> list[list[str]]:
+    return workbook_records(
         settings.workbook,
         settings.sheet,
         settings.columns,
         settings.selected_row_filters,
         settings.manual_row_numbers,
     )
-    records.extend(blank_records(settings))
-    return records
 
 
-def blank_records(settings: Settings) -> list[list[str]]:
-    return [[""] * len(settings.columns) for _ in range(clean_whole_number(settings.blank_slips, 0))]
+def automatic_blank_slips(row_count: int, per_page: int) -> int:
+    """Return the blank slips needed to finish the last non-empty slip page."""
+    if row_count <= 0 or per_page <= 0:
+        return 0
+    return (-row_count) % per_page
 
 
-def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, int]:
-    records = selected_records(settings)
+def blank_records(settings: Settings, count: Optional[int] = None) -> list[list[str]]:
+    if count is None:
+        count = clean_whole_number(settings.blank_slips, 0)
+    return [[""] * len(settings.columns) for _ in range(clean_whole_number(count, 0))]
+
+
+def generated_records(settings: Settings, data_records: Optional[list[list[str]]] = None) -> list[list[str]]:
+    data_records = selected_data_records(settings) if data_records is None else data_records
+    per_page = slips_per_page(settings)
+    automatic_blanks = automatic_blank_slips(len(data_records), per_page)
+    return (
+        list(data_records)
+        + blank_records(settings, automatic_blanks)
+        + blank_records(settings, settings.blank_slips)
+    )
+
+
+def selected_records(settings: Settings) -> list[list[str]]:
+    return generated_records(settings)
+
+
+def summary_rows_per_page(settings: Settings) -> int:
+    reserved_height = (
+        SUMMARY_TITLE_HEIGHT_MM
+        + SUMMARY_HEADER_HEIGHT_MM
+        + settings.bottom_margin_mm
+        + 2.0
+    )
+    usable_height = 297 - settings.top_margin_mm - reserved_height
+    return max(1, int(usable_height // SUMMARY_ROW_HEIGHT_MM))
+
+
+def summary_page_count(settings: Settings, row_count: int) -> int:
+    if not settings.include_summary_page:
+        return 0
+    if row_count <= 0:
+        return 1
+    return math.ceil(row_count / summary_rows_per_page(settings))
+
+
+def summary_column_widths(columns: list[str], records: list[list[str]], settings: Settings,
+                          available_width: float) -> list[float]:
+    if not columns:
+        return []
+    if len(columns) == 1:
+        return [available_width]
+
+    scores = []
+    for index, column in enumerate(columns):
+        score = stringWidth(column, "Helvetica-Bold", SUMMARY_HEADER_FONT_PT)
+        for record in records:
+            value = record[index] if index < len(record) else ""
+            score = max(score, stringWidth(value, "Helvetica", SUMMARY_DATA_FONT_PT))
+        scores.append(max(1, score))
+
+    even_width = available_width / len(columns)
+    text_total = sum(scores)
+    text_widths = [available_width * score / text_total for score in scores]
+    widths = [even_width * 0.35 + text_width * 0.65 for text_width in text_widths]
+    minimum = min(even_width, available_width * 0.05)
+    maximum = max(minimum, available_width * 0.45)
+    return fit_widths(widths, minimum, maximum, available_width)
+
+
+def make_pdf(settings: Settings, output: Optional[Path] = None,
+             data_records: Optional[list[list[str]]] = None) -> tuple[int, int]:
+    data_records = selected_data_records(settings) if data_records is None else data_records
+    records = generated_records(settings, data_records)
     if not records:
         raise ValueError("No slips to generate.")
 
@@ -584,11 +696,13 @@ def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, in
     output = output or output_path(settings)
     output.parent.mkdir(parents=True, exist_ok=True)
     pdf = canvas.Canvas(str(output), pagesize=A4, pageCompression=1)
-    pdf.setTitle(APP_NAME)
+    pdf.setTitle(f"{settings.sheet or APP_NAME} - password slips")
 
-    pages = page_count(settings, len(records))
+    slip_pages = page_count(settings, len(records))
+    summary_pages = summary_page_count(settings, len(data_records))
+    pages = slip_pages + summary_pages
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-    for page in range(pages):
+    for page in range(slip_pages):
         draw_cut_ticks(pdf, settings, page_width, page_height, per_page)
         draw_footer(pdf, settings, page + 1, pages, generated_at, page_width)
         page_records = records[page * per_page:(page + 1) * per_page]
@@ -597,46 +711,87 @@ def make_pdf(settings: Settings, output: Optional[Path] = None) -> tuple[int, in
             draw_slip(pdf, settings, record, widths, side, page_height - top - slot * slip_height, content_width)
         pdf.showPage()
 
+    for summary_page in range(summary_pages):
+        draw_summary_page(
+            pdf,
+            settings,
+            data_records,
+            summary_page,
+            slip_pages + summary_page + 1,
+            pages,
+            generated_at,
+            page_width,
+            page_height,
+        )
+        pdf.showPage()
+
     pdf.save()
     if not output.is_file():
         raise ValueError(f"Could not create PDF at {output}")
     return len(records), pages
 
 
-def open_print_dialog(pdf: Path) -> bool:
-    if not pdf.is_file():
-        return False
+def open_email_draft(pdf: Path, email_address: str) -> tuple[bool, bool]:
+    """Open a draft with the PDF attached when the macOS mail app supports it.
+
+    Returns a pair: (opened, attached). The default-mail fallback can open a
+    draft but cannot reliably add an attachment through a mailto URL.
+    """
+    if not pdf.is_file() or not email_address.strip():
+        return False, False
 
     script = '''
 on run argv
-    tell application "Preview"
-        activate
-        open POSIX file (item 1 of argv)
-        delay 0.5
-        print front document with print dialog
-    end tell
+    set pdfPath to item 1 of argv
+    set recipientAddress to item 2 of argv
+    set subjectLine to item 3 of argv
+
+    try
+        tell application "Microsoft Outlook"
+            activate
+            set newMessage to make new outgoing message with properties {subject:subjectLine, content:""}
+            make new recipient at newMessage with properties {email address:{address:recipientAddress}}
+            make new attachment at newMessage with properties {file name:(POSIX file pdfPath)}
+            open newMessage
+            return "outlook"
+        end tell
+    end try
+
+    try
+        tell application "Mail"
+            activate
+            set newMessage to make new outgoing message with properties {subject:subjectLine, content:""}
+            tell newMessage
+                make new to recipient at end of to recipients with properties {address:recipientAddress}
+                make new attachment with properties {file name:(POSIX file pdfPath)} at after the last paragraph
+            end tell
+            open newMessage
+            return "mail"
+        end tell
+    end try
+
+    return "default"
 end run
 '''
     try:
-        subprocess.run(["osascript", "-e", script, str(pdf)], check=True)
-        return True
-    except Exception:
-        subprocess.run(["open", str(pdf)], check=False)
-        return False
+        result = subprocess.run(
+            ["osascript", "-e", script, str(pdf), email_address, pdf.name],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        mail_app = result.stdout.strip().lower()
+        if mail_app in {"outlook", "mail"}:
+            return True, True
+    except (OSError, subprocess.SubprocessError):
+        pass
 
-
-def open_in_preview(pdf: Path) -> bool:
-    if not pdf.is_file():
-        return False
-    return subprocess.run(["open", "-a", "Preview", str(pdf)], check=False).returncode == 0
-
-
-def temporary_pdf_path(settings: Settings) -> Path:
-    workbook = Path(settings.workbook)
-    name = workbook.stem if workbook.name else "password-slips"
-    handle = tempfile.NamedTemporaryFile(prefix=f"{name}-", suffix=".pdf", delete=False)
-    handle.close()
-    return Path(handle.name)
+    mailto = f"mailto:{quote(email_address, safe='@')}?subject={quote(pdf.name)}"
+    try:
+        subprocess.run(["open", mailto], check=True)
+        return True, False
+    except (OSError, subprocess.SubprocessError):
+        return False, False
 
 
 def draw_cut_ticks(pdf: canvas.Canvas, settings: Settings, page_width: float, page_height: float, per_page: int) -> None:
@@ -675,6 +830,92 @@ def draw_footer(pdf: canvas.Canvas, settings: Settings, page_number: int, page_t
     pdf.setFillColor(HexColor(settings.footer_color))
     pdf.setFont("Helvetica", size)
     pdf.drawCentredString(page_width / 2, y, short_text(text, "Helvetica", size, available_width))
+
+
+def draw_summary_page(pdf: canvas.Canvas, settings: Settings, records: list[list[str]],
+                      summary_page: int, page_number: int, page_total: int,
+                      generated_at: str, page_width: float, page_height: float) -> None:
+    side = settings.side_margin_mm * MM
+    content_width = page_width - side * 2
+    top = page_height - settings.top_margin_mm * MM
+    title = f"{settings.sheet or 'Workbook'} - Summary"
+
+    pdf.setFillColor(HexColor("#111111"))
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(side, top - 7 * MM, short_text(title, "Helvetica-Bold", 16, content_width))
+    pdf.setFillColor(HexColor("#555555"))
+    pdf.setFont("Helvetica", 9)
+    pdf.drawString(side, top - 12 * MM, f"Generated: {generated_at}")
+
+    table_top = top - SUMMARY_TITLE_HEIGHT_MM * MM
+    header_height = SUMMARY_HEADER_HEIGHT_MM * MM
+    row_height = SUMMARY_ROW_HEIGHT_MM * MM
+    padding = SUMMARY_CELL_PADDING_MM * MM
+    widths = summary_column_widths(settings.columns, records, settings, content_width)
+    rows_per_page = summary_rows_per_page(settings)
+    page_records = records[summary_page * rows_per_page:(summary_page + 1) * rows_per_page]
+
+    if not settings.columns:
+        pdf.setFillColor(HexColor("#333333"))
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(side, table_top - 10 * MM, "No columns were selected.")
+        draw_footer(pdf, settings, page_number, page_total, generated_at, page_width)
+        return
+
+    header_y = table_top - header_height
+    x = side
+    pdf.setStrokeColor(HexColor("#B8B8B8"))
+    pdf.setLineWidth(0.45)
+    for index, width in enumerate(widths):
+        pdf.setFillColor(HexColor("#E9EDF1"))
+        pdf.rect(x, header_y, width, header_height, stroke=1, fill=1)
+        draw_summary_cell(
+            pdf,
+            settings.columns[index],
+            "Helvetica-Bold",
+            SUMMARY_HEADER_FONT_PT,
+            x + padding,
+            header_y,
+            max(1, width - padding * 2),
+            header_height,
+        )
+        x += width
+
+    if not page_records:
+        pdf.setFillColor(HexColor("#333333"))
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(side + padding, header_y - 10 * MM, "No workbook rows were selected.")
+    else:
+        for row_index, record in enumerate(page_records):
+            row_y = header_y - (row_index + 1) * row_height
+            x = side
+            for column_index, width in enumerate(widths):
+                value = record[column_index] if column_index < len(record) else ""
+                pdf.setFillColor(HexColor("#FFFFFF" if row_index % 2 == 0 else "#F7F7F7"))
+                pdf.rect(x, row_y, width, row_height, stroke=1, fill=1)
+                draw_summary_cell(
+                    pdf,
+                    value,
+                    "Helvetica",
+                    SUMMARY_DATA_FONT_PT,
+                    x + padding,
+                    row_y,
+                    max(1, width - padding * 2),
+                    row_height,
+                )
+                x += width
+
+    draw_footer(pdf, settings, page_number, page_total, generated_at, page_width)
+
+
+def draw_summary_cell(pdf: canvas.Canvas, text: str, font: str, maximum: float,
+                      x: float, y: float, width: float, height: float) -> None:
+    text = str(text)
+    size = shrink_to_fit(text, font, maximum, 4.5, width, height)
+    pdf.setFillColor(HexColor("#111111"))
+    pdf.setFont(font, size)
+    pdf.drawString(x, y + (height - size) / 2 + size * 0.18,
+                   short_text(text, font, size, width))
 
 
 def draw_slip(pdf: canvas.Canvas, settings: Settings, record: list[str], widths: list[float],
@@ -808,13 +1049,30 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
         value = prompt("Column letters", default)
         if value.strip().lower() == "all":
             numbers = list(range(1, len(headers) + 1))
-            return list(headers), numbers, [], []
+            password_numbers = []
+            truncate_numbers = []
+        else:
+            numbers, password_numbers, truncate_numbers = column_numbers_from_text(value, headers)
 
-        numbers, password_numbers, truncate_numbers = column_numbers_from_text(value, headers)
-        if numbers:
-            return [headers[number - 1] for number in numbers], numbers, password_numbers, truncate_numbers
+        if not numbers:
+            print("Enter at least one valid column letter.")
+            continue
 
-        print("Enter at least one valid column letter.")
+        selected_headers = [headers[number - 1] for number in numbers]
+        print("Selected columns, in print order:")
+        for number, header in zip(numbers, selected_headers):
+            markers = ""
+            if number in password_numbers:
+                markers += " password font"
+            if number in truncate_numbers:
+                markers += " may truncate"
+            print(f"  {column_letter(number)}. {header}{markers}")
+
+        confirmation = prompt("Use these columns? (y/n)", "y").strip().lower()
+        if confirmation in {"", "y", "yes"}:
+            return selected_headers, numbers, password_numbers, truncate_numbers
+        if confirmation not in {"n", "no"}:
+            print("Enter y to confirm or n to choose again.")
 
 
 def remembered_column_numbers(headers: list[str], settings: Settings) -> list[int]:
@@ -944,7 +1202,24 @@ def choose_row_filters(headers: list[str], settings: Settings) -> list[dict[str,
         print("Enter 0, a saved rule number, n, or c.")
 
 
-def choose_blank_slips(settings: Settings) -> int:
+def choose_blank_slips(settings: Settings, row_count: int) -> int:
+    per_page = slips_per_page(settings)
+    automatic_blanks = automatic_blank_slips(row_count, per_page)
+    section("Blank slips")
+    if row_count:
+        print(
+            f"There will be {automatic_blanks} blank "
+            f"{plural(automatic_blanks, 'slip')} on the last page."
+        )
+        if automatic_blanks:
+            print("These blanks will automatically finish the last password-slip page.")
+        else:
+            print("The selected rows already fill the last password-slip page.")
+    else:
+        print("No workbook rows matched the current selection.")
+        print("Extra blank slips can still be generated if you need them.")
+    print("How many extra slips do you want? Extra slips will add page(s).")
+
     while True:
         value = prompt("Extra blank slips", str(settings.blank_slips)).strip()
         if value == "":
@@ -1093,18 +1368,47 @@ def choose_output_folder(default: str) -> str:
         return str(folder)
 
 
-def choose_action() -> str:
+def choose_action(settings: Settings) -> str:
     section("Finish")
-    print("o = open in Preview, e = export PDF, p = print")
-    action = prompt("Action", "open").strip().lower()
-    if action in {"", "o", "open"}:
-        return "open"
-    if action in {"e", "export"}:
+    print("The PDF will be exported to the output folder.")
+    print("1. Save the PDF only")
+    print("2. Save the PDF and open an email draft with it attached")
+    default = "2" if settings.email_pdf else "1"
+    action = prompt("Choose action (1/2)", default).strip().lower()
+    if action in {"", "1", "e", "export", "save"}:
+        settings.email_pdf = False
         return "export"
-    if action in {"p", "print"}:
-        return "print"
-    print("Using open. Next time enter o, e, or p.")
-    return "open"
+    if action in {"2", "m", "mail", "email"}:
+        if not settings.email_address:
+            print("Email is unavailable because PASSWORD_SLIPS_EMAIL_ADDRESS is not set in .env.")
+            print("Saving the PDF only this time.")
+            settings.email_pdf = False
+            return "export"
+        settings.email_pdf = True
+        return "email"
+    print("Saving the PDF only. Choose 1 or 2 next time.")
+    settings.email_pdf = False
+    return "export"
+
+
+def choose_summary_page(settings: Settings, row_count: int) -> bool:
+    section("Summary page")
+    print("Add a compact staff-reference page after the password slips?")
+    print("It will list the selected workbook rows in a simple table.")
+    print("Automatic and extra blank slips are not included in the summary.")
+    if row_count:
+        print(f"The summary will contain {row_count} {plural(row_count, 'row')}.")
+    else:
+        print("There are no selected workbook rows to list.")
+
+    default = "y" if settings.include_summary_page else "n"
+    while True:
+        value = prompt("Add summary page? (y/n)", default).strip().lower()
+        if value in {"y", "yes", "on", "1"}:
+            return True
+        if value in {"", "n", "no", "off", "0"}:
+            return False
+        print("Enter y or n.")
 
 
 def preview_records(columns: list[str], records: list[list[str]]) -> None:
@@ -1122,16 +1426,33 @@ def preview_records(columns: list[str], records: list[list[str]]) -> None:
         print(f"  ...and {len(records) - 3} more")
 
 
-def preview_blank_slips(count: int) -> None:
-    if count:
-        print(f"  Plus {count} blank {plural(count, 'slip')}.")
+def preview_blank_slips(automatic_count: int, extra_count: int) -> None:
+    if automatic_count:
+        print(
+            f"  Plus {automatic_count} automatic blank "
+            f"{plural(automatic_count, 'slip')} to finish the last page."
+        )
+    if extra_count:
+        print(f"  Plus {extra_count} extra blank {plural(extra_count, 'slip')} on new page(s).")
 
 
-def print_summary(settings: Settings, slip_count: int) -> None:
+def print_summary(settings: Settings, row_count: int, slip_count: int) -> None:
     per_page = slips_per_page(settings)
-    pages = page_count(settings, slip_count)
+    automatic_blanks = automatic_blank_slips(row_count, per_page)
+    slip_pages = page_count(settings, slip_count)
+    summary_pages = summary_page_count(settings, row_count)
     print()
-    print(f"Ready: {slip_count} slips, {pages} {plural(pages, 'page')}, {per_page} slips per page.")
+    print(f"Ready: {row_count} workbook {plural(row_count, 'row')}.")
+    print(
+        f"  Password slips: {slip_count} slips across "
+        f"{slip_pages} {plural(slip_pages, 'page')} ({per_page} per page)."
+    )
+    if automatic_blanks:
+        print(f"  Automatic blanks: {automatic_blanks} to finish the last slip page.")
+    if settings.blank_slips:
+        print(f"  Extra blanks: {settings.blank_slips} on new page(s).")
+    if summary_pages:
+        print(f"  Summary: {summary_pages} compact {plural(summary_pages, 'page')}.")
 
 
 def plural(count: int, singular: str) -> str:
@@ -1162,7 +1483,6 @@ def run_cli() -> None:
         settings.truncate_column_numbers,
     ) = choose_columns(headers, settings)
     settings.selected_row_filters = choose_row_filters(headers, settings)
-    settings.blank_slips = choose_blank_slips(settings)
 
     workbook_rows = workbook_records(
         settings.workbook,
@@ -1171,16 +1491,24 @@ def run_cli() -> None:
         settings.selected_row_filters,
         settings.manual_row_numbers,
     )
-    records = workbook_rows + blank_records(settings)
+    per_page = slips_per_page(settings)
+    if per_page < 1:
+        raise ValueError("The slip height and margins do not fit on A4.")
+
+    settings.blank_slips = choose_blank_slips(settings, len(workbook_rows))
+    automatic_blanks = automatic_blank_slips(len(workbook_rows), per_page)
+    records = generated_records(settings, workbook_rows)
     preview_records(settings.columns, workbook_rows)
-    preview_blank_slips(settings.blank_slips)
-    print_summary(settings, len(records))
+    preview_blank_slips(automatic_blanks, settings.blank_slips)
+    print_summary(settings, len(workbook_rows), len(records))
     if not records:
         raise ValueError("No slips to generate. Choose matching rows or add blank slips.")
 
-    action = choose_action()
-    if action in {"export", "print"}:
-        settings.output_folder = choose_output_folder(settings.output_folder)
+    settings.output_folder = choose_output_folder(settings.output_folder)
+    action = choose_action(settings)
+
+    settings.include_summary_page = choose_summary_page(settings, len(workbook_rows))
+    print_summary(settings, len(workbook_rows), len(records))
 
     if not Path(settings.workbook).is_file():
         raise ValueError("Choose an Excel workbook.")
@@ -1188,29 +1516,27 @@ def run_cli() -> None:
         raise ValueError("Choose at least one column.")
 
     save_settings(settings)
-    if action == "open":
-        pdf = temporary_pdf_path(settings)
-        count, pages = make_pdf(settings, pdf)
-        opened = open_in_preview(pdf)
-    else:
-        count, pages = make_pdf(settings)
-        pdf = output_path(settings)
-        opened = False
+    count, pages = make_pdf(settings, data_records=workbook_rows)
+    pdf = output_path(settings)
 
     print()
     print("Done")
     print(f"  Created {count} slips across {pages} {plural(pages, 'page')}.")
+    if settings.include_summary_page:
+        print("  The final page(s) contain the compact summary.")
+    print(f"  PDF: {pdf}")
 
-    if action == "open":
-        print("  Opened in Preview." if opened else f"  Temporary PDF: {pdf}")
-    else:
-        print(f"  PDF: {pdf}")
-
-    if action == "print":
-        if open_print_dialog(pdf):
-            print("Opened the macOS print dialog.")
+    if action == "email":
+        opened, attached = open_email_draft(pdf, settings.email_address)
+        if attached:
+            print(f"  Opened an email draft addressed to {settings.email_address}.")
+            print(f"  Subject: {pdf.name}")
+            print("  The generated PDF is attached.")
+        elif opened:
+            print(f"  Opened the default mail app for {settings.email_address}.")
+            print("  Add the generated PDF manually; automatic attachment was unavailable.")
         else:
-            print("Opened the PDF. Use File > Print if the print dialog did not appear.")
+            print("  Could not open the default mail app. The PDF is ready to attach manually.")
 
 
 def main() -> None:
