@@ -15,7 +15,7 @@ Row selection is optional. Choose all rows, a saved quick rule set, create a new
 
 After row selection, the script reports the blanks needed to finish the last slip page and asks only for any additional blank slips. The PDF is then written automatically to Downloads. Set `PASSWORD_SLIPS_OUTPUT_FOLDER` in `.env` to use another folder; there is no output-folder prompt.
 
-A compact summary is always appended to the PDF and contains the selected workbook rows, excluding automatic and extra blank slips. Extra titled blank columns can be added for handwritten notes with one JSON array:
+A compact summary is always included as the first page(s) of the PDF and contains the selected workbook rows, excluding automatic and extra blank slips. Extra titled blank columns can be added for handwritten notes with one JSON array:
 
 ```dotenv
 PASSWORD_SLIPS_EXTRA_SUMMARY_COLUMNS=["Notes","Follow-up"]

@@ -47,7 +47,7 @@ class PasswordSlipGenerationTests(unittest.TestCase):
         self.assertEqual(records[:2], data_records)
         self.assertTrue(all(not any(row) for row in records[2:]))
 
-    def test_summary_is_always_counted_after_slip_pages(self):
+    def test_summary_is_always_counted_before_slip_pages(self):
         settings = Settings(columns=["Name"])
         data_records = [["user001"], ["user002"]]
 

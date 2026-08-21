@@ -899,27 +899,27 @@ def make_pdf(settings: Settings, output: Optional[Path] = None,
     summary_pages = summary_page_count(settings, len(data_records))
     pages = slip_pages + summary_pages
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-    for page in range(slip_pages):
-        draw_cut_ticks(pdf, settings, page_width, page_height, per_page)
-        draw_footer(pdf, settings, page + 1, pages, generated_at, page_width)
-        page_records = records[page * per_page:(page + 1) * per_page]
-        for slot, record in enumerate(page_records):
-            widths = column_widths(settings.columns, record, settings, column_area)
-            draw_slip(pdf, settings, record, widths, side, page_height - top - slot * slip_height, content_width)
-        pdf.showPage()
-
     for summary_page in range(summary_pages):
         draw_summary_page(
             pdf,
             settings,
             data_records,
             summary_page,
-            slip_pages + summary_page + 1,
+            summary_page + 1,
             pages,
             generated_at,
             page_width,
             page_height,
         )
+        pdf.showPage()
+
+    for page in range(slip_pages):
+        draw_cut_ticks(pdf, settings, page_width, page_height, per_page)
+        draw_footer(pdf, settings, summary_pages + page + 1, pages, generated_at, page_width)
+        page_records = records[page * per_page:(page + 1) * per_page]
+        for slot, record in enumerate(page_records):
+            widths = column_widths(settings.columns, record, settings, column_area)
+            draw_slip(pdf, settings, record, widths, side, page_height - top - slot * slip_height, content_width)
         pdf.showPage()
 
     pdf.save()
@@ -1694,7 +1694,7 @@ def run_cli() -> None:
     print()
     print("Done")
     print(f"  Created {count} slips across {pages} {plural(pages, 'page')}.")
-    print("  The final page(s) contain the compact summary.")
+    print("  The first page(s) contain the compact summary.")
     print(f"  PDF: {pdf}")
 
     if settings.email_address:
