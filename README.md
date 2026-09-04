@@ -8,7 +8,7 @@ The `.command` launcher lives at the project root, source code is in `src`, and 
 
 Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a column letter, such as `B*`, to print that column with `password_font`; add `-`, such as `C-`, when that column can be truncated instead of shrunk. The script remembers your last column combo, saved row filters, and shows a quick preview.
 
-Row filters are optional. Choose `0` for no row rule, a saved rule number, `n` to create a rule, or `c` to manually enter spreadsheet row numbers such as `2,5,9` or a range like `10-15`. When creating a rule, the script lists existing values from that column so you can choose one quickly. The script can also add extra blank slips, and pressing Enter reuses the last blank-slip count.
+Row filters are optional. Choose `0` for no row rule, a saved rule number, `n` to create a rule, or `c` to manually enter spreadsheet row numbers such as `2,5,9` or a range like `10-15`. Hidden spreadsheet rows are always excluded. When creating a rule, the script lists existing values from that column so you can choose one quickly. The script can also add extra blank slips, and pressing Enter reuses the last blank-slip count.
 
 At the finish step, press Enter or type `o` to open a temporary PDF in Preview, type `e` to export a saved PDF, or type `p` to export and print.
 

@@ -49,12 +49,12 @@ class Settings:
     input_folder: str = ""
     workbook_extensions: list[str] = field(default_factory=lambda: [".xlsx", ".xlsm"])
 
-    header_height_mm: float = 20.0
-    data_height_mm: float = 20.0
+    header_height_mm: float = 18.0
+    data_height_mm: float = 18.0
     slip_padding_mm: float = 0.0
-    top_margin_mm: float = 8.0
-    bottom_margin_mm: float = 8.0
-    side_margin_mm: float = 5.0
+    top_margin_mm: float = 10.0
+    bottom_margin_mm: float = 10.0
+    side_margin_mm: float = 0.0
     column_gap_mm: float = 2.0
     padding_mm: float = 2.0
     cut_tick_mm: float = 4.0
@@ -62,11 +62,11 @@ class Settings:
     column_min_width_ratio: float = 0.07
     column_max_width_ratio: float = 0.45
 
-    header_color: str = "#0F4C81"
+    header_color: str = "#1769AA"
     data_font: str = "Helvetica-Bold"
-    password_font: str = "Courier-Bold"
-    header_font_pt: float = 11.0
-    data_font_pt: float = 12.0
+    password_font: str = "Courier"
+    header_font_pt: float = 12.0
+    data_font_pt: float = 15.0
     minimum_font_pt: float = 4.0
 
     show_footer: bool = True
@@ -241,7 +241,7 @@ def layout_settings_help() -> dict[str, str]:
         "data_height_mm": "Height of the white data area on each slip.",
         "slip_padding_mm": "White space below each slip before the next slip starts.",
         "top_margin_mm": "Blank space at the top of each A4 page.",
-        "bottom_margin_mm": "Blank space at the bottom of each A4 page. The footer is drawn inside this area.",
+        "bottom_margin_mm": "Footer text baseline spacing from the bottom of each A4 page, also reserved away from slips.",
         "side_margin_mm": "Left and right page margin.",
         "column_gap_mm": "Space between fields across the slip.",
         "padding_mm": "Inner text padding inside each field area.",
@@ -317,7 +317,9 @@ def workbook_records(path: str, sheet_name: str, columns: list[str],
         return []
 
     wanted_rows = set(row_numbers or [])
-    workbook = load_workbook(path, read_only=True, data_only=True)
+    # Row visibility is stored on worksheet dimensions, which read-only mode
+    # does not expose.
+    workbook = load_workbook(path, data_only=True)
     try:
         sheet = workbook[sheet_name]
         headers = unique_labels(next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), ()))
@@ -343,10 +345,14 @@ def workbook_records(path: str, sheet_name: str, columns: list[str],
 
 def worksheet_rows(sheet, row_numbers, max_col: int):
     if row_numbers is None:
-        yield from enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2)
+        for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+            if not row_is_hidden(sheet, row_number):
+                yield row_number, row
         return
 
     for row_number in row_numbers:
+        if row_is_hidden(sheet, row_number):
+            continue
         row = next(
             sheet.iter_rows(min_row=row_number, max_row=row_number, max_col=max_col, values_only=True),
             (),
@@ -354,13 +360,23 @@ def worksheet_rows(sheet, row_numbers, max_col: int):
         yield row_number, row
 
 
+def row_is_hidden(sheet, row_number: int) -> bool:
+    dimension = sheet.row_dimensions.get(row_number)
+    return bool(dimension and dimension.hidden)
+
+
 def workbook_column_values(path: str, sheet_name: str, column_number: int) -> list[str]:
-    workbook = load_workbook(path, read_only=True, data_only=True)
+    workbook = load_workbook(path, data_only=True)
     try:
         sheet = workbook[sheet_name]
         values = []
         seen = set()
-        for row in sheet.iter_rows(min_row=2, min_col=column_number, max_col=column_number, values_only=True):
+        for row_number, row in enumerate(
+            sheet.iter_rows(min_row=2, min_col=column_number, max_col=column_number, values_only=True),
+            start=2,
+        ):
+            if row_is_hidden(sheet, row_number):
+                continue
             value = "" if row[0] is None else str(row[0]).strip()
             if value and value not in seen:
                 values.append(value)
@@ -667,7 +683,7 @@ def draw_footer(pdf: canvas.Canvas, settings: Settings, page_number: int, page_t
         return
 
     side = settings.side_margin_mm * MM
-    y = max(3 * MM, settings.bottom_margin_mm * MM / 2)
+    y = max(3 * MM, settings.bottom_margin_mm * MM)
     text = "  |  ".join(parts)
     available_width = page_width - side * 2
     size = shrink_to_fit(text, "Helvetica", settings.footer_font_pt, settings.minimum_font_pt,
