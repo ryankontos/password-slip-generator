@@ -11,6 +11,8 @@ On either platform, the first run may take a moment while the Excel and PDF pack
 
 Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a letter, such as `B*`, to print that column with `password_font`; add `-`, such as `C-`, when that column may truncate instead of shrinking. The selected header names and options are previewed in print order, with options shown in brackets, so they can be confirmed or reselected.
 
+Hidden spreadsheet rows are always excluded. Row selection is optional. Choose all rows, a saved quick rule set, create a new rule set, or enter specific spreadsheet rows such as `2,5,9` or `10-15`. When creating a rule, the script lists existing values from that column so you can choose one quickly.
+
 Row selection is optional. Choose all rows, a saved quick rule set, create a new rule set, or enter specific spreadsheet rows such as `2,5,9` or `10-15`. A rule set can contain several rules, applied together with AND, and can be named for one-step reuse on later runs.
 
 After row selection, the script reports the blanks needed to finish the last slip page and asks only for any additional blank slips. The PDF is then written automatically to Downloads. Set `PASSWORD_SLIPS_OUTPUT_FOLDER` in `.env` to use another folder; there is no output-folder prompt.
