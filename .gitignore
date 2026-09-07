@@ -5,3 +5,5 @@ tmp/
 .DS_Store
 settings/settings.json
 settings/layout_settings.json
+settings/web_workspace.json
+settings/web_workbook.xlsx

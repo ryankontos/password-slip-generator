@@ -85,6 +85,11 @@ class Settings:
     column_numbers: list[int] = field(default_factory=list)
     password_column_numbers: list[int] = field(default_factory=list)
     truncate_column_numbers: list[int] = field(default_factory=list)
+    default_column_names: list[str] = field(default_factory=lambda: [
+        "short name", "business group", "temp password", "hiring manager name"
+    ])
+    password_column_names: list[str] = field(default_factory=lambda: ["temp password"])
+    truncate_column_names: list[str] = field(default_factory=list)
     saved_row_filter_sets: list[dict[str, object]] = field(default_factory=list)
     selected_row_filters: list[dict[str, object]] = field(default_factory=list)
     manual_row_numbers: list[int] = field(default_factory=list)
@@ -110,6 +115,10 @@ class Settings:
     column_max_width_ratio: float = 0.45
 
     header_color: str = "#1769AA"
+    header_text_color: str = "#FFFFFF"
+    data_background_color: str = "#FFFFFF"
+    data_text_color: str = "#000000"
+    header_font: str = "Helvetica-Bold"
     data_font: str = "Helvetica-Bold"
     password_font: str = "Courier"
     header_font_pt: float = 12.0
@@ -117,6 +126,8 @@ class Settings:
     minimum_font_pt: float = 4.0
 
     show_footer: bool = True
+    show_cut_ticks: bool = True
+    show_summary: bool = True
     show_sheet_name: bool = True
     show_generated_datetime: bool = True
     show_page_numbers: bool = True
@@ -185,6 +196,15 @@ def apply_saved_app_settings(settings: Settings) -> None:
     settings.truncate_column_numbers = saved_column_numbers(
         data, "truncate_column_letters", "truncate_column_numbers"
     )
+    settings.default_column_names = clean_text_list(
+        data.get("default_column_names", settings.default_column_names)
+    )
+    settings.password_column_names = clean_text_list(
+        data.get("password_column_names", settings.password_column_names)
+    )
+    settings.truncate_column_names = clean_text_list(
+        data.get("truncate_column_names", settings.truncate_column_names)
+    )
     settings.saved_row_filter_sets = saved_row_filter_sets(data)
     settings.selected_row_filters = clean_row_filters(data.get("selected_row_filters", []))
     settings.blank_slips = clean_whole_number(data.get("blank_slips", 0), 0)
@@ -193,6 +213,10 @@ def apply_saved_app_settings(settings: Settings) -> None:
         False,
     )
     settings.email_address = configured_email_address()
+    if any(key not in data for key in (
+        "default_column_names", "password_column_names", "truncate_column_names"
+    )):
+        save_app_settings(settings)
 
 
 def apply_saved_layout(settings: Settings) -> None:
@@ -311,6 +335,9 @@ def save_app_settings(settings: Settings) -> None:
         "column_letters": column_letters_from_numbers(settings.column_numbers),
         "password_column_letters": column_letters_from_numbers(settings.password_column_numbers),
         "truncate_column_letters": column_letters_from_numbers(settings.truncate_column_numbers),
+        "default_column_names": settings.default_column_names,
+        "password_column_names": settings.password_column_names,
+        "truncate_column_names": settings.truncate_column_names,
         "saved_row_filter_sets": serialized_row_filter_sets(settings.saved_row_filter_sets),
         "selected_row_filters": serialized_row_filters(settings.selected_row_filters),
         "blank_slips": settings.blank_slips,
@@ -336,6 +363,12 @@ def clean_number_list(value) -> list[int]:
         if number > 0 and number not in numbers:
             numbers.append(number)
     return numbers
+
+
+def clean_text_list(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def saved_column_numbers(data: dict, new_key: str, legacy_key: str) -> list[int]:
@@ -405,6 +438,9 @@ def app_settings_help() -> dict[str, str]:
         "column_letters": "Last selected column letters, in the order they should appear on each slip.",
         "password_column_letters": "Selected column letters that should use password_font. Add * after a column letter when choosing columns.",
         "truncate_column_letters": "Selected column letters that may truncate instead of shrinking text. Add - after a column letter when choosing columns.",
+        "default_column_names": "Default fields to print, in order. Names are matched without caring about capitals or repeated spaces.",
+        "password_column_names": "Field names that should use password_font.",
+        "truncate_column_names": "Field names that may truncate instead of shrinking.",
         "saved_row_filter_sets": "Named quick sets of one or more row rules. Rules in a set are chained with AND.",
         "selected_row_filters": "Rules selected on the last run. The matching quick set is marked next time.",
         "blank_slips": "Extra blank slips to add after the automatically filled last slip page. Press Enter at the prompt to reuse this number.",
@@ -427,12 +463,18 @@ def layout_settings_help() -> dict[str, str]:
         "column_min_width_ratio": "Smallest share of slip width any field should receive.",
         "column_max_width_ratio": "Largest share of slip width any field should receive.",
         "header_color": "Header colour as a hex value.",
+        "header_text_color": "Header text colour as a hex value.",
+        "data_background_color": "Data area colour as a hex value.",
+        "data_text_color": "Data text colour as a hex value.",
+        "header_font": "Font used for header labels.",
         "data_font": "Font used for normal data values.",
         "password_font": "Font used for columns marked with * when choosing columns.",
         "header_font_pt": "Maximum header text size.",
         "data_font_pt": "Maximum data text size.",
         "minimum_font_pt": "Smallest text size allowed when fitting long text.",
         "show_footer": "Show a small footer in the bottom page margin without changing slip positions.",
+        "show_cut_ticks": "Show matching cut marks at both page edges.",
+        "show_summary": "Add compact summary pages before the password slips.",
         "show_sheet_name": "Show the Excel sheet name in the footer.",
         "show_generated_datetime": "Show the generated date and time in the footer.",
         "show_page_numbers": "Show page numbers as Page X of Y in the footer.",
@@ -456,12 +498,18 @@ def layout_field_names() -> tuple[str, ...]:
         "column_min_width_ratio",
         "column_max_width_ratio",
         "header_color",
+        "header_text_color",
+        "data_background_color",
+        "data_text_color",
+        "header_font",
         "data_font",
         "password_font",
         "header_font_pt",
         "data_font_pt",
         "minimum_font_pt",
         "show_footer",
+        "show_cut_ticks",
+        "show_summary",
         "show_sheet_name",
         "show_generated_datetime",
         "show_page_numbers",
@@ -718,7 +766,8 @@ def column_widths(columns: list[str], record: list[str], settings: Settings, ava
     scores = []
     for index, column in enumerate(columns):
         value = record[index] if index < len(record) else ""
-        header_score = stringWidth(column, "Helvetica-Bold", settings.header_font_pt)
+        header_font = usable_font(settings.header_font, "Helvetica-Bold")
+        header_score = stringWidth(column, header_font, settings.header_font_pt)
         font = data_font_for_column(settings, index)
         value_score = stringWidth(value, font, settings.data_font_pt)
         scores.append(max(1, header_score, value_score))
@@ -757,6 +806,12 @@ def fit_widths(widths: list[float], minimum: float, maximum: float, total_width:
 
 def clamp(value: float, low: float, high: float) -> float:
     return min(high, max(low, float(value)))
+
+
+def page_content_box(settings: Settings, page_width: float) -> tuple[float, float]:
+    """Return one shared left inset and the matching full content width."""
+    side = max(0.0, settings.side_margin_mm * MM)
+    return side, max(0.0, page_width - side * 2)
 
 
 def shrink_to_fit(text: str, font: str, maximum: float, minimum: float, width: float, height: float) -> float:
@@ -897,13 +952,12 @@ def make_pdf(settings: Settings, output: Optional[Path] = None,
 
     page_width, page_height = A4
     top = settings.top_margin_mm * MM
-    side = settings.side_margin_mm * MM
+    side, content_width = page_content_box(settings, page_width)
     header_height = settings.header_height_mm * MM
     data_height = settings.data_height_mm * MM
     slip_height = settings.slip_height_mm * MM
     gap = settings.column_gap_mm * MM
     padding = settings.padding_mm * MM
-    content_width = page_width - side * 2
     column_area = content_width - gap * (len(settings.columns) - 1)
 
     output = output or output_path(settings)
@@ -912,7 +966,7 @@ def make_pdf(settings: Settings, output: Optional[Path] = None,
     pdf.setTitle(f"{settings.sheet or APP_NAME} - password slips")
 
     slip_pages = page_count(settings, len(records))
-    summary_pages = summary_page_count(settings, len(data_records))
+    summary_pages = summary_page_count(settings, len(data_records)) if settings.show_summary else 0
     pages = slip_pages + summary_pages
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     for summary_page in range(summary_pages):
@@ -930,7 +984,8 @@ def make_pdf(settings: Settings, output: Optional[Path] = None,
         pdf.showPage()
 
     for page in range(slip_pages):
-        draw_cut_ticks(pdf, settings, page_width, page_height, per_page)
+        if settings.show_cut_ticks:
+            draw_cut_ticks(pdf, settings, page_width, page_height, per_page)
         draw_footer(pdf, settings, summary_pages + page + 1, pages, generated_at, page_width)
         page_records = records[page * per_page:(page + 1) * per_page]
         for slot, record in enumerate(page_records):
@@ -998,10 +1053,9 @@ def draw_footer(pdf: canvas.Canvas, settings: Settings, page_number: int, page_t
     if not parts:
         return
 
-    side = settings.side_margin_mm * MM
+    side, available_width = page_content_box(settings, page_width)
     y = max(3 * MM, settings.bottom_margin_mm * MM)
     text = "  |  ".join(parts)
-    available_width = page_width - side * 2
     size = shrink_to_fit(text, "Helvetica", settings.footer_font_pt, settings.minimum_font_pt,
                          available_width, settings.footer_font_pt * 1.5)
     pdf.setFillColor(HexColor(settings.footer_color))
@@ -1012,8 +1066,7 @@ def draw_footer(pdf: canvas.Canvas, settings: Settings, page_number: int, page_t
 def draw_summary_page(pdf: canvas.Canvas, settings: Settings, records: list[list[str]],
                       summary_page: int, page_number: int, page_total: int,
                       generated_at: str, page_width: float, page_height: float) -> None:
-    side = settings.side_margin_mm * MM
-    content_width = page_width - side * 2
+    side, content_width = page_content_box(settings, page_width)
     top = page_height - settings.top_margin_mm * MM
     title = f"{settings.sheet or 'Workbook'} - Summary"
 
@@ -1107,14 +1160,18 @@ def draw_slip(pdf: canvas.Canvas, settings: Settings, record: list[str], widths:
 
     pdf.setFillColor(HexColor(settings.header_color))
     pdf.rect(left, header_y, content_width, header_height, stroke=0, fill=1)
+    pdf.setFillColor(HexColor(settings.data_background_color))
+    pdf.rect(left, data_y, content_width, data_height, stroke=0, fill=1)
 
     x = left
+    header_font = usable_font(settings.header_font, "Helvetica-Bold")
     for index, width in enumerate(widths):
         text_width = max(1, width - padding * 2)
-        draw_pdf_text(pdf, settings.columns[index], "Helvetica-Bold", settings.header_font_pt,
-                      settings.minimum_font_pt, x + padding, header_y, text_width, header_height, HexColor("#FFFFFF"))
+        draw_pdf_text(pdf, settings.columns[index], header_font, settings.header_font_pt,
+                      settings.minimum_font_pt, x + padding, header_y, text_width, header_height,
+                      HexColor(settings.header_text_color))
         draw_pdf_text(pdf, record[index], data_font_for_column(settings, index), settings.data_font_pt, settings.minimum_font_pt,
-                      x + padding, data_y, text_width, data_height, HexColor("#000000"),
+                      x + padding, data_y, text_width, data_height, HexColor(settings.data_text_color),
                       shrink=not column_may_truncate(settings, index))
         x += width + gap
 
@@ -1221,8 +1278,8 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
         raise ValueError("No column headings were found in the first row.")
 
     default_numbers = remembered_column_numbers(headers, settings)
-    default_password_numbers = remembered_password_column_numbers(default_numbers, settings)
-    default_truncate_numbers = remembered_truncate_column_numbers(default_numbers, settings)
+    default_password_numbers = remembered_password_column_numbers(headers, default_numbers, settings)
+    default_truncate_numbers = remembered_truncate_column_numbers(headers, default_numbers, settings)
 
     section("Columns")
     for index, header in enumerate(headers, start=1):
@@ -1270,6 +1327,13 @@ def choose_columns(headers: list[str], settings: Settings) -> tuple[list[str], l
 
 
 def remembered_column_numbers(headers: list[str], settings: Settings) -> list[int]:
+    by_name = {" ".join(header.casefold().split()): index for index, header in enumerate(headers, 1)}
+    named = [
+        by_name[key] for key in (" ".join(name.casefold().split()) for name in settings.default_column_names)
+        if key in by_name
+    ]
+    if settings.default_column_names:
+        return named or list(range(1, len(headers) + 1))
     numbers = [
         number for number in settings.column_numbers
         if isinstance(number, int) and 1 <= number <= len(headers)
@@ -1280,14 +1344,26 @@ def remembered_column_numbers(headers: list[str], settings: Settings) -> list[in
     return list(range(1, len(headers) + 1))
 
 
-def remembered_password_column_numbers(column_numbers: list[int], settings: Settings) -> list[int]:
+def remembered_password_column_numbers(headers: list[str], column_numbers: list[int],
+                                       settings: Settings) -> list[int]:
+    names = {" ".join(name.casefold().split()) for name in settings.password_column_names}
+    named = [number for number in column_numbers
+             if " ".join(headers[number - 1].casefold().split()) in names]
+    if settings.default_column_names:
+        return named
     return [
         number for number in settings.password_column_numbers
         if number in column_numbers
     ]
 
 
-def remembered_truncate_column_numbers(column_numbers: list[int], settings: Settings) -> list[int]:
+def remembered_truncate_column_numbers(headers: list[str], column_numbers: list[int],
+                                       settings: Settings) -> list[int]:
+    names = {" ".join(name.casefold().split()) for name in settings.truncate_column_names}
+    named = [number for number in column_numbers
+             if " ".join(headers[number - 1].casefold().split()) in names]
+    if settings.default_column_names:
+        return named
     return [
         number for number in settings.truncate_column_numbers
         if number in column_numbers
@@ -1676,6 +1752,13 @@ def run_cli() -> None:
         settings.password_column_numbers,
         settings.truncate_column_numbers,
     ) = choose_columns(headers, settings)
+    settings.default_column_names = list(settings.columns)
+    settings.password_column_names = [
+        headers[number - 1] for number in settings.password_column_numbers
+    ]
+    settings.truncate_column_names = [
+        headers[number - 1] for number in settings.truncate_column_numbers
+    ]
     settings.selected_row_filters = choose_row_filters(headers, settings)
 
     workbook_rows = workbook_records(
