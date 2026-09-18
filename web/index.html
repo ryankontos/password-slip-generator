@@ -72,7 +72,7 @@
             <button id="deleteDataViewButton" class="icon-button small" title="Delete selected saved view" aria-label="Delete selected saved view" disabled>×</button>
             <button id="addRowButton" class="button secondary">＋ Add row</button>
             <button id="exportCsvButton" class="button secondary">↓ CSV</button>
-            <button id="exportVisibleButton" class="button quiet compact" title="Export the currently filtered included rows as a PDF">↓ View PDF</button>
+            <button id="exportVisibleButton" class="button quiet compact" title="Export the currently filtered rows as a PDF">↓ View PDF</button>
             <button id="dataImportButton" class="button primary">⇧ Import</button>
           </div>
         </div>
@@ -80,10 +80,7 @@
           <strong id="selectionCount">0 selected</strong>
           <button id="exportSelectedButton" class="button quiet compact">Export selected</button>
           <button id="bulkEditButton" class="button quiet compact">Bulk edit</button>
-          <button id="customizeSelectedButton" class="button quiet compact">Customize slips</button>
-          <button id="resetSelectedLayoutsButton" class="button quiet compact">Reset customizations</button>
           <button id="duplicateRowsButton" class="button quiet compact">Duplicate</button>
-          <button id="excludeRowsButton" class="button quiet compact">Exclude</button>
           <button id="deleteRowsButton" class="button danger quiet compact">Delete</button>
           <button id="clearSelectionButton" class="button quiet compact push-right">Clear</button>
         </div>
@@ -140,37 +137,15 @@
 
       <div id="layoutView" class="view">
         <div class="view-header">
-          <div><h1>Layout</h1><p>Changes appear in the sheet preview immediately.</p></div>
+          <div><h1>Layout</h1><p>Changes render in the PDF preview automatically.</p></div>
           <button id="resetLayoutButton" class="button secondary">Reset</button>
         </div>
         <div class="settings-grid">
           <section class="settings-section span-two">
-            <h2>Saved layouts</h2>
-            <div class="preset-create"><input id="layoutPresetName" type="text" placeholder="Name this layout"><button id="saveLayoutPresetButton" class="button secondary">＋ Save current layout</button></div>
-            <div id="layoutPresetList" class="layout-preset-list"><span class="preset-empty">No saved layouts yet.</span></div>
-          </section>
-          <section class="settings-section span-two">
-            <h2>Slip content</h2>
-            <div class="form-grid two">
-              <label>Header text<input id="headerTextInput" type="text" placeholder="Optional"></label>
-              <label>Subheading<input id="subtitleInput" type="text" placeholder="Optional"></label>
-              <label class="span-two">Footer note<input id="footerTextInput" type="text" placeholder="Optional note printed at the bottom of each slip"></label>
-              <label>Header treatment<select id="headerStyleInput"><option value="line">Accent rule</option><option value="band">Accent band</option><option value="box">Outlined header</option></select></label>
-              <div class="logo-control span-two"><label>Logo<input id="logoInput" type="file" accept="image/png,image/jpeg"></label><div><span id="logoStatus">No logo selected</span><button id="clearLogoButton" class="text-button" type="button" disabled>Remove</button></div></div>
-            </div>
-          </section>
-          <section class="settings-section span-two">
             <h2>Slip layout</h2>
             <div id="layoutModes" class="layout-modes">
-              <button class="layout-mode" data-mode="horizontal"><span class="mode-diagram horizontal-mode"><i></i><i></i><i></i></span><strong>Horizontal</strong><small>Legacy bands</small></button>
-              <button class="layout-mode" data-mode="stacked"><span class="mode-diagram stacked-mode"><i></i><i></i><i></i></span><strong>Stacked</strong><small>Label and value rows</small></button>
-              <button class="layout-mode active" data-mode="grid"><span class="mode-diagram grid-mode"><i></i><i></i><i></i><i></i></span><strong>Grid</strong><small>Two-column fields</small></button>
-              <button class="layout-mode" data-mode="compact"><span class="mode-diagram compact-mode"><i></i><i></i><i></i></span><strong>Compact</strong><small>Three-column matrix</small></button>
-              <button class="layout-mode" data-mode="dense"><span class="mode-diagram dense-mode"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><strong>Dense</strong><small>Maximum field capacity</small></button>
-              <button class="layout-mode" data-mode="cards"><span class="mode-diagram cards-mode"><i></i><i></i><i></i><i></i></span><strong>Cards</strong><small>Separated field blocks</small></button>
-              <button class="layout-mode" data-mode="ledger"><span class="mode-diagram ledger-mode"><i></i><i></i><i></i><i></i></span><strong>Ledger</strong><small>Compact label column</small></button>
-              <button class="layout-mode" data-mode="hero"><span class="mode-diagram hero-mode"><i></i><i></i><i></i></span><strong>Hero</strong><small>Primary field emphasis</small></button>
-              <button class="layout-mode" data-mode="sections"><span class="mode-diagram sections-mode"><i></i><i></i><i></i><i></i></span><strong>Sections</strong><small>Grouped field panels</small></button>
+              <button class="layout-mode active" data-mode="horizontal"><span class="mode-diagram horizontal-mode"><i></i><i></i><i></i></span><strong>Horizontal</strong><small>Blue label band, values below</small></button>
+              <button class="layout-mode" data-mode="stacked"><span class="mode-diagram stacked-mode"><i></i><i></i><i></i></span><strong>Stacked</strong><small>Handles many fields</small></button>
             </div>
           </section>
           <section class="settings-section">
@@ -178,11 +153,10 @@
             <div class="form-grid two">
               <label>Paper<select id="paperInput"><option value="a4">A4</option><option value="letter">US Letter</option></select></label>
               <label>Orientation<select id="orientationInput"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
-              <label>Slips across<select id="acrossInput"><option>1</option><option>2</option><option>3</option></select></label>
-              <label>Fill order<select id="flowInput"><option value="rows">Across, then down</option><option value="columns">Down, then across</option></select></label>
               <label>Margin <span class="unit">mm</span><input id="marginInput" type="number" min="2" max="40" step="1"></label>
               <label>Gap <span class="unit">mm</span><input id="gapInput" type="number" min="0" max="20" step="1"></label>
               <label class="span-two">Slip height <output id="slipHeightOutput"></output><input id="slipHeightInput" type="range" min="20" max="120" step="1"></label>
+              <div id="sheetCapacity" class="field-help span-two"></div>
             </div>
           </section>
           <section class="settings-section">
@@ -198,17 +172,6 @@
               <label>Label case<select id="labelCaseInput"><option value="original">Original</option><option value="upper">UPPERCASE</option><option value="title">Title Case</option></select></label>
             </div>
           </section>
-          <section class="settings-section">
-            <h2>Field arrangement</h2>
-            <div class="form-grid two">
-              <label>Grid columns<select id="fieldColumnsInput"><option value="0">Preset default</option><option value="1">1 column</option><option value="2">2 columns</option><option value="3">3 columns</option><option value="4">4 columns</option><option value="5">5 columns</option></select></label>
-              <label>Label position<select id="labelPositionInput"><option value="preset">Preset default</option><option value="top">Above value</option><option value="left">Left of value</option><option value="inline">Inline</option></select></label>
-              <label>Value alignment<select id="valueAlignInput"><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
-              <label>Label width <span class="unit">%</span><input id="labelWidthInput" type="number" min="18" max="60" step="1"></label>
-              <label>Inner padding <span class="unit">mm</span><input id="paddingInput" type="number" min="0" max="10" step="0.5"></label>
-              <label>Corner radius <span class="unit">mm</span><input id="radiusInput" type="number" min="0" max="8" step="0.5"></label>
-            </div>
-          </section>
           <section class="settings-section span-two">
             <h2>Marks</h2>
             <div class="toggle-grid">
@@ -216,7 +179,6 @@
               <label class="toggle-row"><input id="cutMarksInput" type="checkbox"><span class="switch"></span><span><strong>Cut marks</strong><small>Show trim ticks at sheet edges</small></span></label>
               <label class="toggle-row"><input id="footerInput" type="checkbox"><span class="switch"></span><span><strong>Page footer</strong><small>Document name and page count</small></span></label>
               <label class="toggle-row"><input id="fieldLinesInput" type="checkbox"><span class="switch"></span><span><strong>Field dividers</strong><small>Rules between field cells</small></span></label>
-              <label class="toggle-row"><input id="zebraInput" type="checkbox"><span class="switch"></span><span><strong>Alternating fields</strong><small>Subtle alternating background</small></span></label>
               <label class="toggle-row"><input id="showBlankFieldsInput" type="checkbox"><span class="switch"></span><span><strong>Keep empty fields</strong><small>Layout can reserve empty values</small></span></label>
             </div>
           </section>
@@ -224,18 +186,19 @@
       </div>
     </section>
 
-    <div id="previewResizeHandle" class="preview-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sheet preview" aria-valuemin="280" aria-valuemax="620" aria-valuenow="390" tabindex="0" title="Drag to resize preview"></div>
+    <div id="previewResizeHandle" class="preview-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize PDF preview" aria-valuemin="360" aria-valuemax="920" aria-valuenow="520" tabindex="0" title="Drag to resize preview"></div>
     <aside class="preview-panel">
       <div class="preview-header">
-        <div><h2>Sheet preview</h2><span id="previewStats">A4 · 0 slips</span></div>
-        <div class="preview-actions"><button id="previewPrevButton" class="icon-button small" aria-label="Previous preview page" title="Previous preview page">‹</button><span id="previewPageLabel">No pages</span><button id="previewNextButton" class="icon-button small" aria-label="Next preview page" title="Next preview page">›</button><span class="preview-divider"></span><button id="zoomOutButton" class="icon-button small" aria-label="Zoom out">−</button><span id="zoomLabel">78%</span><button id="zoomInButton" class="icon-button small" aria-label="Zoom in">＋</button></div>
+        <div><h2>PDF preview</h2><span id="previewStats">No rows</span></div>
+        <div class="preview-actions"><button id="refreshPreviewButton" class="icon-button small" aria-label="Refresh preview" title="Render PDF now">↻</button><span class="preview-divider"></span><button id="zoomOutButton" class="icon-button small" aria-label="Zoom out">−</button><span id="zoomLabel">110%</span><button id="zoomInButton" class="icon-button small" aria-label="Zoom in">＋</button></div>
       </div>
-      <div id="previewViewport" class="preview-viewport">
-        <div id="paperPreview" class="paper-preview"></div>
+      <div id="previewViewport" class="preview-viewport pdf-preview-viewport">
+        <div id="previewPlaceholder" class="pdf-preview-placeholder">Add or import rows to preview the PDF.</div>
+        <iframe id="pdfPreviewFrame" class="pdf-preview-frame" title="Rendered PDF preview" hidden></iframe>
       </div>
       <div class="preview-footer">
-        <span><i class="legend included"></i><span id="includedCount">0 included</span></span>
-        <span><i class="legend excluded"></i><span id="excludedCount">0 excluded</span></span>
+        <span id="previewStatus">Actual exported PDF</span>
+        <button id="openPreviewButton" class="text-button" type="button" disabled>Open PDF</button>
       </div>
     </aside>
   </main>
@@ -272,47 +235,11 @@
 
   <dialog id="rowOptionsDialog" class="modal">
     <form method="dialog" class="modal-card small-card">
-      <header class="modal-header"><div><h2>Row options</h2><p id="rowOptionsName"></p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <header class="modal-header"><div><h2>Field visibility</h2><p id="rowOptionsName"></p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
       <div class="modal-body">
-        <label class="toggle-row bordered"><input id="rowIncludedInput" type="checkbox"><span class="switch"></span><span><strong>Include in export</strong><small>Excluded rows remain in the studio</small></span></label>
-        <h3 class="section-label">Individual slip customization</h3>
-        <label class="toggle-row bordered"><input id="rowLayoutEnabledInput" type="checkbox"><span class="switch"></span><span><strong>Customize this slip</strong><small>Override the sheet layout for this row only</small></span></label>
-        <div id="rowLayoutControls" class="row-layout-controls">
-          <div class="row-preset-control span-two"><label>Start from saved layout<select id="rowPresetInput"><option value="">Choose a saved layout</option></select></label><button id="applyRowPresetButton" class="button secondary compact" type="button">Apply preset</button></div>
-          <label>Mode<select id="rowModeInput"><option value="">Use sheet default</option><option value="horizontal">Horizontal</option><option value="stacked">Stacked</option><option value="grid">Grid</option><option value="compact">Compact</option><option value="dense">Dense</option><option value="cards">Cards</option><option value="ledger">Ledger</option><option value="hero">Hero</option></select></label>
-          <label>Field columns<select id="rowFieldColumnsInput"><option value="">Use sheet default</option><option value="0">Preset default</option><option value="1">1 column</option><option value="2">2 columns</option><option value="3">3 columns</option><option value="4">4 columns</option><option value="5">5 columns</option></select></label>
-          <label>Label position<select id="rowLabelPositionInput"><option value="">Use sheet default</option><option value="preset">Preset default</option><option value="top">Above value</option><option value="left">Left of value</option><option value="inline">Inline</option></select></label>
-          <label>Value alignment<select id="rowValueAlignInput"><option value="">Use sheet default</option><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
-          <label>Accent<input id="rowAccentInput" type="color"></label>
-          <label>Paper colour<input id="rowPaperColorInput" type="color"></label>
-          <div class="row-logo-control span-two"><label>Slip logo<input id="rowLogoInput" type="file" accept="image/png,image/jpeg"></label><div><span id="rowLogoStatus">Use sheet logo</span><button id="clearRowLogoButton" class="text-button" type="button" disabled>Use sheet logo</button></div></div>
-          <label class="span-two">Header text<input id="rowHeaderTextInput" type="text" placeholder="Use sheet default"></label>
-          <label class="span-two">Subheading<input id="rowSubtitleInput" type="text" placeholder="Use sheet default"></label>
-          <label class="span-two">Footer note<input id="rowFooterTextInput" type="text" placeholder="Use sheet default"></label>
-          <label>Header treatment<select id="rowHeaderStyleInput"><option value="">Use sheet default</option><option value="line">Accent rule</option><option value="band">Accent band</option><option value="box">Outlined header</option></select></label>
-          <label>Typeface<select id="rowFontInput"><option value="">Use sheet default</option><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
-          <label>Label case<select id="rowLabelCaseInput"><option value="">Use sheet default</option><option value="original">Original</option><option value="upper">UPPERCASE</option><option value="title">Title Case</option></select></label>
-          <label>Labels <span class="unit">pt</span><input id="rowLabelSizeInput" type="number" min="4" max="18" step="1" placeholder="Sheet default"></label>
-          <label>Values <span class="unit">pt</span><input id="rowValueSizeInput" type="number" min="5" max="26" step="1" placeholder="Sheet default"></label>
-          <label>Label width <span class="unit">%</span><input id="rowLabelWidthInput" type="number" min="18" max="60" step="1" placeholder="Sheet default"></label>
-          <label>Inner padding <span class="unit">mm</span><input id="rowPaddingInput" type="number" min="0" max="10" step="0.5" placeholder="Sheet default"></label>
-          <label>Corner radius <span class="unit">mm</span><input id="rowRadiusInput" type="number" min="0" max="8" step="0.5" placeholder="Sheet default"></label>
-          <label>Text colour<input id="rowInkInput" type="color"></label>
-          <label>Rule colour<input id="rowBorderColorInput" type="color"></label>
-          <label class="toggle-row compact-toggle"><input id="rowBorderInput" type="checkbox"><span class="switch"></span><span><strong>Slip border</strong></span></label>
-          <label class="toggle-row compact-toggle"><input id="rowFieldLinesInput" type="checkbox"><span class="switch"></span><span><strong>Field dividers</strong></span></label>
-          <label class="toggle-row compact-toggle"><input id="rowZebraInput" type="checkbox"><span class="switch"></span><span><strong>Alternating fields</strong></span></label>
-          <div class="row-order-block span-two">
-            <div class="row-control-heading"><strong>Field order</strong><button id="resetRowFieldOrderButton" class="text-button" type="button">Use sheet order</button></div>
-            <div id="rowFieldOrderList" class="row-order-list"></div>
-          </div>
-          <button id="applyRowLayoutToSelectionButton" class="button secondary compact span-two" type="button">Select rows to copy this layout</button>
-          <button id="resetRowLayoutButton" class="button quiet compact span-two" type="button">Reset individual layout</button>
-        </div>
-        <h3 class="section-label">Field visibility overrides</h3>
         <div id="rowOverrideList" class="override-list"></div>
       </div>
-      <footer class="modal-footer"><span>Rules still apply where set to Automatic.</span><button class="button primary" value="default">Done</button></footer>
+      <footer class="modal-footer"><span>Automatic uses the column and rule settings.</span><button class="button primary" value="default">Done</button></footer>
     </form>
   </dialog>
 

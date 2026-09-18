@@ -5,84 +5,53 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix = "id") => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
-const PREVIEW_MIN_WIDTH = 280;
-const PREVIEW_MAX_WIDTH = 620;
-const clampPreviewWidth = (value) => Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, Number(value) || 390));
+const PREVIEW_MIN_WIDTH = 360;
+const PREVIEW_MAX_WIDTH = 920;
+const clampPreviewWidth = (value) => Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, Number(value) || 520));
 function storedPreviewWidth() {
-  try { return clampPreviewWidth(localStorage.getItem("pss-preview-width")); } catch (_) { return 390; }
+  try { return clampPreviewWidth(localStorage.getItem("pss-preview-width")); } catch (_) { return 520; }
 }
 
 const defaultLayout = Object.freeze({
-  mode: "grid",
+  mode: "horizontal",
   paper: "a4",
   orientation: "portrait",
-  across: 1,
-  flow: "rows",
   margin: 10,
-  gap: 3,
-  slipHeight: 42,
-  accent: "#185adb",
+  gap: 0,
+  slipHeight: 36,
+  accent: "#00539b",
   ink: "#151719",
   paperColor: "#ffffff",
   borderColor: "#c9ced4",
-  labelSize: 8,
-  valueSize: 12,
+  labelSize: 10,
+  valueSize: 14,
   font: "Helvetica",
-  labelCase: "upper",
-  fieldColumns: 0,
-  labelPosition: "preset",
+  labelCase: "original",
   valueAlign: "left",
-  labelWidth: 36,
+  labelWidth: 34,
   padding: 2,
-  radius: 0,
-  showBorder: true,
+  showBorder: false,
   cutMarks: true,
   footer: true,
   fieldLines: true,
-  zebra: false,
-  showBlankFields: false,
-  headerText: "",
-  subtitle: "",
-  footerText: "",
-  headerStyle: "line",
-  logoData: "",
+  showBlankFields: true,
 });
-
-const rowPresetKeys = [
-  "mode", "accent", "ink", "paperColor", "borderColor", "labelSize", "valueSize", "font", "labelCase",
-  "fieldColumns", "labelPosition", "valueAlign", "labelWidth", "padding", "radius", "showBorder", "fieldLines",
-  "zebra", "headerText", "subtitle", "footerText", "headerStyle", "logoData",
-];
-
-function safeLogoData(value) {
-  const text = String(value || "");
-  return /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/i.test(text) ? text : "";
-}
 
 function starterDocument() {
   const columns = [
     { id: "name", label: "Name", group: "", type: "text", style: "strong", visibility: "always", width: 1.3, required: true },
     { id: "username", label: "Username", group: "", type: "text", style: "standard", visibility: "always", width: 1, required: true, unique: true },
     { id: "password", label: "Password", group: "", type: "password", style: "mono", visibility: "always", width: 1.1, required: true },
-    { id: "recovery", label: "Recovery code", group: "", type: "password", style: "mono", visibility: "nonempty", width: 1.1, required: false },
+    { id: "recovery", label: "Recovery code", group: "", type: "password", style: "mono", visibility: "always", width: 1.1, required: false },
   ];
   return {
     version: 1,
     name: "Untitled password slips",
     columns,
     rows: [],
-    rules: [{
-      id: uid("rule"),
-      name: "Show recovery code when present",
-      enabled: true,
-      action: "show_field",
-      target: "recovery",
-      match: "all",
-      conditions: [{ field: "recovery", operator: "not_empty", value: "" }],
-    }],
+    rules: [],
     views: [],
     importConfigs: [],
-    presets: [],
     layout: clone(defaultLayout),
   };
 }
@@ -90,12 +59,10 @@ function starterDocument() {
 const ui = {
   view: "data",
   selectedRows: new Set(),
-  selectedPreviewRow: null,
   search: "",
   history: [],
   future: [],
-  zoom: 0.78,
-  previewPage: 0,
+  zoom: 110,
   dataPage: 0,
   pageSize: 50,
   importData: null,
@@ -109,6 +76,9 @@ const ui = {
   saveTimer: null,
   dirty: false,
   previewWidth: storedPreviewWidth(),
+  previewUrl: null,
+  previewTimer: null,
+  previewRevision: 0,
 };
 
 function loadDocument() {
@@ -133,7 +103,7 @@ function normaliseDocument(input) {
   document.name = String(document.name || "Untitled password slips");
   document.columns = Array.isArray(document.columns) ? document.columns : [];
   document.rows = Array.isArray(document.rows) ? document.rows : [];
-  document.rules = Array.isArray(document.rules) ? document.rules : [];
+  document.rules = Array.isArray(document.rules) ? document.rules.filter((rule) => ["show_field", "hide_field"].includes(rule?.action)) : [];
   document.views = Array.isArray(document.views) ? document.views.filter((view) => view && typeof view === "object").map((view) => ({
     id: String(view.id || uid("view")),
     name: String(view.name || "Saved view"),
@@ -153,10 +123,8 @@ function normaliseDocument(input) {
       newName: String(mapping?.newName || ""),
     })).filter((mapping) => mapping.sourceHeader) : [],
   })) : [];
-  document.presets = Array.isArray(document.presets) ? document.presets.filter((preset) => preset && typeof preset === "object" && preset.layout && typeof preset.layout === "object").map((preset) => ({ id: String(preset.id || uid("preset")), name: String(preset.name || "Saved layout"), layout: { ...defaultLayout, ...clone(preset.layout) } })) : [];
   document.layout = { ...defaultLayout, ...(document.layout || {}) };
-  document.layout.logoData = safeLogoData(document.layout.logoData);
-  document.presets.forEach((preset) => { preset.layout.logoData = safeLogoData(preset.layout.logoData); });
+  document.layout.mode = document.layout.mode === "stacked" ? "stacked" : "horizontal";
   document.columns.forEach((column, index) => {
     column.id = String(column.id || uniqueColumnId(`column_${index + 1}`, document.columns));
     column.label = String(column.label || `Column ${index + 1}`);
@@ -174,9 +142,8 @@ function normaliseDocument(input) {
     row.id ||= uid("row");
     row.values = row.values && typeof row.values === "object" ? row.values : {};
     row.overrides = row.overrides && typeof row.overrides === "object" ? row.overrides : {};
-    row.layoutOverride = row.layoutOverride && typeof row.layoutOverride === "object" ? row.layoutOverride : {};
-    if (Object.prototype.hasOwnProperty.call(row.layoutOverride, "logoData")) row.layoutOverride.logoData = safeLogoData(row.layoutOverride.logoData);
-    row.disabled = Boolean(row.disabled);
+    row.layoutOverride = {};
+    row.disabled = false;
   });
   return document;
 }
@@ -424,14 +391,7 @@ function ruleMatches(rule, values) {
 }
 
 function includedRows() {
-  const rules = documentState.rules.filter((rule) => rule.enabled !== false);
-  const includeRules = rules.filter((rule) => rule.action === "include_row");
-  const excludeRules = rules.filter((rule) => rule.action === "exclude_row");
-  return documentState.rows.filter((row) => {
-    if (row.disabled) return false;
-    if (excludeRules.some((rule) => ruleMatches(rule, row.values))) return false;
-    return !includeRules.length || includeRules.some((rule) => ruleMatches(rule, row.values));
-  });
+  return documentState.rows;
 }
 
 function visibleColumns(row) {
@@ -447,19 +407,11 @@ function visibleColumns(row) {
     if (row.overrides?.[column.id] === false) shown = false;
     return shown;
   });
-  return sortColumnsForRow(visible, row);
+  return visible;
 }
 
 function sortColumnsForRow(columns, row) {
-  const order = Array.isArray(row.layoutOverride?.columnOrder) ? row.layoutOverride.columnOrder : [];
-  if (!order.length) return columns;
-  const explicit = new Map(order.map((id, index) => [id, index]));
-  const global = new Map(documentState.columns.map((column, index) => [column.id, index]));
-  return columns.slice().sort((left, right) => {
-    const leftRank = explicit.has(left.id) ? explicit.get(left.id) : order.length + global.get(left.id);
-    const rightRank = explicit.has(right.id) ? explicit.get(right.id) : order.length + global.get(right.id);
-    return leftRank - rightRank;
-  });
+  return columns;
 }
 
 function renderAll() {
@@ -468,7 +420,7 @@ function renderAll() {
   renderColumns();
   renderRules();
   renderLayout();
-  renderPreview();
+  schedulePdfPreview();
   $("#columnCount").textContent = documentState.columns.length;
   $("#ruleCount").textContent = documentState.rules.length;
   $("#undoButton").disabled = !ui.history.length;
@@ -491,10 +443,10 @@ function renderData() {
   $("#dataHead").innerHTML = `<tr><th><input id="selectAllRows" type="checkbox" aria-label="Select all filtered rows" ${allRows.length && allRows.every((row) => ui.selectedRows.has(row.id)) ? "checked" : ""}></th><th class="row-number-head">#</th>${documentState.columns.map((column) => `<th style="width:${Math.max(115, column.width * 130)}px">${escapeHtml(column.label)}</th>`).join("")}<th class="row-menu-head"></th></tr>`;
   $("#dataBody").innerHTML = rows.map((row) => {
     const originalIndex = documentState.rows.indexOf(row) + 1;
-    const customized = Object.keys(row.layoutOverride || {}).length > 0 || Object.keys(row.overrides || {}).length > 0;
-    return `<tr data-row-id="${row.id}" class="${ui.selectedRows.has(row.id) ? "selected" : ""} ${row.disabled ? "excluded" : ""} ${customized ? "customized" : ""}">
+    const customized = Object.keys(row.overrides || {}).length > 0;
+    return `<tr data-row-id="${row.id}" class="${ui.selectedRows.has(row.id) ? "selected" : ""} ${customized ? "customized" : ""}">
       <td class="select-cell"><input class="row-select" type="checkbox" ${ui.selectedRows.has(row.id) ? "checked" : ""} aria-label="Select row ${originalIndex}"></td>
-      <td class="row-number" draggable="true" title="${customized ? "Individual slip customization set · drag to reorder" : "Drag to reorder"}">⠿ ${originalIndex}${customized ? " ✦" : ""}</td>
+      <td class="row-number" draggable="true" title="${customized ? "Field visibility override set · drag to reorder" : "Drag to reorder"}">⠿ ${originalIndex}${customized ? " ✦" : ""}</td>
       ${documentState.columns.map((column) => { const missing = column.required && !String(row.values?.[column.id] ?? "").trim(); const duplicate = hasDuplicateValue(row, column, duplicateCounts); const issue = valueValidationIssue(row, column); const stateClass = [missing ? "missing-required" : "", duplicate ? "duplicate-value" : "", issue ? "invalid-value" : ""].filter(Boolean).join(" "); const invalid = missing || issue; return `<td class="${stateClass}"${issue ? ` title="${escapeHtml(issue)}"` : ""}><input type="${inputTypeForColumn(column)}" class="cell-input ${column.style === "mono" || column.type === "password" ? "password-cell" : ""}" data-column-id="${column.id}" value="${escapeHtml(row.values[column.id] || "")}" aria-label="${escapeHtml(column.label)}, row ${originalIndex}" ${invalid ? "aria-invalid=\"true\"" : ""} ${duplicate ? "data-duplicate=\"true\"" : ""}></td>`; }).join("")}
       <td class="row-menu"><button class="row-menu-button" data-action="row-options" title="Row options" aria-label="Row ${originalIndex} options">•••</button></td>
     </tr>`;
@@ -659,8 +611,6 @@ const operatorLabels = {
 const actionLabels = {
   show_field: "Show field",
   hide_field: "Hide field",
-  include_row: "Include row",
-  exclude_row: "Exclude row",
 };
 
 function actionOptions(selected) {
@@ -689,7 +639,7 @@ function renderRules() {
   $("#ruleList").innerHTML = documentState.rules.map((rule, index) => { const matching = documentState.rows.filter((row) => ruleMatches(rule, row.values)).length; const testMatch = selectedTestRow && rule.enabled !== false ? ruleMatches(rule, selectedTestRow.values) : null; const testLabel = selectedTestRow ? (rule.enabled === false ? "Disabled" : testMatch ? "Matches test row" : "No match") : ""; return `<article class="rule-card ${rule.enabled === false ? "disabled" : ""}" data-rule-id="${rule.id}" draggable="true">
     <header class="rule-header"><span class="rule-number">${index + 1}</span><input class="rule-name-input" value="${escapeHtml(rule.name || actionLabels[rule.action] || "Rule")}" aria-label="Rule name"><span class="rule-match-count">${matching} matching</span>${testLabel ? `<span class="rule-test-chip ${testMatch ? "pass" : "fail"}">${escapeHtml(testLabel)}</span>` : ""}<label class="rule-enabled"><input class="rule-enabled-input" type="checkbox" ${rule.enabled !== false ? "checked" : ""}> Active</label><button class="icon-button small" data-action="duplicate-rule" title="Duplicate rule">⧉</button><button class="icon-button small" data-action="delete-rule" title="Delete rule">×</button></header>
     <div class="rule-body">
-      <div class="rule-action-row"><span>Then</span><select class="rule-action-input">${actionOptions(rule.action)}</select><select class="rule-target-input" ${["include_row", "exclude_row"].includes(rule.action) ? "hidden" : ""}>${columnOptions(rule.target)}</select></div>
+      <div class="rule-action-row"><span>Then</span><select class="rule-action-input">${actionOptions(rule.action)}</select><select class="rule-target-input">${columnOptions(rule.target)}</select></div>
       <div class="conditions">
         ${(rule.conditions || []).map((condition, conditionIndex) => `<div class="condition-row" data-condition-index="${conditionIndex}"><span class="condition-join">${conditionIndex ? (rule.match === "any" ? "OR" : "AND") : "If"}</span><select class="condition-field">${columnOptions(condition.field)}</select><select class="condition-operator">${operatorOptions(condition.operator)}</select><input class="condition-value" value="${escapeHtml(condition.value || "")}" placeholder="Value" ${["empty", "not_empty"].includes(condition.operator) ? "hidden" : ""}><button class="condition-delete" data-action="delete-condition" title="Remove condition">×</button></div>`).join("")}
         <div class="condition-footer"><button class="text-button" data-action="add-condition">＋ Add condition</button><label class="match-control">Match<select class="rule-match-input"><option value="all" ${rule.match !== "any" ? "selected" : ""}>all conditions</option><option value="any" ${rule.match === "any" ? "selected" : ""}>any condition</option></select></label><label class="negate-control"><input class="rule-negate-input" type="checkbox" ${rule.negate ? "checked" : ""}> Not</label></div>
@@ -868,6 +818,108 @@ function renderPreview() {
   $("#zoomLabel").textContent = `${Math.round(ui.zoom * 100)}%`;
 }
 
+// The preview is the real server-rendered PDF. The browser's PDF viewer handles
+// pagination and crisp scaling; the studio only controls when it is regenerated.
+function renderLayout() {
+  const layout = documentState.layout;
+  $$(".layout-mode").forEach((button) => button.classList.toggle("active", button.dataset.mode === layout.mode));
+  const bindings = {
+    paperInput: layout.paper,
+    orientationInput: layout.orientation,
+    marginInput: layout.margin,
+    gapInput: layout.gap,
+    slipHeightInput: layout.slipHeight,
+    accentInput: layout.accent,
+    inkInput: layout.ink,
+    paperColorInput: layout.paperColor,
+    borderColorInput: layout.borderColor,
+    labelSizeInput: layout.labelSize,
+    valueSizeInput: layout.valueSize,
+    fontInput: layout.font,
+    labelCaseInput: layout.labelCase,
+  };
+  Object.entries(bindings).forEach(([id, value]) => { const control = $("#" + id); if (control) control.value = value; });
+  $("#borderInput").checked = layout.showBorder;
+  $("#cutMarksInput").checked = layout.cutMarks;
+  $("#footerInput").checked = layout.footer;
+  $("#fieldLinesInput").checked = layout.fieldLines;
+  $("#showBlankFieldsInput").checked = layout.showBlankFields;
+  $("#slipHeightOutput").textContent = `${layout.slipHeight} mm`;
+  const pageHeight = layout.orientation === "landscape" ? (layout.paper === "letter" ? 215.9 : 210) : (layout.paper === "letter" ? 279.4 : 297);
+  const usable = pageHeight - (2 * Number(layout.margin || 0)) - (layout.footer ? 7 : 0);
+  const perPage = Math.max(0, Math.floor((usable + Number(layout.gap || 0)) / (Number(layout.slipHeight || 1) + Number(layout.gap || 0))));
+  $("#sheetCapacity").textContent = `${perPage} slip${perPage === 1 ? "" : "s"} per page · full sheet width`;
+}
+
+function previewFragment() {
+  return `#page=1&zoom=${ui.zoom}`;
+}
+
+function applyPreviewZoom() {
+  $("#zoomLabel").textContent = `${ui.zoom}%`;
+  if (ui.previewUrl) $("#pdfPreviewFrame").src = `${ui.previewUrl}${previewFragment()}`;
+}
+
+function clearPdfPreview(message = "Add or import rows to preview the PDF.") {
+  if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
+  ui.previewUrl = null;
+  const frame = $("#pdfPreviewFrame");
+  frame.hidden = true;
+  frame.removeAttribute("src");
+  $("#previewPlaceholder").hidden = false;
+  $("#previewPlaceholder").textContent = message;
+  $("#openPreviewButton").disabled = true;
+}
+
+function schedulePdfPreview(immediate = false) {
+  clearTimeout(ui.previewTimer);
+  if (!documentState.rows.length || !documentState.columns.length) {
+    clearPdfPreview();
+    $("#previewStats").textContent = documentState.rows.length ? "No columns" : "No rows";
+    $("#previewStatus").textContent = "Actual exported PDF";
+    return;
+  }
+  $("#previewStatus").textContent = "Rendering PDF…";
+  ui.previewTimer = setTimeout(renderPdfPreview, immediate ? 0 : 400);
+}
+
+async function renderPdfPreview() {
+  const revision = ++ui.previewRevision;
+  try {
+    const response = await fetch("/api/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document: documentState }),
+    });
+    if (!response.ok) {
+      let message = "The PDF preview could not be rendered.";
+      try { message = (await response.json()).error || message; } catch (_) {}
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    if (revision !== ui.previewRevision) return;
+    if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
+    ui.previewUrl = URL.createObjectURL(blob);
+    const frame = $("#pdfPreviewFrame");
+    frame.src = `${ui.previewUrl}${previewFragment()}`;
+    frame.hidden = false;
+    $("#previewPlaceholder").hidden = true;
+    $("#openPreviewButton").disabled = false;
+    $("#previewStats").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.layout.mode}`;
+    $("#previewStatus").textContent = "Actual exported PDF · up to date";
+    $("#zoomLabel").textContent = `${ui.zoom}%`;
+  } catch (error) {
+    if (revision !== ui.previewRevision) return;
+    clearPdfPreview(`PDF preview error: ${error.message}`);
+    $("#previewStats").textContent = "Preview unavailable";
+    $("#previewStatus").textContent = "Fix the error, then refresh";
+  }
+}
+
+function renderPreview() {
+  schedulePdfPreview();
+}
+
 function addRow() {
   const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, ""])), disabled: false, overrides: {}, layoutOverride: {} };
   commit((state) => state.rows.push(row));
@@ -906,36 +958,6 @@ function openRowOptions(rowId) {
   if (!row) return;
   ui.rowOptionsId = rowId;
   $("#rowOptionsName").textContent = documentState.columns.map((column) => row.values[column.id]).find(Boolean) || `Row ${documentState.rows.indexOf(row) + 1}`;
-  $("#rowIncludedInput").checked = !row.disabled;
-  const layoutOverride = row.layoutOverride || {};
-  $("#rowLayoutEnabledInput").checked = Object.keys(layoutOverride).length > 0;
-  renderRowPresetOptions();
-  syncRowLogoStatus(row, layoutOverride);
-  $("#rowModeInput").value = layoutOverride.mode || "";
-  $("#rowFieldColumnsInput").value = layoutOverride.fieldColumns == null ? "" : String(layoutOverride.fieldColumns);
-  $("#rowLabelPositionInput").value = layoutOverride.labelPosition || "";
-  $("#rowValueAlignInput").value = layoutOverride.valueAlign || "";
-  $("#rowAccentInput").value = layoutOverride.accent || documentState.layout.accent;
-  $("#rowPaperColorInput").value = layoutOverride.paperColor || documentState.layout.paperColor;
-  $("#rowHeaderTextInput").value = layoutOverride.headerText || "";
-  $("#rowSubtitleInput").value = layoutOverride.subtitle || "";
-  $("#rowFooterTextInput").value = layoutOverride.footerText || "";
-  $("#rowHeaderStyleInput").value = layoutOverride.headerStyle || "";
-  $("#rowFontInput").value = layoutOverride.font || "";
-  $("#rowLabelCaseInput").value = layoutOverride.labelCase || "";
-  $("#rowLabelSizeInput").value = layoutOverride.labelSize == null ? "" : String(layoutOverride.labelSize);
-  $("#rowValueSizeInput").value = layoutOverride.valueSize == null ? "" : String(layoutOverride.valueSize);
-  $("#rowLabelWidthInput").value = layoutOverride.labelWidth == null ? "" : String(layoutOverride.labelWidth);
-  $("#rowPaddingInput").value = layoutOverride.padding == null ? "" : String(layoutOverride.padding);
-  $("#rowRadiusInput").value = layoutOverride.radius == null ? "" : String(layoutOverride.radius);
-  $("#rowInkInput").value = layoutOverride.ink || documentState.layout.ink;
-  $("#rowBorderColorInput").value = layoutOverride.borderColor || documentState.layout.borderColor;
-  $("#rowBorderInput").checked = layoutOverride.showBorder == null ? documentState.layout.showBorder : Boolean(layoutOverride.showBorder);
-  $("#rowFieldLinesInput").checked = layoutOverride.fieldLines == null ? documentState.layout.fieldLines : Boolean(layoutOverride.fieldLines);
-  $("#rowZebraInput").checked = layoutOverride.zebra == null ? documentState.layout.zebra : Boolean(layoutOverride.zebra);
-  renderRowFieldOrder(row);
-  syncRowLayoutControls();
-  syncRowLogoStatus(row, layoutOverride);
   $("#rowOverrideList").innerHTML = documentState.columns.map((column) => `<label class="override-row"><strong>${escapeHtml(column.label)}</strong><select data-column-id="${column.id}"><option value="auto" ${row.overrides[column.id] == null ? "selected" : ""}>Automatic</option><option value="show" ${row.overrides[column.id] === true ? "selected" : ""}>Always show</option><option value="hide" ${row.overrides[column.id] === false ? "selected" : ""}>Always hide</option></select></label>`).join("");
   if (!$("#rowOptionsDialog").open) $("#rowOptionsDialog").showModal();
 }
@@ -1137,7 +1159,7 @@ function safeFilename(value) {
 
 function exportValidationIssues(source) {
   const columns = Array.isArray(source.columns) ? source.columns : [];
-  const rows = Array.isArray(source.rows) ? source.rows.filter((row) => !row.disabled) : [];
+  const rows = Array.isArray(source.rows) ? source.rows : [];
   const incompleteRows = rows.filter((row) => columns.some((column) => column.required && !String(row.values?.[column.id] ?? "").trim()));
   const duplicateCounts = duplicateValueCounts(rows, columns);
   const duplicateRows = rows.filter((row) => columns.some((column) => hasDuplicateValue(row, column, duplicateCounts)));
@@ -1146,6 +1168,8 @@ function exportValidationIssues(source) {
 }
 
 async function exportPdf(source = documentState, filenameSuffix = "", triggerButton = null) {
+  if (!Array.isArray(source.rows) || !source.rows.length) { toast("There are no data rows to export. Import a sheet or add a row first.", "error"); return; }
+  if (!Array.isArray(source.columns) || !source.columns.length) { toast("Add at least one column before exporting.", "error"); return; }
   const issues = exportValidationIssues(source);
   const warnings = [];
   if (issues.incompleteRows.length) warnings.push(`${issues.incompleteRows.length} row${issues.incompleteRows.length === 1 ? " is" : "s are"} missing required values`);
@@ -1174,17 +1198,16 @@ async function exportPdf(source = documentState, filenameSuffix = "", triggerBut
 
 async function exportSelectedRows() {
   const ids = new Set(ui.selectedRows);
-  const rows = includedRows().filter((row) => ids.has(row.id));
-  if (!rows.length) { toast("Select at least one included row", "error"); return; }
+  const rows = documentState.rows.filter((row) => ids.has(row.id));
+  if (!rows.length) { toast("Select at least one row", "error"); return; }
   const source = clone(documentState);
   source.rows = rows.map((row) => ({ ...clone(row), disabled: false }));
   await exportPdf(source, "-selected");
 }
 
 async function exportVisibleRows() {
-  const included = new Set(includedRows().map((row) => row.id));
-  const rows = filteredRows().filter((row) => included.has(row.id));
-  if (!rows.length) { toast("There are no included rows in the current view", "error"); return; }
+  const rows = filteredRows();
+  if (!rows.length) { toast("No rows match the current view", "error"); return; }
   const source = clone(documentState);
   source.rows = rows.map((row) => ({ ...clone(row), disabled: false }));
   await exportPdf(source, "-view", $("#exportVisibleButton"));
@@ -1250,6 +1273,7 @@ async function importWorkbook(file) {
     const response = await fetch("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, content }) });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "The workbook could not be imported.");
+    if (!Array.isArray(payload.sheets) || !payload.sheets.length) throw new Error("The workbook has no readable, visible worksheets.");
     ui.importData = payload;
     $("#importSheetSelect").innerHTML = payload.sheets.map((sheet, index) => `<option value="${index}">${escapeHtml(sheet.name)} · ${sheet.rows.length} rows</option>`).join("");
     $("#importChoose").hidden = true;
@@ -1259,7 +1283,7 @@ async function importWorkbook(file) {
     $("#importProjectName").placeholder = String(file.name).replace(/\.(xlsx|xlsm|csv)$/i, "") || documentState.name;
     renderImportMapping();
   } catch (error) {
-    $("#importMeta").textContent = "";
+    $("#importMeta").textContent = error.message || "The workbook could not be imported.";
     toast(error.message || "The workbook could not be imported.", "error");
   }
 }
@@ -1278,10 +1302,6 @@ function guessedMapping(header) {
 function inferImportedColumnType(header, values) {
   const normal = String(header).toLowerCase().replace(/[^a-z0-9]+/g, "");
   if (/(password|passcode|passwd|pwd|pin|secret|recovery|otp|mfa|securitycode)/.test(normal)) return "password";
-  if (/(url|uri|link|website|webaddress|portal|endpoint)/.test(normal)) return "url";
-  if (/(date|time|created|updated|expires|expiry|timestamp)/.test(normal)) return "date";
-  const samples = values.map((value) => String(value ?? "").trim()).filter(Boolean);
-  if (samples.length && samples.every((value) => /^[-+]?\d+(?:\.\d+)?$/.test(value))) return "number";
   return "text";
 }
 
@@ -1689,7 +1709,7 @@ function installEvents() {
   $("#addColumnButton").addEventListener("click", () => addColumn());
   $("#addRuleButton").addEventListener("click", addRule);
   $("#commandButton").addEventListener("click", openCommands);
-  $("#exportPdfButton").addEventListener("click", exportPdf);
+  $("#exportPdfButton").addEventListener("click", () => exportPdf());
   $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
   $("#exportCsvButton").addEventListener("click", exportCsv);
   $("#exportVisibleButton").addEventListener("click", exportVisibleRows);
@@ -1768,18 +1788,6 @@ function installEvents() {
   $("#bulkEditColumn").addEventListener("change", updateBulkEditPreview);
   $("#bulkEditOperation").addEventListener("change", renderBulkEditFields);
   $("#applyBulkEditButton").addEventListener("click", applyBulkEdit);
-  $("#customizeSelectedButton").addEventListener("click", openSelectedRowOptions);
-  $("#resetSelectedLayoutsButton").addEventListener("click", async () => {
-    const selected = new Set([...ui.selectedRows].filter((id) => documentState.rows.some((row) => row.id === id)));
-    if (!selected.size) return;
-    if (!await confirmAction("Reset selected slip customizations?", `${selected.size} row${selected.size === 1 ? "" : "s"} will use the sheet layout and automatic field visibility again.`, "Reset")) return;
-    commit((state) => state.rows.forEach((row) => {
-      if (!selected.has(row.id)) return;
-      delete row.layoutOverride;
-      row.overrides = {};
-    }));
-    toast(`Reset ${selected.size} slip customization${selected.size === 1 ? "" : "s"}`);
-  });
   $("#deleteRowsButton").addEventListener("click", async () => {
     const count = ui.selectedRows.size;
     if (!await confirmAction("Delete selected rows?", `${count} row${count === 1 ? "" : "s"} will be removed from this studio.`, "Delete")) return;
@@ -1794,7 +1802,6 @@ function installEvents() {
     });
     toast("Selected rows duplicated");
   });
-  $("#excludeRowsButton").addEventListener("click", () => commit((state) => state.rows.forEach((row) => { if (ui.selectedRows.has(row.id)) row.disabled = true; })));
 
   let draggedColumnId = null;
   $("#columnList").addEventListener("dragstart", (event) => {
@@ -1922,56 +1929,22 @@ function installEvents() {
 
   $$(".layout-mode").forEach((button) => button.addEventListener("click", () => commit((state) => { state.layout.mode = button.dataset.mode; })));
   const layoutBindings = {
-    paperInput: ["paper", String], orientationInput: ["orientation", String], acrossInput: ["across", Number], flowInput: ["flow", String], marginInput: ["margin", Number], gapInput: ["gap", Number], slipHeightInput: ["slipHeight", Number], accentInput: ["accent", String], inkInput: ["ink", String], paperColorInput: ["paperColor", String], borderColorInput: ["borderColor", String], labelSizeInput: ["labelSize", Number], valueSizeInput: ["valueSize", Number], fontInput: ["font", String], labelCaseInput: ["labelCase", String], fieldColumnsInput: ["fieldColumns", Number], labelPositionInput: ["labelPosition", String], valueAlignInput: ["valueAlign", String], labelWidthInput: ["labelWidth", Number], paddingInput: ["padding", Number], radiusInput: ["radius", Number], headerTextInput: ["headerText", String], subtitleInput: ["subtitle", String], footerTextInput: ["footerText", String], headerStyleInput: ["headerStyle", String],
+    paperInput: ["paper", String], orientationInput: ["orientation", String], marginInput: ["margin", Number], gapInput: ["gap", Number], slipHeightInput: ["slipHeight", Number], accentInput: ["accent", String], inkInput: ["ink", String], paperColorInput: ["paperColor", String], borderColorInput: ["borderColor", String], labelSizeInput: ["labelSize", Number], valueSizeInput: ["valueSize", Number], fontInput: ["font", String], labelCaseInput: ["labelCase", String],
   };
   Object.entries(layoutBindings).forEach(([id, [key, cast]]) => {
     $("#" + id).addEventListener(["slipHeightInput", "accentInput", "inkInput", "paperColorInput", "borderColorInput"].includes(id) ? "input" : "change", (event) => {
       if (["slipHeightInput", "accentInput", "inkInput", "paperColorInput", "borderColorInput"].includes(id)) {
         documentState.layout[key] = cast(event.target.value);
-        changed(); renderLayout(); renderPreview();
+        changed(); renderLayout(); schedulePdfPreview();
       } else commit((state) => { state.layout[key] = cast(event.target.value); });
     });
   });
-  [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"], ["zebraInput", "zebra"], ["showBlankFieldsInput", "showBlankFields"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
+  [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"], ["showBlankFieldsInput", "showBlankFields"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
   $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
-  $("#logoInput").addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!/^image\/(png|jpeg)$/i.test(file.type)) { toast("Choose a PNG or JPEG logo.", "error"); event.target.value = ""; return; }
-    if (file.size > 1024 * 1024) { toast("Logo files must be 1 MB or smaller.", "error"); event.target.value = ""; return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const logoData = safeLogoData(reader.result);
-      if (!logoData) { toast("That logo could not be read.", "error"); return; }
-      commit((state) => { state.layout.logoData = logoData; });
-      event.target.value = "";
-      toast("Logo added to the layout");
-    };
-    reader.onerror = () => toast("That logo could not be read.", "error");
-    reader.readAsDataURL(file);
-  });
-  $("#clearLogoButton").addEventListener("click", () => commit((state) => { state.layout.logoData = ""; }));
-  $("#saveLayoutPresetButton").addEventListener("click", saveLayoutPreset);
-  $("#layoutPresetName").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); saveLayoutPreset(); } });
-  $("#layoutPresetList").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-action]");
-    const presetElement = event.target.closest("[data-preset-id]");
-    if (!button || !presetElement) return;
-    const presetId = presetElement.dataset.presetId;
-    if (button.dataset.action === "apply-preset") {
-      const preset = documentState.presets.find((item) => item.id === presetId);
-      if (preset) { commit((state) => { state.layout = { ...defaultLayout, ...clone(preset.layout) }; }); toast(`Applied “${preset.name}”`); }
-    }
-    if (button.dataset.action === "delete-preset") {
-      commit((state) => { state.presets = state.presets.filter((item) => item.id !== presetId); });
-      toast("Layout removed");
-    }
-  });
-  $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(.45, ui.zoom - .08); renderPreview(); });
-  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(1.3, ui.zoom + .08); renderPreview(); });
-  $("#previewPrevButton").addEventListener("click", () => { ui.previewPage = Math.max(0, ui.previewPage - 1); renderPreview(); });
-  $("#previewNextButton").addEventListener("click", () => { ui.previewPage += 1; renderPreview(); });
-  $("#paperPreview").addEventListener("click", (event) => { const slip = event.target.closest("[data-preview-row-id]"); if (slip) { ui.selectedPreviewRow = slip.dataset.previewRowId; renderPreview(); } });
+  $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); applyPreviewZoom(); });
+  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); applyPreviewZoom(); });
+  $("#refreshPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
+  $("#openPreviewButton").addEventListener("click", () => { if (ui.previewUrl) window.open(`${ui.previewUrl}${previewFragment()}`, "_blank", "noopener"); });
 
   $("#workbookInput").addEventListener("change", (event) => importWorkbook(event.target.files[0]));
   $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); event.currentTarget.classList.add("drag-over"); });
@@ -2012,6 +1985,9 @@ function installEvents() {
   $("#confirmImportButton").addEventListener("click", confirmImport);
   $("#importDialog").addEventListener("close", resetImportDialog);
 
+  // Legacy per-row layout controls are intentionally retired. Row options now
+  // only contain field visibility overrides.
+  if (false) {
   $("#rowIncludedInput").addEventListener("change", (event) => commit((state) => { state.rows.find((row) => row.id === ui.rowOptionsId).disabled = !event.target.checked; }));
   $("#applyRowPresetButton").addEventListener("click", applyRowPreset);
   $("#rowLayoutEnabledInput").addEventListener("change", (event) => {
@@ -2097,6 +2073,7 @@ function installEvents() {
     commit((state) => { const row = state.rows.find((item) => item.id === ui.rowOptionsId); if (row) delete row.layoutOverride; });
     openRowOptions(ui.rowOptionsId);
   });
+  }
   $("#rowOverrideList").addEventListener("change", (event) => {
     const columnId = event.target.dataset.columnId;
     commit((state) => {

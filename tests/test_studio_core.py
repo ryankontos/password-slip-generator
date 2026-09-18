@@ -11,15 +11,15 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from studio_core import _display_value, _value_align, included_rows, parse_workbook, pdf_layout, render_pdf, row_pdf_layout, visible_columns  # noqa: E402
+from studio_core import _display_value, _value_align, included_rows, parse_workbook, pdf_layout, render_pdf, visible_columns  # noqa: E402
 
 
 def sample_state() -> dict:
     return {
         "name": "Test slips",
         "columns": [
-            {"id": "name", "label": "Name", "group": "Identity", "visibility": "always", "style": "strong", "width": 1},
-            {"id": "code", "label": "Code", "group": "Access", "visibility": "nonempty", "style": "mono", "width": 1},
+            {"id": "name", "label": "Name", "visibility": "always", "style": "strong", "width": 1},
+            {"id": "code", "label": "Code", "visibility": "nonempty", "style": "mono", "width": 1},
         ],
         "rows": [
             {"id": "one", "values": {"name": "Ava", "code": "A-123"}, "overrides": {}, "disabled": False},
@@ -27,7 +27,7 @@ def sample_state() -> dict:
             {"id": "three", "values": {"name": "Hidden", "code": "X"}, "overrides": {}, "disabled": True},
         ],
         "rules": [],
-        "layout": {"mode": "grid", "paper": "a4", "orientation": "portrait", "across": 1, "slipHeight": 42},
+        "layout": {"mode": "horizontal", "paper": "a4", "orientation": "portrait", "slipHeight": 36},
     }
 
 
@@ -68,41 +68,28 @@ class RuleTests(unittest.TestCase):
         state["rows"][1]["overrides"]["code"] = True
         self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name", "code"])
 
-    def test_individual_slip_can_reorder_visible_fields(self) -> None:
-        state = sample_state()
-        state["rows"][0]["layoutOverride"] = {"columnOrder": ["code", "name"]}
-        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][0])], ["code", "name"])
-        state["rows"][1]["layoutOverride"] = None
-        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name"])
-
     def test_layout_can_reserve_empty_conditional_fields(self) -> None:
         state = sample_state()
         state["layout"]["showBlankFields"] = True
         self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name", "code"])
 
-    def test_include_and_exclude_rules_are_evaluated_per_row(self) -> None:
+    def test_global_column_order_is_used_for_every_slip(self) -> None:
+        state = sample_state()
+        state["rows"][0]["layoutOverride"] = {"columnOrder": ["code", "name"]}
+        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][0])], ["name", "code"])
+
+    def test_every_data_row_is_included(self) -> None:
         state = sample_state()
         state["rules"] = [
-            {"enabled": True, "action": "include_row", "match": "all", "conditions": [{"field": "name", "operator": "contains", "value": "a"}]},
-            {"enabled": True, "action": "exclude_row", "match": "all", "conditions": [{"field": "code", "operator": "empty", "value": ""}]},
+            {"enabled": True, "action": "include_row", "conditions": [{"field": "name", "operator": "equals", "value": "Ava"}]},
+            {"enabled": True, "action": "exclude_row", "conditions": [{"field": "code", "operator": "empty", "value": ""}]},
         ]
-        self.assertEqual([row["id"] for row in included_rows(state)], ["one"])
-
-    def test_negated_rule_condition_group(self) -> None:
-        state = sample_state()
-        state["rules"] = [{
-            "enabled": True,
-            "action": "include_row",
-            "match": "all",
-            "negate": True,
-            "conditions": [{"field": "name", "operator": "contains", "value": "ava"}],
-        }]
-        self.assertEqual([row["id"] for row in included_rows(state)], ["two"])
+        self.assertEqual([row["id"] for row in included_rows(state)], ["one", "two", "three"])
 
 
 class PdfTests(unittest.TestCase):
-    def test_every_layout_mode_produces_a_pdf(self) -> None:
-        for mode in ("horizontal", "stacked", "grid", "compact", "dense", "cards", "ledger", "hero", "sections"):
+    def test_both_layout_modes_produce_a_pdf(self) -> None:
+        for mode in ("horizontal", "stacked"):
             with self.subTest(mode=mode):
                 state = sample_state()
                 state["layout"]["mode"] = mode
@@ -110,70 +97,20 @@ class PdfTests(unittest.TestCase):
                 self.assertTrue(pdf.startswith(b"%PDF"))
                 self.assertGreater(len(pdf), 1_000)
 
-    def test_sections_layout_handles_named_field_groups(self) -> None:
+    def test_colour_font_and_spacing_controls_produce_a_pdf(self) -> None:
         state = sample_state()
-        state["layout"].update({"mode": "sections", "fieldColumns": 2, "labelPosition": "top"})
-        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
-
-    def test_custom_layout_controls_produce_a_pdf(self) -> None:
-        state = sample_state()
-        state["rows"][0]["layoutOverride"] = {
-            "mode": "hero",
-            "accent": "#a64032",
-            "fieldColumns": 1,
-            "labelPosition": "left",
-            "valueAlign": "right",
-            "showBorder": False,
-        }
         state["layout"].update({
-            "mode": "cards",
-            "fieldColumns": 4,
-            "labelPosition": "left",
+            "mode": "stacked",
+            "accent": "#a64032",
             "valueAlign": "right",
             "labelWidth": 42,
             "padding": 3.5,
-            "radius": 2,
             "paperColor": "#fffdf5",
             "borderColor": "#7c8799",
             "font": "Times-Roman",
             "labelCase": "title",
             "fieldLines": False,
-            "zebra": True,
         })
-        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
-
-    def test_row_chrome_overrides_sheet_chrome(self) -> None:
-        state = sample_state()
-        state["layout"].update({"headerText": "Sheet title", "headerStyle": "line"})
-        state["rows"][0]["layoutOverride"] = {"headerText": "Row title", "headerStyle": "band", "footerText": "Keep secure"}
-        layout = row_pdf_layout(state, state["rows"][0], pdf_layout(state))
-        self.assertEqual(layout.header_text, "Row title")
-        self.assertEqual(layout.header_style, "band")
-        self.assertEqual(layout.footer_text, "Keep secure")
-        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
-
-    def test_row_typography_and_marks_overrides_are_safe(self) -> None:
-        state = sample_state()
-        state["rows"][0]["layoutOverride"] = {
-            "font": "Times-Roman",
-            "labelCase": "title",
-            "labelSize": 11,
-            "valueSize": 16,
-            "labelWidth": 48,
-            "padding": 4,
-            "radius": 3,
-            "ink": "#20252b",
-            "borderColor": "#6a7280",
-            "fieldLines": False,
-            "zebra": True,
-        }
-        layout = row_pdf_layout(state, state["rows"][0], pdf_layout(state))
-        self.assertEqual(layout.font, "Times-Roman")
-        self.assertEqual(layout.label_case, "title")
-        self.assertEqual(layout.label_size, 11)
-        self.assertEqual(layout.value_size, 16)
-        self.assertFalse(layout.field_lines)
-        self.assertTrue(layout.zebra)
         self.assertTrue(render_pdf(state).startswith(b"%PDF"))
 
     def test_column_alignment_can_override_sheet_alignment(self) -> None:
@@ -183,37 +120,36 @@ class PdfTests(unittest.TestCase):
         layout = pdf_layout(state)
         self.assertEqual(_value_align(state["columns"][0], layout), "right")
         self.assertEqual(_value_align(state["columns"][1], layout), "left")
-        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
 
-    def test_optional_logo_is_embedded_without_becoming_required(self) -> None:
+    def test_unknown_legacy_mode_falls_back_to_horizontal(self) -> None:
         state = sample_state()
-        state["layout"].update({
-            "logoData": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-            "headerText": "Access details",
-        })
-        layout = pdf_layout(state)
-        self.assertTrue(layout.logo_data.startswith("data:image/png;base64,"))
-        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
-
-    def test_row_logo_override_is_rendered_without_changing_sheet_logo(self) -> None:
-        state = sample_state()
-        state["layout"]["logoData"] = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-        state["rows"][0]["layoutOverride"] = {
-            "logoData": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        }
-        layout = row_pdf_layout(state, state["rows"][0], pdf_layout(state))
-        self.assertTrue(layout.logo_data.startswith("data:image/png;base64,"))
+        state["layout"]["mode"] = "grid"
+        self.assertEqual(pdf_layout(state).mode, "horizontal")
         self.assertTrue(render_pdf(state).startswith(b"%PDF"))
 
     def test_large_projects_render_multiple_pages(self) -> None:
         state = sample_state()
         state["rows"] = [
-            {"id": f"row-{index}", "values": {"name": f"Person {index}", "code": f"CODE-{index}"}, "overrides": {}, "disabled": False}
+            {"id": f"row-{index}", "values": {"name": f"Person {index}", "code": f"CODE-{index}"}, "overrides": {}}
             for index in range(14)
         ]
-        state["layout"].update({"across": 2, "slipHeight": 70, "flow": "columns"})
+        state["layout"].update({"slipHeight": 70})
         pdf = render_pdf(state)
         self.assertGreaterEqual(pdf.count(b"/Type /Page"), 2)
+
+    def test_stacked_layout_handles_many_columns(self) -> None:
+        state = sample_state()
+        state["columns"] = [
+            {"id": f"field_{index}", "label": f"Field {index}", "visibility": "always", "style": "standard", "width": 1}
+            for index in range(12)
+        ]
+        state["rows"] = [{
+            "id": "many",
+            "values": {column["id"]: f"Value {index}" for index, column in enumerate(state["columns"])},
+            "overrides": {},
+        }]
+        state["layout"].update({"mode": "stacked", "slipHeight": 72})
+        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
 
 
 if __name__ == "__main__":
