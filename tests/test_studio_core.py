@@ -78,13 +78,33 @@ class RuleTests(unittest.TestCase):
         state["rows"][0]["layoutOverride"] = {"columnOrder": ["code", "name"]}
         self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][0])], ["name", "code"])
 
-    def test_every_data_row_is_included(self) -> None:
+    def test_only_explicitly_hidden_rows_are_excluded(self) -> None:
         state = sample_state()
+        state["rows"][1]["hidden"] = True
+        self.assertEqual([row["id"] for row in included_rows(state)], ["one"])
+
+    def test_hide_slip_rule_can_match_empty_or_exact_values(self) -> None:
+        state = sample_state()
+        state["rows"][2]["disabled"] = False
+        state["rules"] = [{
+            "enabled": True,
+            "action": "hide_slip",
+            "match": "any",
+            "conditions": [
+                {"field": "code", "operator": "empty", "value": ""},
+                {"field": "name", "operator": "equals", "value": "Hidden"},
+            ],
+        }]
+        self.assertEqual([row["id"] for row in included_rows(state)], ["one"])
+
+    def test_hide_field_wins_when_show_and_hide_rules_both_match(self) -> None:
+        state = sample_state()
+        condition = [{"field": "name", "operator": "equals", "value": "Ava"}]
         state["rules"] = [
-            {"enabled": True, "action": "include_row", "conditions": [{"field": "name", "operator": "equals", "value": "Ava"}]},
-            {"enabled": True, "action": "exclude_row", "conditions": [{"field": "code", "operator": "empty", "value": ""}]},
+            {"enabled": True, "action": "hide_field", "target": "code", "conditions": condition},
+            {"enabled": True, "action": "show_field", "target": "code", "conditions": condition},
         ]
-        self.assertEqual([row["id"] for row in included_rows(state)], ["one", "two", "three"])
+        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][0])], ["name"])
 
 
 class PdfTests(unittest.TestCase):
@@ -108,6 +128,7 @@ class PdfTests(unittest.TestCase):
             "paperColor": "#fffdf5",
             "borderColor": "#7c8799",
             "font": "Times-Roman",
+            "labelFont": "Courier",
             "labelCase": "title",
             "fieldLines": False,
         })

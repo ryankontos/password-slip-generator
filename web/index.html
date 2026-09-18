@@ -32,7 +32,7 @@
     <aside class="rail">
       <nav class="rail-nav" aria-label="Studio sections">
         <button class="nav-item active" data-view="data"><span class="nav-icon">▦</span><span>Data</span><kbd>D</kbd></button>
-        <button class="nav-item" data-view="columns"><span class="nav-icon">⫶</span><span>Columns</span><span id="columnCount" class="nav-count">4</span></button>
+        <button class="nav-item" data-view="columns"><span class="nav-icon">⫶</span><span>Fields</span><span id="columnCount" class="nav-count">4</span></button>
         <button class="nav-item" data-view="rules"><span class="nav-icon">⌁</span><span>Rules</span><span id="ruleCount" class="nav-count">1</span></button>
         <button class="nav-item" data-view="layout"><span class="nav-icon">▤</span><span>Layout</span><kbd>L</kbd></button>
       </nav>
@@ -81,6 +81,8 @@
           <button id="exportSelectedButton" class="button quiet compact">Export selected</button>
           <button id="bulkEditButton" class="button quiet compact">Bulk edit</button>
           <button id="duplicateRowsButton" class="button quiet compact">Duplicate</button>
+          <button id="hideRowsButton" class="button quiet compact">Hide slips</button>
+          <button id="showRowsButton" class="button quiet compact">Show slips</button>
           <button id="deleteRowsButton" class="button danger quiet compact">Delete</button>
           <button id="clearSelectionButton" class="button quiet compact push-right">Clear</button>
         </div>
@@ -109,18 +111,18 @@
 
       <div id="columnsView" class="view">
         <div class="view-header">
-          <div><h1>Columns</h1><p>Drag to set the order used in every slip.</p></div>
-          <button id="addColumnButton" class="button primary">＋ Add column</button>
+          <div><h1>Fields</h1><p>Choose what each slip contains and drag to set its order.</p></div>
+          <button id="addColumnButton" class="button primary">＋ Add field</button>
         </div>
           <div class="column-toolbar">
-          <span>Field</span><span>Format</span><span>Show field</span><span>Flags</span><span>Width</span><span></span>
+          <span>Field</span><span>Value style</span><span>Default visibility</span><span>Validation</span><span>Horizontal size</span><span></span>
         </div>
         <div id="columnList" class="column-list"></div>
       </div>
 
       <div id="rulesView" class="view">
         <div class="view-header">
-          <div><h1>Rules</h1><p>Rules run independently for every row.</p></div>
+          <div><h1>Rules</h1><p>Rules run per slip. If show and hide both match a field, hide wins.</p></div>
           <button id="addRuleButton" class="button primary">＋ Add rule</button>
         </div>
         <div class="rule-summary-bar">
@@ -168,7 +170,8 @@
               <label>Rule colour<input id="borderColorInput" type="color"></label>
               <label>Labels <span class="unit">pt</span><input id="labelSizeInput" type="number" min="4" max="18" step="1"></label>
               <label>Values <span class="unit">pt</span><input id="valueSizeInput" type="number" min="5" max="26" step="1"></label>
-              <label>Typeface<select id="fontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Label typeface<select id="labelFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Value typeface<select id="fontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
               <label>Label case<select id="labelCaseInput"><option value="original">Original</option><option value="upper">UPPERCASE</option><option value="title">Title Case</option></select></label>
             </div>
           </section>
@@ -218,6 +221,7 @@
           <label>Data handling<select id="importMode"><option value="replace">Replace all existing rows</option><option value="append">Append to existing rows</option></select></label>
           <label>Which rows<select id="importRowSelectionMode"><option value="all">All non-empty rows</option><option value="manual">Specific row numbers</option></select></label>
           <label>Column handling<select id="importColumnMode"><option value="replace">Overwrite all existing columns</option><option value="merge">Keep columns · map selected</option></select></label>
+          <label>Imported slips<select id="importRowVisibility"><option value="printable">Printable</option><option value="hidden">Hidden · keep in studio only</option></select></label>
           <label id="importRowNumbersWrap" class="span-two" hidden>Spreadsheet row numbers <input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Use commas and ranges. Row 1 is the header; hidden rows stay excluded.</small></label>
           <div class="import-config-control"><label>Mapping configuration<select id="importConfigSelect"><option value="">Ad hoc mapping</option></select></label><button id="saveImportConfigButton" class="button secondary compact" type="button">＋ Save mapping</button><button id="deleteImportConfigButton" class="icon-button small" type="button" title="Delete saved mapping" aria-label="Delete saved mapping" disabled>×</button></div>
           <label class="span-two">Project name <input id="importProjectName" type="text" placeholder="Leave unchanged"></label>
@@ -235,8 +239,10 @@
 
   <dialog id="rowOptionsDialog" class="modal">
     <form method="dialog" class="modal-card small-card">
-      <header class="modal-header"><div><h2>Field visibility</h2><p id="rowOptionsName"></p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <header class="modal-header"><div><h2>Row options</h2><p id="rowOptionsName"></p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
       <div class="modal-body">
+        <label class="toggle-row bordered"><input id="rowPrintableInput" type="checkbox"><span class="switch"></span><span><strong>Print this slip</strong><small>Hidden rows remain editable and available to rules</small></span></label>
+        <h3 class="section-label">Field visibility</h3>
         <div id="rowOverrideList" class="override-list"></div>
       </div>
       <footer class="modal-footer"><span>Automatic uses the column and rule settings.</span><button class="button primary" value="default">Done</button></footer>

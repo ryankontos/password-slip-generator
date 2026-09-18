@@ -217,6 +217,7 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .rule-body { padding: 13px; }
 .rule-action-row { display: grid; grid-template-columns: 74px minmax(175px, 1fr) minmax(145px, .85fr); gap: 8px; align-items: center; margin-bottom: 12px; }
 .rule-action-row > span, .condition-row > span { color: var(--muted); font-size: 11px; }
+.rule-action-row > .rule-target-label { min-height: 33px; display: flex; align-items: center; padding: 0 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-soft); color: var(--muted); font-size: 12px; }
 .rule-action-row .target-placeholder { display: none; }
 .conditions { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-soft); }
 .condition-row { display: grid; grid-template-columns: 42px minmax(120px, 1fr) minmax(120px, .9fr) minmax(100px, 1fr) 28px; gap: 7px; align-items: center; }

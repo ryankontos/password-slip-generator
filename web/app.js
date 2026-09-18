@@ -26,6 +26,7 @@ const defaultLayout = Object.freeze({
   labelSize: 10,
   valueSize: 14,
   font: "Helvetica",
+  labelFont: "Helvetica",
   labelCase: "original",
   valueAlign: "left",
   labelWidth: 34,
@@ -103,7 +104,7 @@ function normaliseDocument(input) {
   document.name = String(document.name || "Untitled password slips");
   document.columns = Array.isArray(document.columns) ? document.columns : [];
   document.rows = Array.isArray(document.rows) ? document.rows : [];
-  document.rules = Array.isArray(document.rules) ? document.rules.filter((rule) => ["show_field", "hide_field"].includes(rule?.action)) : [];
+  document.rules = Array.isArray(document.rules) ? document.rules.filter((rule) => ["show_field", "hide_field", "hide_slip"].includes(rule?.action)) : [];
   document.views = Array.isArray(document.views) ? document.views.filter((view) => view && typeof view === "object").map((view) => ({
     id: String(view.id || uid("view")),
     name: String(view.name || "Saved view"),
@@ -116,6 +117,7 @@ function normaliseDocument(input) {
     name: String(config.name || "Import mapping"),
     rowMode: config.rowMode === "append" ? "append" : "replace",
     columnMode: config.columnMode === "replace" ? "replace" : "merge",
+    rowVisibility: config.rowVisibility === "hidden" ? "hidden" : "printable",
     mappings: Array.isArray(config.mappings) ? config.mappings.map((mapping) => ({
       sourceHeader: String(mapping?.sourceHeader || ""),
       include: Boolean(mapping?.include),
@@ -143,7 +145,8 @@ function normaliseDocument(input) {
     row.values = row.values && typeof row.values === "object" ? row.values : {};
     row.overrides = row.overrides && typeof row.overrides === "object" ? row.overrides : {};
     row.layoutOverride = {};
-    row.disabled = false;
+    row.hidden = Boolean(row.hidden || row.disabled);
+    delete row.disabled;
   });
   return document;
 }
@@ -390,19 +393,28 @@ function ruleMatches(rule, values) {
   return rule.negate ? !matched : matched;
 }
 
+function includedRowsFor(state) {
+  const hideRules = (state.rules || []).filter((rule) => rule.enabled !== false && rule.action === "hide_slip");
+  return (state.rows || []).filter((row) => !row.hidden && !hideRules.some((rule) => ruleMatches(rule, row.values || {})));
+}
+
 function includedRows() {
-  return documentState.rows;
+  return includedRowsFor(documentState);
+}
+
+function rowHiddenReason(row) {
+  if (row.hidden) return "Hidden manually";
+  const rule = documentState.rules.find((item) => item.enabled !== false && item.action === "hide_slip" && ruleMatches(item, row.values));
+  return rule ? `Hidden by rule: ${rule.name || "Unnamed rule"}` : "";
 }
 
 function visibleColumns(row) {
   const rules = documentState.rules.filter((rule) => rule.enabled !== false);
   const visible = documentState.columns.filter((column) => {
     let shown = column.visibility === "always" || (column.visibility === "nonempty" && (documentState.layout.showBlankFields || Boolean(String(row.values[column.id] ?? "").trim())));
-    rules.forEach((rule) => {
-      if (rule.target !== column.id || !ruleMatches(rule, row.values)) return;
-      if (rule.action === "show_field") shown = true;
-      if (rule.action === "hide_field") shown = false;
-    });
+    const matchingActions = new Set(rules.filter((rule) => rule.target === column.id && ruleMatches(rule, row.values)).map((rule) => rule.action));
+    if (matchingActions.has("hide_field")) shown = false;
+    else if (matchingActions.has("show_field")) shown = true;
     if (row.overrides?.[column.id] === true) shown = true;
     if (row.overrides?.[column.id] === false) shown = false;
     return shown;
@@ -439,24 +451,28 @@ function renderData() {
   $("#sortColumn").innerHTML = `<option value="">Original order</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}">${escapeHtml(column.label)}</option>`).join("")}`;
   $("#sortColumn").value = documentState.columns.some((column) => column.id === previousSort) ? previousSort : "";
   $("#sortDirection").value = ui.sortDirection;
-  $("#dataSummary").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.columns.length} column${documentState.columns.length === 1 ? "" : "s"}`;
+  $("#dataSummary").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
   $("#dataHead").innerHTML = `<tr><th><input id="selectAllRows" type="checkbox" aria-label="Select all filtered rows" ${allRows.length && allRows.every((row) => ui.selectedRows.has(row.id)) ? "checked" : ""}></th><th class="row-number-head">#</th>${documentState.columns.map((column) => `<th style="width:${Math.max(115, column.width * 130)}px">${escapeHtml(column.label)}</th>`).join("")}<th class="row-menu-head"></th></tr>`;
   $("#dataBody").innerHTML = rows.map((row) => {
     const originalIndex = documentState.rows.indexOf(row) + 1;
     const customized = Object.keys(row.overrides || {}).length > 0;
-    return `<tr data-row-id="${row.id}" class="${ui.selectedRows.has(row.id) ? "selected" : ""} ${customized ? "customized" : ""}">
+    const hiddenReason = rowHiddenReason(row);
+    return `<tr data-row-id="${row.id}" class="${ui.selectedRows.has(row.id) ? "selected" : ""} ${customized ? "customized" : ""} ${hiddenReason ? "excluded" : ""}" title="${escapeHtml(hiddenReason)}">
       <td class="select-cell"><input class="row-select" type="checkbox" ${ui.selectedRows.has(row.id) ? "checked" : ""} aria-label="Select row ${originalIndex}"></td>
-      <td class="row-number" draggable="true" title="${customized ? "Field visibility override set · drag to reorder" : "Drag to reorder"}">⠿ ${originalIndex}${customized ? " ✦" : ""}</td>
+      <td class="row-number" draggable="true">⠿ ${originalIndex}${hiddenReason ? " ⊘" : ""}${customized ? " ✦" : ""}</td>
       ${documentState.columns.map((column) => { const missing = column.required && !String(row.values?.[column.id] ?? "").trim(); const duplicate = hasDuplicateValue(row, column, duplicateCounts); const issue = valueValidationIssue(row, column); const stateClass = [missing ? "missing-required" : "", duplicate ? "duplicate-value" : "", issue ? "invalid-value" : ""].filter(Boolean).join(" "); const invalid = missing || issue; return `<td class="${stateClass}"${issue ? ` title="${escapeHtml(issue)}"` : ""}><input type="${inputTypeForColumn(column)}" class="cell-input ${column.style === "mono" || column.type === "password" ? "password-cell" : ""}" data-column-id="${column.id}" value="${escapeHtml(row.values[column.id] || "")}" aria-label="${escapeHtml(column.label)}, row ${originalIndex}" ${invalid ? "aria-invalid=\"true\"" : ""} ${duplicate ? "data-duplicate=\"true\"" : ""}></td>`; }).join("")}
       <td class="row-menu"><button class="row-menu-button" data-action="row-options" title="Row options" aria-label="Row ${originalIndex} options">•••</button></td>
     </tr>`;
   }).join("");
   $("#dataEmpty").hidden = Boolean(allRows.length);
-  const incomplete = documentState.rows.filter((row) => missingRequiredColumns(row).length).length;
-  const duplicates = documentState.rows.filter((row) => documentState.columns.some((column) => hasDuplicateValue(row, column, duplicateCounts))).length;
-  const invalid = documentState.rows.filter((row) => documentState.columns.some((column) => valueValidationIssue(row, column))).length;
+  const printableRows = includedRows();
+  const printableDuplicateCounts = duplicateValueCounts(printableRows, documentState.columns);
+  const incomplete = printableRows.filter((row) => missingRequiredColumns(row).length).length;
+  const duplicates = printableRows.filter((row) => documentState.columns.some((column) => hasDuplicateValue(row, column, printableDuplicateCounts))).length;
+  const invalid = printableRows.filter((row) => documentState.columns.some((column) => valueValidationIssue(row, column))).length;
+  const hidden = documentState.rows.filter((row) => rowHiddenReason(row)).length;
   const rowText = ui.search ? `${allRows.length} of ${documentState.rows.length} rows` : `${documentState.rows.length} rows`;
-  const warnings = [incomplete ? `${incomplete} incomplete` : "", duplicates ? `${duplicates} with duplicates` : "", invalid ? `${invalid} invalid` : ""].filter(Boolean);
+  const warnings = [hidden ? `${hidden} hidden` : "", incomplete ? `${incomplete} incomplete` : "", duplicates ? `${duplicates} with duplicates` : "", invalid ? `${invalid} invalid` : ""].filter(Boolean);
   $("#visibleRowCount").textContent = warnings.length ? `${rowText} · ${warnings.join(" · ")}` : rowText;
   $("#visibleRowCount").classList.toggle("warning-text", warnings.length > 0);
   $("#pageSizeInput").value = String(ui.pageSize);
@@ -585,12 +601,12 @@ function columnOptions(selected) {
 
 function renderColumns() {
   $("#columnList").innerHTML = documentState.columns.map((column) => `<article class="column-row" data-column-id="${column.id}" draggable="true">
-    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Column label"><input class="column-group-input" value="${escapeHtml(column.group || "")}" aria-label="${escapeHtml(column.label)} group" placeholder="Group (optional)"><span class="column-key">${escapeHtml(column.id)}</span><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select><select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Sheet alignment</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></div></div>
+    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select><select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default alignment</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></div></div>
     <select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select>
     <select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select>
-    <div class="column-flags"><label><input class="column-required-input" type="checkbox" ${column.required ? "checked" : ""}> Required</label><label><input class="column-unique-input" type="checkbox" ${column.unique ? "checked" : ""}> Unique</label></div>
-    <label class="column-width"><input class="column-width-input" type="range" min="0.5" max="3" step="0.1" value="${column.width}"><span>${Number(column.width).toFixed(1)}×</span></label>
-    <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate column">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete column">×</button></div>
+    <div class="column-flags"><label><input class="column-required-input" type="checkbox" ${column.required ? "checked" : ""}> Required value</label><label><input class="column-unique-input" type="checkbox" ${column.unique ? "checked" : ""}> No duplicates</label></div>
+    <label class="column-width" title="Relative space used by this field in Horizontal layout"><input class="column-width-input" type="range" min="0.5" max="3" step="0.1" value="${column.width}"><span>${Number(column.width).toFixed(1)}×</span></label>
+    <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field">×</button></div>
   </article>`).join("");
 }
 
@@ -611,6 +627,7 @@ const operatorLabels = {
 const actionLabels = {
   show_field: "Show field",
   hide_field: "Hide field",
+  hide_slip: "Hide entire slip",
 };
 
 function actionOptions(selected) {
@@ -628,18 +645,19 @@ function renderRules() {
   const testRow = testRows.find((row) => row.id === ui.ruleTestRowId);
   if (!testRow) ui.ruleTestRowId = "";
   if (testSelect) {
-    testSelect.innerHTML = `<option value="">No row selected</option>${testRows.map((row, index) => { const label = documentState.columns.map((column) => String(row.values?.[column.id] ?? "").trim()).find(Boolean) || `Row ${index + 1}`; return `<option value="${escapeHtml(row.id)}">${escapeHtml(`Row ${index + 1} · ${label}`)}${row.disabled ? " · excluded" : ""}</option>`; }).join("")}`;
+    testSelect.innerHTML = `<option value="">No row selected</option>${testRows.map((row, index) => { const label = documentState.columns.map((column) => String(row.values?.[column.id] ?? "").trim()).find(Boolean) || `Row ${index + 1}`; return `<option value="${escapeHtml(row.id)}">${escapeHtml(`Row ${index + 1} · ${label}`)}${row.hidden ? " · hidden" : ""}</option>`; }).join("")}`;
     testSelect.value = ui.ruleTestRowId;
     testSelect.disabled = !testRows.length;
   }
   const selectedTestRow = testRows.find((row) => row.id === ui.ruleTestRowId);
-  $("#ruleTestStatus").textContent = selectedTestRow ? "Rule matches are shown on each card" : (testRows.length ? "Select a row to inspect its rule matches" : "Add or import rows to test rules");
+  const selectedHiddenReason = selectedTestRow ? rowHiddenReason(selectedTestRow) : "";
+  $("#ruleTestStatus").textContent = selectedTestRow ? (selectedHiddenReason || "Printable · rule matches are shown on each card") : (testRows.length ? "Select a row to inspect its rule matches" : "Add or import rows to test rules");
   $("#ruleSummary").textContent = `${active} active rule${active === 1 ? "" : "s"} · ${documentState.rules.length} total`;
   $("#disableRulesButton").textContent = active ? "Disable all" : "Enable all";
   $("#ruleList").innerHTML = documentState.rules.map((rule, index) => { const matching = documentState.rows.filter((row) => ruleMatches(rule, row.values)).length; const testMatch = selectedTestRow && rule.enabled !== false ? ruleMatches(rule, selectedTestRow.values) : null; const testLabel = selectedTestRow ? (rule.enabled === false ? "Disabled" : testMatch ? "Matches test row" : "No match") : ""; return `<article class="rule-card ${rule.enabled === false ? "disabled" : ""}" data-rule-id="${rule.id}" draggable="true">
     <header class="rule-header"><span class="rule-number">${index + 1}</span><input class="rule-name-input" value="${escapeHtml(rule.name || actionLabels[rule.action] || "Rule")}" aria-label="Rule name"><span class="rule-match-count">${matching} matching</span>${testLabel ? `<span class="rule-test-chip ${testMatch ? "pass" : "fail"}">${escapeHtml(testLabel)}</span>` : ""}<label class="rule-enabled"><input class="rule-enabled-input" type="checkbox" ${rule.enabled !== false ? "checked" : ""}> Active</label><button class="icon-button small" data-action="duplicate-rule" title="Duplicate rule">⧉</button><button class="icon-button small" data-action="delete-rule" title="Delete rule">×</button></header>
     <div class="rule-body">
-      <div class="rule-action-row"><span>Then</span><select class="rule-action-input">${actionOptions(rule.action)}</select><select class="rule-target-input">${columnOptions(rule.target)}</select></div>
+      <div class="rule-action-row"><span>Then</span><select class="rule-action-input">${actionOptions(rule.action)}</select>${rule.action === "hide_slip" ? `<span class="rule-target-label">Entire slip</span>` : `<select class="rule-target-input">${columnOptions(rule.target)}</select>`}</div>
       <div class="conditions">
         ${(rule.conditions || []).map((condition, conditionIndex) => `<div class="condition-row" data-condition-index="${conditionIndex}"><span class="condition-join">${conditionIndex ? (rule.match === "any" ? "OR" : "AND") : "If"}</span><select class="condition-field">${columnOptions(condition.field)}</select><select class="condition-operator">${operatorOptions(condition.operator)}</select><input class="condition-value" value="${escapeHtml(condition.value || "")}" placeholder="Value" ${["empty", "not_empty"].includes(condition.operator) ? "hidden" : ""}><button class="condition-delete" data-action="delete-condition" title="Remove condition">×</button></div>`).join("")}
         <div class="condition-footer"><button class="text-button" data-action="add-condition">＋ Add condition</button><label class="match-control">Match<select class="rule-match-input"><option value="all" ${rule.match !== "any" ? "selected" : ""}>all conditions</option><option value="any" ${rule.match === "any" ? "selected" : ""}>any condition</option></select></label><label class="negate-control"><input class="rule-negate-input" type="checkbox" ${rule.negate ? "checked" : ""}> Not</label></div>
@@ -667,6 +685,7 @@ function renderLayout() {
     labelSizeInput: layout.labelSize,
     valueSizeInput: layout.valueSize,
     fontInput: layout.font,
+    labelFontInput: layout.labelFont,
     labelCaseInput: layout.labelCase,
     fieldColumnsInput: layout.fieldColumns,
     labelPositionInput: layout.labelPosition,
@@ -879,6 +898,13 @@ function schedulePdfPreview(immediate = false) {
     $("#previewStatus").textContent = "Actual exported PDF";
     return;
   }
+  const printableCount = includedRows().length;
+  if (!printableCount) {
+    clearPdfPreview("No printable slips. Show a hidden row or change the hide-slip rules to render a PDF.");
+    $("#previewStats").textContent = `0 printable · ${documentState.rows.length} stored`;
+    $("#previewStatus").textContent = "Nothing to preview";
+    return;
+  }
   $("#previewStatus").textContent = "Rendering PDF…";
   ui.previewTimer = setTimeout(renderPdfPreview, immediate ? 0 : 400);
 }
@@ -905,7 +931,9 @@ async function renderPdfPreview() {
     frame.hidden = false;
     $("#previewPlaceholder").hidden = true;
     $("#openPreviewButton").disabled = false;
-    $("#previewStats").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.layout.mode}`;
+    const printableCount = includedRows().length;
+    const storedSuffix = printableCount === documentState.rows.length ? "" : ` · ${documentState.rows.length} stored`;
+    $("#previewStats").textContent = `${printableCount} printable${storedSuffix} · ${documentState.layout.mode}`;
     $("#previewStatus").textContent = "Actual exported PDF · up to date";
     $("#zoomLabel").textContent = `${ui.zoom}%`;
   } catch (error) {
@@ -921,7 +949,7 @@ function renderPreview() {
 }
 
 function addRow() {
-  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, ""])), disabled: false, overrides: {}, layoutOverride: {} };
+  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, ""])), hidden: false, overrides: {}, layoutOverride: {} };
   commit((state) => state.rows.push(row));
   showView("data");
   requestAnimationFrame(() => $(`[data-row-id="${row.id}"] .cell-input`)?.focus());
@@ -958,6 +986,7 @@ function openRowOptions(rowId) {
   if (!row) return;
   ui.rowOptionsId = rowId;
   $("#rowOptionsName").textContent = documentState.columns.map((column) => row.values[column.id]).find(Boolean) || `Row ${documentState.rows.indexOf(row) + 1}`;
+  $("#rowPrintableInput").checked = !row.hidden;
   $("#rowOverrideList").innerHTML = documentState.columns.map((column) => `<label class="override-row"><strong>${escapeHtml(column.label)}</strong><select data-column-id="${column.id}"><option value="auto" ${row.overrides[column.id] == null ? "selected" : ""}>Automatic</option><option value="show" ${row.overrides[column.id] === true ? "selected" : ""}>Always show</option><option value="hide" ${row.overrides[column.id] === false ? "selected" : ""}>Always hide</option></select></label>`).join("");
   if (!$("#rowOptionsDialog").open) $("#rowOptionsDialog").showModal();
 }
@@ -1126,7 +1155,7 @@ function pasteIntoDataGrid(event) {
   event.preventDefault();
   commit((state) => {
     for (let index = 0; index < additions; index += 1) {
-      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, ""])), disabled: false, overrides: {}, layoutOverride: {} };
+      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, ""])), hidden: false, overrides: {}, layoutOverride: {} };
       state.rows.push(row);
       rowIds.push(row.id);
     }
@@ -1159,7 +1188,7 @@ function safeFilename(value) {
 
 function exportValidationIssues(source) {
   const columns = Array.isArray(source.columns) ? source.columns : [];
-  const rows = Array.isArray(source.rows) ? source.rows : [];
+  const rows = includedRowsFor(source);
   const incompleteRows = rows.filter((row) => columns.some((column) => column.required && !String(row.values?.[column.id] ?? "").trim()));
   const duplicateCounts = duplicateValueCounts(rows, columns);
   const duplicateRows = rows.filter((row) => columns.some((column) => hasDuplicateValue(row, column, duplicateCounts)));
@@ -1169,7 +1198,8 @@ function exportValidationIssues(source) {
 
 async function exportPdf(source = documentState, filenameSuffix = "", triggerButton = null) {
   if (!Array.isArray(source.rows) || !source.rows.length) { toast("There are no data rows to export. Import a sheet or add a row first.", "error"); return; }
-  if (!Array.isArray(source.columns) || !source.columns.length) { toast("Add at least one column before exporting.", "error"); return; }
+  if (!includedRowsFor(source).length) { toast("Every row is hidden by its row setting or a hide-slip rule.", "error"); return; }
+  if (!Array.isArray(source.columns) || !source.columns.length) { toast("Add at least one field before exporting.", "error"); return; }
   const issues = exportValidationIssues(source);
   const warnings = [];
   if (issues.incompleteRows.length) warnings.push(`${issues.incompleteRows.length} row${issues.incompleteRows.length === 1 ? " is" : "s are"} missing required values`);
@@ -1198,18 +1228,19 @@ async function exportPdf(source = documentState, filenameSuffix = "", triggerBut
 
 async function exportSelectedRows() {
   const ids = new Set(ui.selectedRows);
-  const rows = documentState.rows.filter((row) => ids.has(row.id));
-  if (!rows.length) { toast("Select at least one row", "error"); return; }
+  const rows = includedRows().filter((row) => ids.has(row.id));
+  if (!rows.length) { toast("The selected rows are hidden by their row setting or a rule", "error"); return; }
   const source = clone(documentState);
-  source.rows = rows.map((row) => ({ ...clone(row), disabled: false }));
+  source.rows = rows.map((row) => clone(row));
   await exportPdf(source, "-selected");
 }
 
 async function exportVisibleRows() {
-  const rows = filteredRows();
-  if (!rows.length) { toast("No rows match the current view", "error"); return; }
+  const printable = new Set(includedRows().map((row) => row.id));
+  const rows = filteredRows().filter((row) => printable.has(row.id));
+  if (!rows.length) { toast("No printable rows match the current view", "error"); return; }
   const source = clone(documentState);
-  source.rows = rows.map((row) => ({ ...clone(row), disabled: false }));
+  source.rows = rows.map((row) => clone(row));
   await exportPdf(source, "-view", $("#exportVisibleButton"));
 }
 
@@ -1246,6 +1277,7 @@ function resetImportDialog() {
   $("#workbookInput").value = "";
   $("#importMode").value = "replace";
   $("#importRowSelectionMode").value = "all";
+  $("#importRowVisibility").value = "printable";
   $("#importRowNumbers").value = "";
   $("#importColumnMode").value = "replace";
   $("#importProjectName").value = "";
@@ -1352,7 +1384,7 @@ function updateImportRowSelectionControls() {
 }
 
 function importTargetOptions(selected) {
-  return `<option value="__create__" ${selected === "__create__" ? "selected" : ""}>Create new column</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}" ${column.id === selected ? "selected" : ""}>Add to “${escapeHtml(column.label)}”</option>`).join("")}`;
+  return `<option value="__create__" ${selected === "__create__" ? "selected" : ""}>Create new field</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}" ${column.id === selected ? "selected" : ""}>Add to “${escapeHtml(column.label)}”</option>`).join("")}`;
 }
 
 function selectedImportConfig() {
@@ -1466,6 +1498,7 @@ function updateImportModeNotice() {
   updateImportRowSelectionControls();
   const replace = $("#importMode").value === "replace";
   const overwriteColumns = $("#importColumnMode").value === "replace";
+  const hiddenRows = $("#importRowVisibility").value === "hidden";
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
   const selection = selectedImportRows(sheet);
   const incoming = selection.entries.length;
@@ -1477,10 +1510,13 @@ function updateImportModeNotice() {
   const rowNotice = replace
     ? `Rows: all ${documentState.rows.length} existing rows will be removed and replaced by ${selectedNotice}.`
     : `Rows: ${selectedNotice} will be added after the current ${documentState.rows.length} rows.`;
+  const visibilityNotice = hiddenRows
+    ? "Imported rows will be hidden from preview and PDF but remain available in the studio and rule tester."
+    : "Imported rows will be printable unless a hide-slip rule matches.";
   const columnNotice = overwriteColumns
     ? "Columns: only checked source columns will replace the current columns."
     : "Columns: only checked source columns will be mapped or added; unchecked columns stay out of the studio.";
-  $("#importModeNotice").textContent = `${rowNotice} ${columnNotice}`;
+  $("#importModeNotice").textContent = `${rowNotice} ${visibilityNotice} ${columnNotice}`;
   $("#confirmImportButton").textContent = replace ? "Replace rows" : "Import rows";
   updateImportMappingControls();
   updateImportWarning();
@@ -1500,6 +1536,7 @@ function confirmImport() {
   }
   const replaceRows = $("#importMode").value === "replace";
   const overwriteColumns = $("#importColumnMode").value === "replace";
+  const importHidden = $("#importRowVisibility").value === "hidden";
   const mappings = currentImportMappings().filter((mapping) => mapping.include && mapping.target !== "__skip__");
   if (!mappings.length) {
     toast("Check at least one sheet column to import.", "error");
@@ -1532,7 +1569,7 @@ function confirmImport() {
     if (overwriteColumns) {
       state.columns = nextColumns;
       const validColumns = new Set(state.columns.map((column) => column.id));
-      state.rules = state.rules.filter((rule) => validColumns.has(rule.target) && Array.isArray(rule.conditions) && rule.conditions.every((condition) => validColumns.has(condition.field)));
+      state.rules = state.rules.filter((rule) => (rule.action === "hide_slip" || validColumns.has(rule.target)) && Array.isArray(rule.conditions) && rule.conditions.every((condition) => validColumns.has(condition.field)));
       state.rows.forEach((row) => { row.values = Object.fromEntries(state.columns.map((column) => [column.id, ""])); row.overrides = {}; row.layoutOverride = {}; });
     } else {
       state.columns = nextColumns;
@@ -1541,7 +1578,7 @@ function confirmImport() {
     const imported = sourceRows.map((source) => {
       const values = Object.fromEntries(state.columns.map((column) => [column.id, ""]));
       targetIds.forEach((target, sourceIndex) => { values[target] = String(source[sourceIndex] ?? ""); });
-      return { id: uid("row"), values, disabled: false, overrides: {}, layoutOverride: {} };
+      return { id: uid("row"), values, hidden: importHidden, overrides: {}, layoutOverride: {} };
     });
     if (replaceRows) state.rows = imported;
     else state.rows.push(...imported);
@@ -1551,7 +1588,7 @@ function confirmImport() {
   ui.dataPage = 0;
   $("#importDialog").close();
   showView("data");
-  toast(`${selection.entries.length} row${selection.entries.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"} · ${mappings.length} column${mappings.length === 1 ? "" : "s"} included`);
+  toast(`${selection.entries.length} ${importHidden ? "hidden " : ""}row${selection.entries.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"} · ${mappings.length} column${mappings.length === 1 ? "" : "s"} included`);
 }
 
 function applyImportConfig(configId) {
@@ -1560,6 +1597,7 @@ function applyImportConfig(configId) {
   if (config) {
     $("#importMode").value = config.rowMode;
     $("#importColumnMode").value = config.columnMode;
+    $("#importRowVisibility").value = config.rowVisibility === "hidden" ? "hidden" : "printable";
   }
   if (ui.importData) renderImportMapping();
   else renderImportConfigs();
@@ -1582,10 +1620,11 @@ function confirmSaveImportConfig() {
   let id = existing?.id || uid("import");
   commit((state) => {
     state.importConfigs ||= [];
-    const target = state.importConfigs.find((config) => config.id === id) || { id, name, rowMode: "replace", columnMode: "replace", mappings: [] };
+    const target = state.importConfigs.find((config) => config.id === id) || { id, name, rowMode: "replace", columnMode: "replace", rowVisibility: "printable", mappings: [] };
     target.name = name;
     target.rowMode = $("#importMode").value === "append" ? "append" : "replace";
     target.columnMode = $("#importColumnMode").value === "replace" ? "replace" : "merge";
+    target.rowVisibility = $("#importRowVisibility").value === "hidden" ? "hidden" : "printable";
     target.mappings = mappings.map((mapping) => ({ sourceHeader: mapping.header, include: mapping.include, target: mapping.target, newName: mapping.newName }));
     if (!state.importConfigs.some((config) => config.id === target.id)) state.importConfigs.push(target);
   });
@@ -1610,10 +1649,10 @@ function commandActions() {
   return [
     { icon: "⇧", label: "Import spreadsheet", detail: "XLSX, XLSM or CSV", run: openImport },
     { icon: "＋", label: "Add row", detail: "Manual entry", run: addRow },
-    { icon: "⫶", label: "Add column", detail: "Define a new field", run: () => addColumn() },
+    { icon: "⫶", label: "Add field", detail: "Define a value shown on slips", run: () => addColumn() },
     { icon: "⌁", label: "Add rule", detail: "Conditional visibility or row filter", run: addRule },
     { icon: "▦", label: "Go to Data", detail: "D", run: () => showView("data") },
-    { icon: "⫶", label: "Go to Columns", detail: "", run: () => showView("columns") },
+    { icon: "⫶", label: "Go to Fields", detail: "", run: () => showView("columns") },
     { icon: "⌁", label: "Go to Rules", detail: "", run: () => showView("rules") },
     { icon: "▤", label: "Go to Layout", detail: "L", run: () => showView("layout") },
     { icon: "↓", label: "Export PDF", detail: "⇧⌘E", run: exportPdf },
@@ -1802,6 +1841,14 @@ function installEvents() {
     });
     toast("Selected rows duplicated");
   });
+  $("#hideRowsButton").addEventListener("click", () => {
+    commit((state) => state.rows.forEach((row) => { if (ui.selectedRows.has(row.id)) row.hidden = true; }));
+    toast(`${ui.selectedRows.size} slip${ui.selectedRows.size === 1 ? "" : "s"} hidden`);
+  });
+  $("#showRowsButton").addEventListener("click", () => {
+    commit((state) => state.rows.forEach((row) => { if (ui.selectedRows.has(row.id)) row.hidden = false; }));
+    toast(`${ui.selectedRows.size} slip${ui.selectedRows.size === 1 ? "" : "s"} made printable`);
+  });
 
   let draggedColumnId = null;
   $("#columnList").addEventListener("dragstart", (event) => {
@@ -1851,13 +1898,13 @@ function installEvents() {
       });
     }
     if (button.dataset.action === "delete-column") {
-      if (documentState.columns.length === 1) return toast("A studio needs at least one column.", "error");
+      if (documentState.columns.length === 1) return toast("A studio needs at least one field.", "error");
       const column = documentState.columns.find((item) => item.id === columnId);
-      if (!await confirmAction("Delete column?", `“${column.label}” and its values will be removed.`, "Delete")) return;
+      if (!await confirmAction("Delete field?", `“${column.label}” and its values will be removed.`, "Delete")) return;
       commit((state) => {
         state.columns = state.columns.filter((item) => item.id !== columnId);
         state.rows.forEach((row) => { delete row.values[columnId]; delete row.overrides[columnId]; });
-        state.rules = state.rules.filter((rule) => rule.target !== columnId && !rule.conditions.some((condition) => condition.field === columnId));
+        state.rules = state.rules.filter((rule) => (rule.action === "hide_slip" || rule.target !== columnId) && !rule.conditions.some((condition) => condition.field === columnId));
       });
     }
   });
@@ -1929,7 +1976,7 @@ function installEvents() {
 
   $$(".layout-mode").forEach((button) => button.addEventListener("click", () => commit((state) => { state.layout.mode = button.dataset.mode; })));
   const layoutBindings = {
-    paperInput: ["paper", String], orientationInput: ["orientation", String], marginInput: ["margin", Number], gapInput: ["gap", Number], slipHeightInput: ["slipHeight", Number], accentInput: ["accent", String], inkInput: ["ink", String], paperColorInput: ["paperColor", String], borderColorInput: ["borderColor", String], labelSizeInput: ["labelSize", Number], valueSizeInput: ["valueSize", Number], fontInput: ["font", String], labelCaseInput: ["labelCase", String],
+    paperInput: ["paper", String], orientationInput: ["orientation", String], marginInput: ["margin", Number], gapInput: ["gap", Number], slipHeightInput: ["slipHeight", Number], accentInput: ["accent", String], inkInput: ["ink", String], paperColorInput: ["paperColor", String], borderColorInput: ["borderColor", String], labelSizeInput: ["labelSize", Number], valueSizeInput: ["valueSize", Number], fontInput: ["font", String], labelFontInput: ["labelFont", String], labelCaseInput: ["labelCase", String],
   };
   Object.entries(layoutBindings).forEach(([id, [key, cast]]) => {
     $("#" + id).addEventListener(["slipHeightInput", "accentInput", "inkInput", "paperColorInput", "borderColorInput"].includes(id) ? "input" : "change", (event) => {
@@ -1953,6 +2000,7 @@ function installEvents() {
   $("#importSheetSelect").addEventListener("change", renderImportMapping);
   $("#importMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
   $("#importColumnMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
+  $("#importRowVisibility").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
   $("#importRowSelectionMode").addEventListener("change", () => { updateImportRowSelectionControls(); updateImportModeNotice(); });
   $("#importRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
   $("#importConfigSelect").addEventListener("change", (event) => applyImportConfig(event.target.value));
@@ -1984,6 +2032,13 @@ function installEvents() {
   });
   $("#confirmImportButton").addEventListener("click", confirmImport);
   $("#importDialog").addEventListener("close", resetImportDialog);
+
+  $("#rowPrintableInput").addEventListener("change", (event) => {
+    commit((state) => {
+      const row = state.rows.find((item) => item.id === ui.rowOptionsId);
+      if (row) row.hidden = !event.target.checked;
+    });
+  });
 
   // Legacy per-row layout controls are intentionally retired. Row options now
   // only contain field visibility overrides.

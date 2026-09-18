@@ -173,8 +173,20 @@ def rule_matches(rule: dict[str, Any], values: dict[str, Any]) -> bool:
 
 
 def included_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every data row is printable; rules only control field visibility."""
-    return [row for row in state.get("rows", []) if isinstance(row, dict)]
+    """Return printable rows after explicit row state and hide-slip rules."""
+    hide_rules = [
+        rule for rule in state.get("rules", [])
+        if isinstance(rule, dict) and rule.get("enabled", True) and rule.get("action") == "hide_slip"
+    ]
+    result = []
+    for row in state.get("rows", []):
+        if not isinstance(row, dict) or row.get("hidden") or row.get("disabled"):
+            continue
+        values = row.get("values", {})
+        if any(rule_matches(rule, values) for rule in hide_rules):
+            continue
+        result.append(row)
+    return result
 
 
 def visible_columns(state: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -187,13 +199,16 @@ def visible_columns(state: dict[str, Any], row: dict[str, Any]) -> list[dict[str
         mode = column.get("visibility", "always")
         keep_empty = bool(state.get("layout", {}).get("showBlankFields", False))
         shown = mode == "always" or (mode == "nonempty" and (keep_empty or bool(clean_cell(values.get(column_id, "")).strip())))
-        for rule in active_rules:
-            if rule.get("target") != column_id or not rule_matches(rule, values):
-                continue
-            if rule.get("action") == "show_field":
-                shown = True
-            elif rule.get("action") == "hide_field":
-                shown = False
+        matching_actions = {
+            rule.get("action") for rule in active_rules
+            if rule.get("target") == column_id and rule_matches(rule, values)
+        }
+        # A matching hide always wins over a matching show. This makes rule
+        # order irrelevant and prevents a later rule from revealing a field.
+        if "hide_field" in matching_actions:
+            shown = False
+        elif "show_field" in matching_actions:
+            shown = True
         if overrides.get(column_id) is True:
             shown = True
         elif overrides.get(column_id) is False:
@@ -218,6 +233,7 @@ class PdfLayout:
     label_size: float
     value_size: float
     font: str
+    label_font: str
     label_case: str
     value_align: str
     label_width: float
@@ -261,6 +277,7 @@ def pdf_layout(state: dict[str, Any]) -> PdfLayout:
         label_size=_number(source.get("labelSize", 10), 10, 4, 18),
         value_size=_number(source.get("valueSize", 14), 14, 5, 26),
         font=str(source.get("font", "Helvetica")) if source.get("font") in {"Helvetica", "Times-Roman", "Courier"} else "Helvetica",
+        label_font=str(source.get("labelFont", source.get("font", "Helvetica"))) if source.get("labelFont", source.get("font", "Helvetica")) in {"Helvetica", "Times-Roman", "Courier"} else "Helvetica",
         label_case=str(source.get("labelCase", "original")),
         value_align=str(source.get("valueAlign", "left")),
         label_width=_number(source.get("labelWidth", 34), 34, 18, 60) / 100,
@@ -280,10 +297,12 @@ def row_pdf_layout(state: dict[str, Any], row: dict[str, Any], base: PdfLayout) 
 def render_pdf(state: dict[str, Any]) -> bytes:
     rows = included_rows(state)
     if not rows:
+        if state.get("rows"):
+            raise StudioError("There are no printable rows. Check hidden row settings and hide-slip rules.")
         raise StudioError("There are no data rows to export. Import a sheet or add a row first.")
     columns = state.get("columns", [])
     if not columns:
-        raise StudioError("Add at least one column before exporting.")
+        raise StudioError("Add at least one field before exporting.")
     layout = pdf_layout(state)
     width, height = layout.page_size
     footer_height = 7 * MM if layout.footer else 0
@@ -338,7 +357,7 @@ def _font_for(column: dict[str, Any], layout: PdfLayout) -> str:
 
 
 def _label_font(layout: PdfLayout) -> str:
-    return {"Helvetica": "Helvetica-Bold", "Times-Roman": "Times-Bold", "Courier": "Courier-Bold"}.get(layout.font, "Helvetica-Bold")
+    return {"Helvetica": "Helvetica-Bold", "Times-Roman": "Times-Bold", "Courier": "Courier-Bold"}.get(layout.label_font, "Helvetica-Bold")
 
 
 def _label(value: Any, layout: PdfLayout) -> str:
@@ -443,15 +462,22 @@ def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict
         row_index = index % rows_per_block
         left = x + block * block_width
         bottom = y + height - (row_index + 1) * row_height
-        if row_index and layout.field_lines:
-            pdf.setStrokeColor(layout.border)
-            pdf.line(left, bottom + row_height, left + block_width, bottom + row_height)
-        if block and row_index == 0 and layout.field_lines:
-            pdf.setStrokeColor(layout.border)
-            pdf.line(left, y, left, y + height)
         pdf.setFillColor(layout.accent)
         pdf.rect(left, bottom, label_width, row_height, fill=1, stroke=0)
         baseline = bottom + (row_height - layout.label_size) / 2
         padding = max(layout.padding, 1 * MM)
         _text(pdf, _label(column.get("label", ""), layout), _label_font(layout), layout.label_size, HexColor("#FFFFFF"), left + padding, baseline, label_width - padding * 2)
         _text(pdf, _display_value(column, values.get(column.get("id"), "")), _font_for(column, layout), layout.value_size, layout.ink, left + label_width + padding, bottom + (row_height - layout.value_size) / 2, block_width - label_width - padding * 2, _value_align(column, layout))
+    if layout.field_lines:
+        # Draw dividers last so they remain continuous over the filled label
+        # panel instead of being partially painted over by its background.
+        pdf.setStrokeColor(layout.border)
+        pdf.setLineWidth(0.6)
+        for block in range(blocks):
+            left = x + block * block_width
+            count = min(rows_per_block, len(columns) - block * rows_per_block)
+            for row_index in range(1, count):
+                divider_y = y + height - row_index * row_height
+                pdf.line(left, divider_y, left + block_width, divider_y)
+            if block:
+                pdf.line(left, y, left, y + height)
