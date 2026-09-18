@@ -81,6 +81,7 @@ function starterDocument() {
       conditions: [{ field: "recovery", operator: "not_empty", value: "" }],
     }],
     views: [],
+    importConfigs: [],
     presets: [],
     layout: clone(defaultLayout),
   };
@@ -98,6 +99,7 @@ const ui = {
   dataPage: 0,
   pageSize: 50,
   importData: null,
+  importConfigId: "",
   rowOptionsId: null,
   activeDataViewId: "",
   ruleTestRowId: "",
@@ -138,6 +140,18 @@ function normaliseDocument(input) {
     search: String(view.search || ""),
     sortColumn: String(view.sortColumn || ""),
     sortDirection: view.sortDirection === "desc" ? "desc" : "asc",
+  })) : [];
+  document.importConfigs = Array.isArray(document.importConfigs) ? document.importConfigs.filter((config) => config && typeof config === "object").map((config) => ({
+    id: String(config.id || uid("import")),
+    name: String(config.name || "Import mapping"),
+    rowMode: config.rowMode === "append" ? "append" : "replace",
+    columnMode: config.columnMode === "replace" ? "replace" : "merge",
+    mappings: Array.isArray(config.mappings) ? config.mappings.map((mapping) => ({
+      sourceHeader: String(mapping?.sourceHeader || ""),
+      include: Boolean(mapping?.include),
+      target: String(mapping?.target || "__create__"),
+      newName: String(mapping?.newName || ""),
+    })).filter((mapping) => mapping.sourceHeader) : [],
   })) : [];
   document.presets = Array.isArray(document.presets) ? document.presets.filter((preset) => preset && typeof preset === "object" && preset.layout && typeof preset.layout === "object").map((preset) => ({ id: String(preset.id || uid("preset")), name: String(preset.name || "Saved layout"), layout: { ...defaultLayout, ...clone(preset.layout) } })) : [];
   document.layout = { ...defaultLayout, ...(document.layout || {}) };
@@ -1200,6 +1214,7 @@ async function openProjectFile(file) {
 
 function resetImportDialog() {
   ui.importData = null;
+  ui.importConfigId = "";
   $("#importChoose").hidden = false;
   $("#importMap").hidden = true;
   $("#confirmImportButton").hidden = true;
@@ -1207,8 +1222,12 @@ function resetImportDialog() {
   $("#importMeta").textContent = "";
   $("#workbookInput").value = "";
   $("#importMode").value = "replace";
+  $("#importRowSelectionMode").value = "all";
+  $("#importRowNumbers").value = "";
+  $("#importColumnMode").value = "replace";
   $("#importProjectName").value = "";
   $("#importProjectName").placeholder = documentState.name;
+  renderImportConfigs();
   updateImportModeNotice();
 }
 
@@ -1236,7 +1255,7 @@ async function importWorkbook(file) {
     $("#importChoose").hidden = true;
     $("#importMap").hidden = false;
     $("#confirmImportButton").hidden = false;
-    $("#importStepLabel").textContent = "Map sheet columns";
+    $("#importStepLabel").textContent = "Choose rows and columns";
     $("#importProjectName").placeholder = String(file.name).replace(/\.(xlsx|xlsm|csv)$/i, "") || documentState.name;
     renderImportMapping();
   } catch (error) {
@@ -1266,27 +1285,138 @@ function inferImportedColumnType(header, values) {
   return "text";
 }
 
+function parseImportRowNumbers(value) {
+  const numbers = new Set();
+  const invalid = [];
+  const tokens = String(value || "").split(/[\s,]+/).map((token) => token.trim()).filter(Boolean);
+  tokens.forEach((token) => {
+    const single = /^(\d+)$/.exec(token);
+    const range = /^(\d+)\s*-\s*(\d+)$/.exec(token);
+    if (single) {
+      const number = Number(single[1]);
+      if (number >= 2) numbers.add(number); else invalid.push(token);
+      return;
+    }
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      if (start < 2 || end < start || end - start > 20000) {
+        invalid.push(token);
+        return;
+      }
+      for (let number = start; number <= end; number += 1) numbers.add(number);
+      return;
+    }
+    invalid.push(token);
+  });
+  return { numbers: [...numbers].sort((left, right) => left - right), invalid };
+}
+
+function selectedImportRows(sheet) {
+  const entries = (sheet?.rows || []).map((values, index) => ({
+    values,
+    index,
+    rowNumber: Number(sheet.rowNumbers?.[index] || index + 2),
+  }));
+  if ($("#importRowSelectionMode")?.value !== "manual") return { entries, requested: [], invalid: [], missing: [] };
+  const parsed = parseImportRowNumbers($("#importRowNumbers")?.value);
+  const available = new Map(entries.map((entry) => [entry.rowNumber, entry]));
+  const selected = parsed.numbers.map((number) => available.get(number)).filter(Boolean);
+  const missing = parsed.numbers.filter((number) => !available.has(number));
+  return { entries: selected, requested: parsed.numbers, invalid: parsed.invalid, missing };
+}
+
+function updateImportRowSelectionControls() {
+  const manual = $("#importRowSelectionMode")?.value === "manual";
+  $("#importRowNumbersWrap").hidden = !manual;
+}
+
+function importTargetOptions(selected) {
+  return `<option value="__create__" ${selected === "__create__" ? "selected" : ""}>Create new column</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}" ${column.id === selected ? "selected" : ""}>Add to “${escapeHtml(column.label)}”</option>`).join("")}`;
+}
+
+function selectedImportConfig() {
+  return (documentState.importConfigs || []).find((config) => config.id === ui.importConfigId) || null;
+}
+
+function renderImportConfigs() {
+  const select = $("#importConfigSelect");
+  if (!select) return;
+  const configs = documentState.importConfigs || [];
+  select.innerHTML = `<option value="">Ad hoc mapping</option>${configs.map((config) => `<option value="${escapeHtml(config.id)}">${escapeHtml(config.name)}</option>`).join("")}`;
+  select.value = configs.some((config) => config.id === ui.importConfigId) ? ui.importConfigId : "";
+  $("#deleteImportConfigButton").disabled = !select.value;
+}
+
+function markImportConfigAdHoc() {
+  if (!ui.importConfigId) return;
+  ui.importConfigId = "";
+  renderImportConfigs();
+}
+
+function updateImportMappingControls() {
+  const overwrite = $("#importColumnMode").value === "replace";
+  $$(".mapping-row", $("#mappingList")).forEach((row) => {
+    const include = row.querySelector(".mapping-include")?.checked;
+    const select = row.querySelector(".mapping-select");
+    const newName = row.querySelector(".mapping-new-name");
+    if (!select || !newName) return;
+    if (overwrite && include && select.value !== "__create__") {
+      row.dataset.mergeTarget = select.value;
+      select.value = "__create__";
+      if (!newName.value) newName.value = row.getAttribute("data-source-header") || row.querySelector(".mapping-source")?.textContent?.trim() || "";
+    } else if (!overwrite && select.value === "__create__" && row.dataset.mergeTarget) {
+      select.value = row.dataset.mergeTarget;
+      delete row.dataset.mergeTarget;
+    }
+    select.disabled = !include || overwrite;
+    newName.disabled = !include || select.value !== "__create__";
+    row.classList.toggle("mapping-included", Boolean(include));
+  });
+}
+
 function currentImportMappings() {
-  return $$(".mapping-row", $("#mappingList")).map((row, sourceIndex) => ({ sourceIndex, target: row.querySelector("select").value, header: row.dataset.sourceHeader || "" }));
+  return $$(".mapping-row", $("#mappingList")).map((row, sourceIndex) => {
+    const include = Boolean(row.querySelector(".mapping-include")?.checked);
+    return {
+      sourceIndex: Number(row.dataset.sourceIndex ?? sourceIndex),
+      target: include ? row.querySelector(".mapping-select")?.value || "__create__" : "__skip__",
+      header: row.dataset.sourceHeader || "",
+      include,
+      newName: row.querySelector(".mapping-new-name")?.value.trim() || "",
+    };
+  });
 }
 
 function updateMappingSummary() {
   const mappings = currentImportMappings();
-  const mapped = mappings.filter((item) => item.target !== "__skip__");
+  const mapped = mappings.filter((item) => item.include && item.target !== "__skip__");
   const created = mapped.filter((item) => item.target === "__create__").length;
   const existing = mapped.length - created;
   const skipped = mappings.length - mapped.length;
   const duplicateTargets = [...new Set(mapped.filter((item) => item.target !== "__create__").map((item) => item.target).filter((target, index, list) => list.indexOf(target) !== index))];
-  $("#mappingSummary").textContent = `${existing} existing field${existing === 1 ? "" : "s"} · ${created} new field${created === 1 ? "" : "s"} · ${skipped} skipped${duplicateTargets.length ? ` · ${duplicateTargets.length} duplicate mapping${duplicateTargets.length === 1 ? "" : "s"}` : ""}`;
-  return duplicateTargets;
+  const names = mapped.filter((item) => item.target === "__create__").map((item) => (item.newName || item.header).trim().toLowerCase()).filter(Boolean);
+  const duplicateNames = [...new Set(names.filter((name, index, list) => list.indexOf(name) !== index))];
+  $("#mappingSummary").textContent = `${mapped.length} included · ${existing} existing field${existing === 1 ? "" : "s"} · ${created} new field${created === 1 ? "" : "s"} · ${skipped} skipped${duplicateTargets.length || duplicateNames.length ? ` · ${duplicateTargets.length + duplicateNames.length} duplicate name${duplicateTargets.length + duplicateNames.length === 1 ? "" : "s"}` : ""}`;
+  return { duplicateTargets, duplicateNames };
 }
 
 function updateImportWarning() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
   const duplicates = updateMappingSummary();
+  const mappings = currentImportMappings();
+  const selection = selectedImportRows(sheet);
   const warnings = [];
   if (sheet?.truncated) warnings.push("This sheet was limited to the first 20,000 non-empty rows.");
-  if (duplicates.length) warnings.push("Two or more sheet columns map to the same studio field. The last mapped column will win; remap or skip duplicates before importing.");
+  if ($("#importRowSelectionMode").value === "manual") {
+    if (selection.invalid.length) warnings.push(`Invalid row number${selection.invalid.length === 1 ? "" : "s"}: ${selection.invalid.join(", ")}. Use numbers and ranges such as 2, 5, 10-15.`);
+    if (selection.missing.length) warnings.push(`${selection.missing.length} requested row${selection.missing.length === 1 ? " is" : "s are"} not available and will be skipped (hidden rows are excluded).`);
+    if (!selection.entries.length && !selection.invalid.length && !selection.missing.length) warnings.push("Enter at least one spreadsheet row number.");
+  }
+  if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) warnings.push("Select at least one source column to import.");
+  if (duplicates.duplicateTargets.length) warnings.push("Two or more sheet columns map to the same studio field. Remap one of them before importing.");
+  if (duplicates.duplicateNames.length) warnings.push("Two or more new columns use the same name. Give each new column a unique name.");
+  if ($("#importColumnMode").value === "replace") warnings.push("Overwrite mode will remove the current columns and rules when you import.");
   $("#importWarning").hidden = !warnings.length;
   $("#importWarning").textContent = warnings.join(" ");
 }
@@ -1294,56 +1424,101 @@ function updateImportWarning() {
 function renderImportMapping() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
   if (!sheet) return;
-  const options = documentState.columns.map((column) => `<option value="${column.id}">${escapeHtml(column.label)}</option>`).join("");
+  updateImportRowSelectionControls();
+  const selectedRows = selectedImportRows(sheet).entries;
+  const config = selectedImportConfig();
   $("#mappingList").innerHTML = sheet.headers.map((header, index) => {
+    const saved = config?.mappings.find((mapping) => mapping.sourceHeader === header);
     const guessed = guessedMapping(header);
-    return `<div class="mapping-row" data-source-index="${index}" data-source-header="${escapeHtml(header)}"><span class="mapping-source">${escapeHtml(header)}</span><select class="mapping-select"><option value="__skip__">Skip</option><option value="__create__" ${guessed === "__create__" ? "selected" : ""}>Create “${escapeHtml(header)}”</option>${options}</select><span class="mapping-sample">${escapeHtml(sheet.rows.find((row) => row[index])?.[index] || "—")}</span></div>`;
+    const target = saved?.target && (saved.target === "__create__" || documentState.columns.some((column) => column.id === saved.target)) ? saved.target : guessed;
+    const include = saved ? Boolean(saved.include) : false;
+    const newName = target === "__create__" ? (saved?.newName || header) : "";
+    return `<div class="mapping-row" data-source-index="${index}" data-source-header="${escapeHtml(header)}"><input class="mapping-include" type="checkbox" aria-label="Include ${escapeHtml(header)}" ${include ? "checked" : ""}><span class="mapping-source">${escapeHtml(header)}</span><select class="mapping-select" aria-label="How to import ${escapeHtml(header)}">${importTargetOptions(target)}</select><input class="mapping-new-name" type="text" value="${escapeHtml(newName)}" placeholder="New column name" aria-label="New name for ${escapeHtml(header)}"><span class="mapping-sample">${escapeHtml(selectedRows.find((entry) => entry.values[index])?.values[index] || sheet.rows.find((row) => row[index])?.[index] || "—")}</span></div>`;
   }).join("");
-  $$(".mapping-row", $("#mappingList")).forEach((row, index) => { row.querySelector("select").value = guessedMapping(sheet.headers[index]); });
-  $("#importMeta").textContent = `${escapeHtml(ui.importData.filename)} · ${sheet.rows.length} rows`;
+  renderImportConfigs();
+  $("#importMeta").textContent = `${ui.importData.filename} · ${sheet.rows.length} non-empty rows · ${selectedRows.length} selected`;
+  updateImportMappingControls();
   updateImportWarning();
   updateImportModeNotice();
 }
 
 function updateImportModeNotice() {
+  updateImportRowSelectionControls();
   const replace = $("#importMode").value === "replace";
+  const overwriteColumns = $("#importColumnMode").value === "replace";
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
-  const incoming = sheet?.rows?.length || 0;
-  $("#importModeNotice").textContent = replace
-    ? `All ${documentState.rows.length} existing rows will be removed and replaced by ${incoming || "the imported"} spreadsheet rows.`
-    : `${incoming || "The imported"} spreadsheet rows will be added after the current ${documentState.rows.length} rows.`;
+  const selection = selectedImportRows(sheet);
+  const incoming = selection.entries.length;
+  const available = sheet?.rows?.length || 0;
+  const selectedNotice = $("#importRowSelectionMode").value === "manual"
+    ? `${incoming} of ${available} selected spreadsheet rows`
+    : `${incoming} non-empty spreadsheet rows`;
+  if (ui.importData && sheet) $("#importMeta").textContent = `${ui.importData.filename} · ${available} non-empty rows · ${incoming} selected`;
+  const rowNotice = replace
+    ? `Rows: all ${documentState.rows.length} existing rows will be removed and replaced by ${selectedNotice}.`
+    : `Rows: ${selectedNotice} will be added after the current ${documentState.rows.length} rows.`;
+  const columnNotice = overwriteColumns
+    ? "Columns: only checked source columns will replace the current columns."
+    : "Columns: only checked source columns will be mapped or added; unchecked columns stay out of the studio.";
+  $("#importModeNotice").textContent = `${rowNotice} ${columnNotice}`;
   $("#confirmImportButton").textContent = replace ? "Replace rows" : "Import rows";
+  updateImportMappingControls();
+  updateImportWarning();
 }
 
 function confirmImport() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
   if (!sheet) return;
-  const replaceRows = $("#importMode").value === "replace";
-  const mappings = $$(".mapping-row", $("#mappingList")).map((row, sourceIndex) => ({ sourceIndex, target: row.querySelector("select").value, header: sheet.headers[sourceIndex] }));
-  if (!mappings.some((mapping) => mapping.target !== "__skip__")) {
-    toast("Map at least one sheet column.", "error");
+  const selection = selectedImportRows(sheet);
+  if (selection.invalid.length) {
+    toast("Fix the invalid spreadsheet row numbers before importing.", "error");
     return;
   }
-  const duplicateTargets = [...new Set(mappings.filter((mapping) => mapping.target !== "__skip__" && mapping.target !== "__create__").map((mapping) => mapping.target).filter((target, index, list) => list.indexOf(target) !== index))];
-  if (duplicateTargets.length) {
-    toast("Resolve duplicate field mappings before importing.", "error");
+  if (!selection.entries.length) {
+    toast("Select at least one spreadsheet row to import.", "error");
+    return;
+  }
+  const replaceRows = $("#importMode").value === "replace";
+  const overwriteColumns = $("#importColumnMode").value === "replace";
+  const mappings = currentImportMappings().filter((mapping) => mapping.include && mapping.target !== "__skip__");
+  if (!mappings.length) {
+    toast("Check at least one sheet column to import.", "error");
+    return;
+  }
+  const duplicateIssues = updateMappingSummary();
+  if (duplicateIssues.duplicateTargets.length || duplicateIssues.duplicateNames.length) {
+    toast("Resolve duplicate field mappings or new names before importing.", "error");
+    return;
+  }
+  if (overwriteColumns && mappings.some((mapping) => mapping.target !== "__create__")) {
+    toast("Overwrite mode creates a new column for each checked source column.", "error");
     return;
   }
   commit((state) => {
     const targetIds = new Map();
+    const nextColumns = overwriteColumns ? [] : state.columns;
+    const sourceRows = selection.entries.map((entry) => entry.values);
     mappings.forEach((mapping) => {
-      if (mapping.target === "__skip__") return;
       if (mapping.target === "__create__") {
-        const id = uniqueColumnId(mapping.header, state.columns);
-        const type = inferImportedColumnType(mapping.header, sheet.rows.map((row) => row[mapping.sourceIndex]));
-        state.columns.push({ id, label: mapping.header, group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always", width: 1 });
-        state.rows.forEach((row) => { row.values[id] = ""; });
+        const label = mapping.newName || mapping.header;
+        const id = uniqueColumnId(label, nextColumns);
+        const type = inferImportedColumnType(mapping.header, sourceRows.map((row) => row[mapping.sourceIndex]));
+        nextColumns.push({ id, label, group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always", width: 1 });
         targetIds.set(mapping.sourceIndex, id);
       } else {
         targetIds.set(mapping.sourceIndex, mapping.target);
       }
     });
-    const imported = sheet.rows.map((source) => {
+    if (overwriteColumns) {
+      state.columns = nextColumns;
+      const validColumns = new Set(state.columns.map((column) => column.id));
+      state.rules = state.rules.filter((rule) => validColumns.has(rule.target) && Array.isArray(rule.conditions) && rule.conditions.every((condition) => validColumns.has(condition.field)));
+      state.rows.forEach((row) => { row.values = Object.fromEntries(state.columns.map((column) => [column.id, ""])); row.overrides = {}; row.layoutOverride = {}; });
+    } else {
+      state.columns = nextColumns;
+      state.rows.forEach((row) => { state.columns.forEach((column) => { row.values[column.id] ??= ""; }); });
+    }
+    const imported = sourceRows.map((source) => {
       const values = Object.fromEntries(state.columns.map((column) => [column.id, ""]));
       targetIds.forEach((target, sourceIndex) => { values[target] = String(source[sourceIndex] ?? ""); });
       return { id: uid("row"), values, disabled: false, overrides: {}, layoutOverride: {} };
@@ -1356,7 +1531,59 @@ function confirmImport() {
   ui.dataPage = 0;
   $("#importDialog").close();
   showView("data");
-  toast(`${sheet.rows.length} row${sheet.rows.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"}`);
+  toast(`${selection.entries.length} row${selection.entries.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"} · ${mappings.length} column${mappings.length === 1 ? "" : "s"} included`);
+}
+
+function applyImportConfig(configId) {
+  ui.importConfigId = configId;
+  const config = selectedImportConfig();
+  if (config) {
+    $("#importMode").value = config.rowMode;
+    $("#importColumnMode").value = config.columnMode;
+  }
+  if (ui.importData) renderImportMapping();
+  else renderImportConfigs();
+}
+
+function openSaveImportConfig() {
+  if (!ui.importData) { toast("Choose a workbook before saving a mapping", "error"); return; }
+  const existing = selectedImportConfig();
+  $("#saveImportConfigName").value = existing?.name || "";
+  $("#saveImportConfigDialog").showModal();
+  requestAnimationFrame(() => { $("#saveImportConfigName").focus(); $("#saveImportConfigName").select(); });
+}
+
+function confirmSaveImportConfig() {
+  const name = $("#saveImportConfigName").value.trim();
+  if (!name) { toast("Give this import configuration a name first", "error"); $("#saveImportConfigName").focus(); return; }
+  const mappings = currentImportMappings();
+  if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) { toast("Check at least one column before saving a mapping", "error"); return; }
+  const existing = selectedImportConfig();
+  let id = existing?.id || uid("import");
+  commit((state) => {
+    state.importConfigs ||= [];
+    const target = state.importConfigs.find((config) => config.id === id) || { id, name, rowMode: "replace", columnMode: "replace", mappings: [] };
+    target.name = name;
+    target.rowMode = $("#importMode").value === "append" ? "append" : "replace";
+    target.columnMode = $("#importColumnMode").value === "replace" ? "replace" : "merge";
+    target.mappings = mappings.map((mapping) => ({ sourceHeader: mapping.header, include: mapping.include, target: mapping.target, newName: mapping.newName }));
+    if (!state.importConfigs.some((config) => config.id === target.id)) state.importConfigs.push(target);
+  });
+  ui.importConfigId = id;
+  renderImportConfigs();
+  $("#saveImportConfigDialog").close();
+  toast(existing ? `Updated “${name}”` : `Saved “${name}”`);
+}
+
+async function deleteImportConfig() {
+  const config = selectedImportConfig();
+  if (!config) return;
+  if (!await confirmAction("Delete import configuration?", `“${config.name}” will be removed.`, "Delete")) return;
+  commit((state) => { state.importConfigs = (state.importConfigs || []).filter((item) => item.id !== config.id); });
+  ui.importConfigId = "";
+  renderImportConfigs();
+  if (ui.importData) renderImportMapping();
+  toast("Import configuration removed");
 }
 
 function commandActions() {
@@ -1751,8 +1978,37 @@ function installEvents() {
   $("#dropZone").addEventListener("dragleave", (event) => event.currentTarget.classList.remove("drag-over"));
   $("#dropZone").addEventListener("drop", (event) => { event.preventDefault(); event.currentTarget.classList.remove("drag-over"); importWorkbook(event.dataTransfer.files[0]); });
   $("#importSheetSelect").addEventListener("change", renderImportMapping);
-  $("#importMode").addEventListener("change", updateImportModeNotice);
-  $("#mappingList").addEventListener("change", updateImportWarning);
+  $("#importMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
+  $("#importColumnMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
+  $("#importRowSelectionMode").addEventListener("change", () => { updateImportRowSelectionControls(); updateImportModeNotice(); });
+  $("#importRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
+  $("#importConfigSelect").addEventListener("change", (event) => applyImportConfig(event.target.value));
+  $("#saveImportConfigButton").addEventListener("click", openSaveImportConfig);
+  $("#deleteImportConfigButton").addEventListener("click", deleteImportConfig);
+  $("#confirmSaveImportConfigButton").addEventListener("click", () => confirmSaveImportConfig());
+  $("#saveImportConfigName").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); confirmSaveImportConfig(); } });
+  $("#includeAllColumnsButton").addEventListener("click", () => {
+    markImportConfigAdHoc();
+    $$(".mapping-include", $("#mappingList")).forEach((input) => { input.checked = true; });
+    updateImportMappingControls();
+    updateImportWarning();
+  });
+  $("#clearAllColumnsButton").addEventListener("click", () => {
+    markImportConfigAdHoc();
+    $$(".mapping-include", $("#mappingList")).forEach((input) => { input.checked = false; });
+    updateImportMappingControls();
+    updateImportWarning();
+  });
+  $("#mappingList").addEventListener("change", (event) => {
+    markImportConfigAdHoc();
+    if (event.target.classList.contains("mapping-select") || event.target.classList.contains("mapping-include")) updateImportMappingControls();
+    updateImportWarning();
+  });
+  $("#mappingList").addEventListener("input", (event) => {
+    if (!event.target.classList.contains("mapping-new-name")) return;
+    markImportConfigAdHoc();
+    updateImportWarning();
+  });
   $("#confirmImportButton").addEventListener("click", confirmImport);
   $("#importDialog").addEventListener("close", resetImportDialog);
 

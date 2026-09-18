@@ -70,6 +70,7 @@ def parse_workbook(filename: str, content: bytes) -> dict[str, Any]:
             if sheet.sheet_state != "visible":
                 continue
             rows: list[list[str]] = []
+            row_numbers: list[int] = []
             iterator = sheet.iter_rows(values_only=True)
             first = next(iterator, ())
             headers = unique_headers(first[:MAX_IMPORT_COLUMNS])
@@ -80,12 +81,14 @@ def parse_workbook(filename: str, content: bytes) -> dict[str, Any]:
                 values = [clean_cell(value) for value in row[: len(headers)]]
                 if any(value.strip() for value in values):
                     rows.append(values)
+                    row_numbers.append(row_number)
                 if len(rows) >= MAX_IMPORT_ROWS:
                     break
             sheets.append({
                 "name": sheet.title,
                 "headers": headers,
                 "rows": rows,
+                "rowNumbers": row_numbers,
                 "truncated": len(rows) >= MAX_IMPORT_ROWS,
             })
     finally:
@@ -114,14 +117,16 @@ def _parse_csv(content: bytes) -> dict[str, Any]:
     first = next(reader, [])
     headers = unique_headers(first[:MAX_IMPORT_COLUMNS])
     rows = []
-    for row in reader:
+    row_numbers = []
+    for row_number, row in enumerate(reader, start=2):
         values = [clean_cell(value) for value in row[: len(headers)]]
         values.extend([""] * (len(headers) - len(values)))
         if any(value.strip() for value in values):
             rows.append(values)
+            row_numbers.append(row_number)
         if len(rows) >= MAX_IMPORT_ROWS:
             break
-    return {"name": "CSV", "headers": headers, "rows": rows, "truncated": len(rows) >= MAX_IMPORT_ROWS}
+    return {"name": "CSV", "headers": headers, "rows": rows, "rowNumbers": row_numbers, "truncated": len(rows) >= MAX_IMPORT_ROWS}
 
 
 def condition_matches(condition: dict[str, Any], values: dict[str, Any]) -> bool:

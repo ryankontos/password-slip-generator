@@ -33,9 +33,10 @@ def sample_state() -> dict:
 
 class WorkbookImportTests(unittest.TestCase):
     def test_csv_import_makes_headers_unique(self) -> None:
-        result = parse_workbook("people.csv", b"Name,Name,Password\nAva,Chen,Maple!482\n")
+        result = parse_workbook("people.csv", b"Name,Name,Password\nAva,Chen,Maple!482\n\nNoah,West,River!193\n")
         self.assertEqual(result["sheets"][0]["headers"], ["Name", "Name (2)", "Password"])
         self.assertEqual(result["sheets"][0]["rows"][0][2], "Maple!482")
+        self.assertEqual(result["sheets"][0]["rowNumbers"], [2, 4])
 
     def test_excel_import_ignores_hidden_rows_and_sheets(self) -> None:
         workbook = Workbook()
@@ -52,6 +53,7 @@ class WorkbookImportTests(unittest.TestCase):
         result = parse_workbook("people.xlsx", stream.getvalue())
         self.assertEqual([item["name"] for item in result["sheets"]], ["People"])
         self.assertEqual(result["sheets"][0]["rows"], [["Ava", "one"]])
+        self.assertEqual(result["sheets"][0]["rowNumbers"], [2])
 
 
 class RuleTests(unittest.TestCase):

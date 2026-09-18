@@ -252,11 +252,16 @@
       <div id="importMap" class="modal-body import-step" hidden>
         <div class="import-options">
           <label>Sheet<select id="importSheetSelect"></select></label>
-          <label>Rows<select id="importMode"><option value="replace">Replace all existing rows</option><option value="append">Append to existing rows</option></select></label>
+          <label>Data handling<select id="importMode"><option value="replace">Replace all existing rows</option><option value="append">Append to existing rows</option></select></label>
+          <label>Which rows<select id="importRowSelectionMode"><option value="all">All non-empty rows</option><option value="manual">Specific row numbers</option></select></label>
+          <label>Column handling<select id="importColumnMode"><option value="replace">Overwrite all existing columns</option><option value="merge">Keep columns · map selected</option></select></label>
+          <label id="importRowNumbersWrap" class="span-two" hidden>Spreadsheet row numbers <input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Use commas and ranges. Row 1 is the header; hidden rows stay excluded.</small></label>
+          <div class="import-config-control"><label>Mapping configuration<select id="importConfigSelect"><option value="">Ad hoc mapping</option></select></label><button id="saveImportConfigButton" class="button secondary compact" type="button">＋ Save mapping</button><button id="deleteImportConfigButton" class="icon-button small" type="button" title="Delete saved mapping" aria-label="Delete saved mapping" disabled>×</button></div>
           <label class="span-two">Project name <input id="importProjectName" type="text" placeholder="Leave unchanged"></label>
         </div>
         <p id="importModeNotice" class="import-mode-notice"></p>
-        <div class="mapping-head"><span>Sheet column</span><span>Map to studio column</span><span>Sample</span></div>
+        <div class="mapping-toolbar"><strong>Source columns</strong><span>Nothing is included until you check it.</span><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
+        <div class="mapping-head"><span>Include</span><span>Sheet column</span><span>How to import</span><span>New name / target</span><span>Sample</span></div>
         <p id="mappingSummary" class="mapping-summary"></p>
         <div id="mappingList" class="mapping-list"></div>
         <p id="importWarning" class="inline-notice" hidden></p>
@@ -337,6 +342,14 @@
       <header class="modal-header"><div><h2>Save data view</h2><p>Keep this filter and sort combination for quick reuse.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
       <div class="modal-body save-view-body"><label>View name<input id="saveDataViewName" type="text" maxlength="80" placeholder="e.g. Ready for print"></label></div>
       <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="confirmSaveDataViewButton" class="button primary" type="button">Save view</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="saveImportConfigDialog" class="modal">
+    <form method="dialog" class="modal-card confirm-card">
+      <header class="modal-header"><div><h2>Save import configuration</h2><p>Remember the selected columns and mappings, without the workbook or sheet.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body save-view-body"><label>Configuration name<input id="saveImportConfigName" type="text" maxlength="80" placeholder="e.g. Access sheet mapping"></label></div>
+      <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="confirmSaveImportConfigButton" class="button primary" type="button">Save mapping</button></footer>
     </form>
   </dialog>
 
