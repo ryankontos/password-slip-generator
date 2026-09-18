@@ -40,10 +40,10 @@ const defaultLayout = Object.freeze({
 
 function starterDocument() {
   const columns = [
-    { id: "name", label: "Name", group: "", type: "text", style: "strong", visibility: "always", width: 1.3, required: true },
-    { id: "username", label: "Username", group: "", type: "text", style: "standard", visibility: "always", width: 1, required: true, unique: true },
-    { id: "password", label: "Password", group: "", type: "password", style: "mono", visibility: "always", width: 1.1, required: true },
-    { id: "recovery", label: "Recovery code", group: "", type: "password", style: "mono", visibility: "always", width: 1.1, required: false },
+    { id: "name", label: "Name", group: "", type: "text", style: "strong", visibility: "always" },
+    { id: "username", label: "Username", group: "", type: "text", style: "standard", visibility: "always" },
+    { id: "password", label: "Password", group: "", type: "password", style: "mono", visibility: "always" },
+    { id: "recovery", label: "Recovery code", group: "", type: "password", style: "mono", visibility: "always" },
   ];
   return {
     version: 1,
@@ -80,6 +80,7 @@ const ui = {
   previewUrl: null,
   previewTimer: null,
   previewRevision: 0,
+  lastImportSheetName: (() => { try { return localStorage.getItem("pss-last-import-sheet") || ""; } catch (_) { return ""; } })(),
 };
 
 function loadDocument() {
@@ -118,6 +119,7 @@ function normaliseDocument(input) {
     rowMode: config.rowMode === "append" ? "append" : "replace",
     columnMode: config.columnMode === "replace" ? "replace" : "merge",
     rowVisibility: config.rowVisibility === "hidden" ? "hidden" : "printable",
+    sheetName: String(config.sheetName || ""),
     mappings: Array.isArray(config.mappings) ? config.mappings.map((mapping) => ({
       sourceHeader: String(mapping?.sourceHeader || ""),
       include: Boolean(mapping?.include),
@@ -136,9 +138,9 @@ function normaliseDocument(input) {
     column.valueTransform = ["as_entered", "upper", "lower", "title", "mask_last4"].includes(column.valueTransform) ? column.valueTransform : "as_entered";
     column.valueAlign = ["default", "left", "center", "right"].includes(column.valueAlign) ? column.valueAlign : "default";
     column.visibility ||= "always";
-    column.width = Number(column.width) || 1;
-    column.required = Boolean(column.required);
-    column.unique = Boolean(column.unique);
+    delete column.width;
+    delete column.required;
+    delete column.unique;
   });
   document.rows.forEach((row) => {
     row.id ||= uid("row");
@@ -222,51 +224,6 @@ function formatValue(value, column) {
     case "mask_last4": return text.length > 4 ? `${"•".repeat(Math.max(4, text.length - 4))}${text.slice(-4)}` : text;
     default: return text;
   }
-}
-
-function missingRequiredColumns(row) {
-  return documentState.columns.filter((column) => column.required && !String(row.values?.[column.id] ?? "").trim());
-}
-
-function valueValidationIssue(row, column) {
-  const value = String(row.values?.[column.id] ?? "").trim();
-  if (!value) return "";
-  if (column.type === "number" && !Number.isFinite(Number(value))) return "Enter a number";
-  if (column.type === "date" && Number.isNaN(Date.parse(value))) return "Enter a valid date";
-  if (column.type === "url") {
-    try {
-      const candidate = /:\/\//.test(value) ? value : `https://${value}`;
-      if (!new URL(candidate).hostname) return "Enter a valid URL";
-    } catch (_) {
-      return "Enter a valid URL";
-    }
-  }
-  return "";
-}
-
-function inputTypeForColumn(column) {
-  if (column.type === "number") return "number";
-  if (column.type === "url") return "url";
-  return "text";
-}
-
-function duplicateValueCounts(rows = documentState.rows, columns = documentState.columns) {
-  const result = new Map();
-  columns.filter((column) => column.unique).forEach((column) => {
-    const counts = new Map();
-    rows.forEach((row) => {
-      const value = String(row.values?.[column.id] ?? "").trim().toLowerCase();
-      if (value) counts.set(value, (counts.get(value) || 0) + 1);
-    });
-    result.set(column.id, counts);
-  });
-  return result;
-}
-
-function hasDuplicateValue(row, column, counts = duplicateValueCounts()) {
-  if (!column.unique) return false;
-  const value = String(row.values?.[column.id] ?? "").trim().toLowerCase();
-  return Boolean(value) && (counts.get(column.id)?.get(value) || 0) > 1;
 }
 
 function filteredRows() {
@@ -444,7 +401,6 @@ function renderData() {
   const pageCount = Math.max(1, Math.ceil(allRows.length / ui.pageSize));
   ui.dataPage = Math.min(ui.dataPage, pageCount - 1);
   const rows = allRows.slice(ui.dataPage * ui.pageSize, (ui.dataPage + 1) * ui.pageSize);
-  const duplicateCounts = duplicateValueCounts();
   const previousSort = ui.sortColumn;
   renderDataViews();
   $("#rowSearch").value = ui.search;
@@ -452,7 +408,7 @@ function renderData() {
   $("#sortColumn").value = documentState.columns.some((column) => column.id === previousSort) ? previousSort : "";
   $("#sortDirection").value = ui.sortDirection;
   $("#dataSummary").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
-  $("#dataHead").innerHTML = `<tr><th><input id="selectAllRows" type="checkbox" aria-label="Select all filtered rows" ${allRows.length && allRows.every((row) => ui.selectedRows.has(row.id)) ? "checked" : ""}></th><th class="row-number-head">#</th>${documentState.columns.map((column) => `<th style="width:${Math.max(115, column.width * 130)}px">${escapeHtml(column.label)}</th>`).join("")}<th class="row-menu-head"></th></tr>`;
+  $("#dataHead").innerHTML = `<tr><th><input id="selectAllRows" type="checkbox" aria-label="Select all filtered rows" ${allRows.length && allRows.every((row) => ui.selectedRows.has(row.id)) ? "checked" : ""}></th><th class="row-number-head">#</th>${documentState.columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}<th class="row-menu-head"></th></tr>`;
   $("#dataBody").innerHTML = rows.map((row) => {
     const originalIndex = documentState.rows.indexOf(row) + 1;
     const customized = Object.keys(row.overrides || {}).length > 0;
@@ -460,19 +416,14 @@ function renderData() {
     return `<tr data-row-id="${row.id}" class="${ui.selectedRows.has(row.id) ? "selected" : ""} ${customized ? "customized" : ""} ${hiddenReason ? "excluded" : ""}" title="${escapeHtml(hiddenReason)}">
       <td class="select-cell"><input class="row-select" type="checkbox" ${ui.selectedRows.has(row.id) ? "checked" : ""} aria-label="Select row ${originalIndex}"></td>
       <td class="row-number" draggable="true">⠿ ${originalIndex}${hiddenReason ? " ⊘" : ""}${customized ? " ✦" : ""}</td>
-      ${documentState.columns.map((column) => { const missing = column.required && !String(row.values?.[column.id] ?? "").trim(); const duplicate = hasDuplicateValue(row, column, duplicateCounts); const issue = valueValidationIssue(row, column); const stateClass = [missing ? "missing-required" : "", duplicate ? "duplicate-value" : "", issue ? "invalid-value" : ""].filter(Boolean).join(" "); const invalid = missing || issue; return `<td class="${stateClass}"${issue ? ` title="${escapeHtml(issue)}"` : ""}><input type="${inputTypeForColumn(column)}" class="cell-input ${column.style === "mono" || column.type === "password" ? "password-cell" : ""}" data-column-id="${column.id}" value="${escapeHtml(row.values[column.id] || "")}" aria-label="${escapeHtml(column.label)}, row ${originalIndex}" ${invalid ? "aria-invalid=\"true\"" : ""} ${duplicate ? "data-duplicate=\"true\"" : ""}></td>`; }).join("")}
+      ${documentState.columns.map((column) => `<td><input type="text" class="cell-input ${column.style === "mono" || column.type === "password" ? "password-cell" : ""}" data-column-id="${column.id}" value="${escapeHtml(row.values[column.id] || "")}" aria-label="${escapeHtml(column.label)}, row ${originalIndex}"></td>`).join("")}
       <td class="row-menu"><button class="row-menu-button" data-action="row-options" title="Row options" aria-label="Row ${originalIndex} options">•••</button></td>
     </tr>`;
   }).join("");
   $("#dataEmpty").hidden = Boolean(allRows.length);
-  const printableRows = includedRows();
-  const printableDuplicateCounts = duplicateValueCounts(printableRows, documentState.columns);
-  const incomplete = printableRows.filter((row) => missingRequiredColumns(row).length).length;
-  const duplicates = printableRows.filter((row) => documentState.columns.some((column) => hasDuplicateValue(row, column, printableDuplicateCounts))).length;
-  const invalid = printableRows.filter((row) => documentState.columns.some((column) => valueValidationIssue(row, column))).length;
   const hidden = documentState.rows.filter((row) => rowHiddenReason(row)).length;
   const rowText = ui.search ? `${allRows.length} of ${documentState.rows.length} rows` : `${documentState.rows.length} rows`;
-  const warnings = [hidden ? `${hidden} hidden` : "", incomplete ? `${incomplete} incomplete` : "", duplicates ? `${duplicates} with duplicates` : "", invalid ? `${invalid} invalid` : ""].filter(Boolean);
+  const warnings = [hidden ? `${hidden} hidden` : ""].filter(Boolean);
   $("#visibleRowCount").textContent = warnings.length ? `${rowText} · ${warnings.join(" · ")}` : rowText;
   $("#visibleRowCount").classList.toggle("warning-text", warnings.length > 0);
   $("#pageSizeInput").value = String(ui.pageSize);
@@ -604,8 +555,6 @@ function renderColumns() {
     <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select><select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default alignment</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></div></div>
     <select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select>
     <select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select>
-    <div class="column-flags"><label><input class="column-required-input" type="checkbox" ${column.required ? "checked" : ""}> Required value</label><label><input class="column-unique-input" type="checkbox" ${column.unique ? "checked" : ""}> No duplicates</label></div>
-    <label class="column-width" title="Relative space used by this field in Horizontal layout"><input class="column-width-input" type="range" min="0.5" max="3" step="0.1" value="${column.width}"><span>${Number(column.width).toFixed(1)}×</span></label>
     <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field">×</button></div>
   </article>`).join("");
 }
@@ -781,7 +730,7 @@ function previewSlip(row) {
     });
     const sectionColumns = Math.max(1, arranged.columns || 2);
     return `<div class="slip-sections">${groups.map((group) => {
-      const weights = group.columns.slice(0, sectionColumns).map((column) => Math.max(.5, Number(column.width) || 1));
+      const weights = group.columns.slice(0, sectionColumns).map(() => 1);
       const template = weights.length ? `${weights.join("fr ")}fr` : "1fr";
       return `<section class="slip-section"><div class="slip-section-heading">${escapeHtml(group.name)}</div><div class="slip-section-fields" style="--section-columns:${Math.min(sectionColumns, group.columns.length)};--section-template:${template}">${group.columns.map((column, index) => fieldMarkup(column, index)).join("")}</div></section>`;
     }).join("")}</div>`;
@@ -955,10 +904,10 @@ function addRow() {
   requestAnimationFrame(() => $(`[data-row-id="${row.id}"] .cell-input`)?.focus());
 }
 
-function addColumn(label = "New column") {
+function addColumn(label = "New field") {
   const id = uniqueColumnId(label);
   commit((state) => {
-    state.columns.push({ id, label, group: "", type: "text", style: "standard", valueAlign: "default", visibility: "always", width: 1 });
+    state.columns.push({ id, label, group: "", type: "text", style: "standard", valueAlign: "default", visibility: "always" });
     state.rows.forEach((row) => { row.values[id] = ""; });
   });
   showView("columns");
@@ -1186,26 +1135,10 @@ function safeFilename(value) {
   return String(value || "password-slips").replace(/[^a-z0-9._ -]+/gi, "").trim() || "password-slips";
 }
 
-function exportValidationIssues(source) {
-  const columns = Array.isArray(source.columns) ? source.columns : [];
-  const rows = includedRowsFor(source);
-  const incompleteRows = rows.filter((row) => columns.some((column) => column.required && !String(row.values?.[column.id] ?? "").trim()));
-  const duplicateCounts = duplicateValueCounts(rows, columns);
-  const duplicateRows = rows.filter((row) => columns.some((column) => hasDuplicateValue(row, column, duplicateCounts)));
-  const invalidRows = rows.filter((row) => columns.some((column) => valueValidationIssue(row, column)));
-  return { incompleteRows, duplicateRows, invalidRows };
-}
-
 async function exportPdf(source = documentState, filenameSuffix = "", triggerButton = null) {
   if (!Array.isArray(source.rows) || !source.rows.length) { toast("There are no data rows to export. Import a sheet or add a row first.", "error"); return; }
   if (!includedRowsFor(source).length) { toast("Every row is hidden by its row setting or a hide-slip rule.", "error"); return; }
   if (!Array.isArray(source.columns) || !source.columns.length) { toast("Add at least one field before exporting.", "error"); return; }
-  const issues = exportValidationIssues(source);
-  const warnings = [];
-  if (issues.incompleteRows.length) warnings.push(`${issues.incompleteRows.length} row${issues.incompleteRows.length === 1 ? " is" : "s are"} missing required values`);
-  if (issues.duplicateRows.length) warnings.push(`${issues.duplicateRows.length} row${issues.duplicateRows.length === 1 ? " has" : "s have"} duplicate unique values`);
-  if (issues.invalidRows.length) warnings.push(`${issues.invalidRows.length} row${issues.invalidRows.length === 1 ? " has" : "s have"} invalid typed values`);
-  if (warnings.length && !await confirmAction("Export with data warnings?", `${warnings.join(" and ")}. The PDF can still be exported, but review the affected rows first.`, "Export anyway")) return;
   const button = triggerButton || $("#exportPdfButton");
   const originalText = button.textContent;
   button.disabled = true;
@@ -1279,6 +1212,7 @@ function resetImportDialog() {
   $("#importRowSelectionMode").value = "all";
   $("#importRowVisibility").value = "printable";
   $("#importRowNumbers").value = "";
+  $("#importHiddenRowNumbers").value = "";
   $("#importColumnMode").value = "replace";
   $("#importProjectName").value = "";
   $("#importProjectName").placeholder = documentState.name;
@@ -1308,6 +1242,10 @@ async function importWorkbook(file) {
     if (!Array.isArray(payload.sheets) || !payload.sheets.length) throw new Error("The workbook has no readable, visible worksheets.");
     ui.importData = payload;
     $("#importSheetSelect").innerHTML = payload.sheets.map((sheet, index) => `<option value="${index}">${escapeHtml(sheet.name)} · ${sheet.rows.length} rows</option>`).join("");
+    const preferredSheet = selectedImportConfig()?.sheetName || ui.lastImportSheetName;
+    const preferredIndex = payload.sheets.findIndex((sheet) => normaliseImportName(sheet.name) === normaliseImportName(preferredSheet));
+    if (preferredIndex >= 0) $("#importSheetSelect").value = String(preferredIndex);
+    rememberImportSheet();
     $("#importChoose").hidden = true;
     $("#importMap").hidden = false;
     $("#confirmImportButton").hidden = false;
@@ -1320,8 +1258,19 @@ async function importWorkbook(file) {
   }
 }
 
+function normaliseImportName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function rememberImportSheet() {
+  const sheet = ui.importData?.sheets[Number($("#importSheetSelect")?.value) || 0];
+  if (!sheet) return;
+  ui.lastImportSheetName = sheet.name;
+  try { localStorage.setItem("pss-last-import-sheet", sheet.name); } catch (_) {}
+}
+
 function guessedMapping(header) {
-  const normal = String(header).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const normal = normaliseImportName(header);
   const match = documentState.columns.find((column) => column.id.toLowerCase().replace(/[^a-z0-9]+/g, "") === normal || column.label.toLowerCase().replace(/[^a-z0-9]+/g, "") === normal);
   if (match) return match.id;
   const semantic = (pattern) => documentState.columns.find((column) => pattern.test(`${column.id} ${column.label}`.toLowerCase()));
@@ -1376,6 +1325,18 @@ function selectedImportRows(sheet) {
   const selected = parsed.numbers.map((number) => available.get(number)).filter(Boolean);
   const missing = parsed.numbers.filter((number) => !available.has(number));
   return { entries: selected, requested: parsed.numbers, invalid: parsed.invalid, missing };
+}
+
+function hiddenImportRows(sheet, selectedEntries = selectedImportRows(sheet).entries) {
+  const parsed = parseImportRowNumbers($("#importHiddenRowNumbers")?.value);
+  const available = new Set((sheet?.rowNumbers || []).map(Number));
+  const selected = new Set(selectedEntries.map((entry) => entry.rowNumber));
+  return {
+    numbers: new Set(parsed.numbers.filter((number) => selected.has(number))),
+    invalid: parsed.invalid,
+    missing: parsed.numbers.filter((number) => !available.has(number)),
+    unselected: parsed.numbers.filter((number) => available.has(number) && !selected.has(number)),
+  };
 }
 
 function updateImportRowSelectionControls() {
@@ -1458,6 +1419,7 @@ function updateImportWarning() {
   const duplicates = updateMappingSummary();
   const mappings = currentImportMappings();
   const selection = selectedImportRows(sheet);
+  const hiddenSelection = hiddenImportRows(sheet, selection.entries);
   const warnings = [];
   if (sheet?.truncated) warnings.push("This sheet was limited to the first 20,000 non-empty rows.");
   if ($("#importRowSelectionMode").value === "manual") {
@@ -1465,6 +1427,9 @@ function updateImportWarning() {
     if (selection.missing.length) warnings.push(`${selection.missing.length} requested row${selection.missing.length === 1 ? " is" : "s are"} not available and will be skipped (hidden rows are excluded).`);
     if (!selection.entries.length && !selection.invalid.length && !selection.missing.length) warnings.push("Enter at least one spreadsheet row number.");
   }
+  if (hiddenSelection.invalid.length) warnings.push(`Invalid hidden row number${hiddenSelection.invalid.length === 1 ? "" : "s"}: ${hiddenSelection.invalid.join(", ")}.`);
+  if (hiddenSelection.missing.length) warnings.push(`${hiddenSelection.missing.length} hidden row selection${hiddenSelection.missing.length === 1 ? " is" : "s are"} not available.`);
+  if (hiddenSelection.unselected.length) warnings.push(`${hiddenSelection.unselected.length} hidden row selection${hiddenSelection.unselected.length === 1 ? " is" : "s are"} outside the rows being imported.`);
   if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) warnings.push("Select at least one source column to import.");
   if (duplicates.duplicateTargets.length) warnings.push("Two or more sheet columns map to the same studio field. Remap one of them before importing.");
   if (duplicates.duplicateNames.length) warnings.push("Two or more new columns use the same name. Give each new column a unique name.");
@@ -1480,7 +1445,7 @@ function renderImportMapping() {
   const selectedRows = selectedImportRows(sheet).entries;
   const config = selectedImportConfig();
   $("#mappingList").innerHTML = sheet.headers.map((header, index) => {
-    const saved = config?.mappings.find((mapping) => mapping.sourceHeader === header);
+    const saved = config?.mappings.find((mapping) => normaliseImportName(mapping.sourceHeader) === normaliseImportName(header));
     const guessed = guessedMapping(header);
     const target = saved?.target && (saved.target === "__create__" || documentState.columns.some((column) => column.id === saved.target)) ? saved.target : guessed;
     const include = saved ? Boolean(saved.include) : false;
@@ -1501,6 +1466,7 @@ function updateImportModeNotice() {
   const hiddenRows = $("#importRowVisibility").value === "hidden";
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
   const selection = selectedImportRows(sheet);
+  const hiddenSelection = hiddenImportRows(sheet, selection.entries);
   const incoming = selection.entries.length;
   const available = sheet?.rows?.length || 0;
   const selectedNotice = $("#importRowSelectionMode").value === "manual"
@@ -1510,9 +1476,12 @@ function updateImportModeNotice() {
   const rowNotice = replace
     ? `Rows: all ${documentState.rows.length} existing rows will be removed and replaced by ${selectedNotice}.`
     : `Rows: ${selectedNotice} will be added after the current ${documentState.rows.length} rows.`;
+  const individuallyHidden = hiddenSelection.numbers.size;
   const visibilityNotice = hiddenRows
     ? "Imported rows will be hidden from preview and PDF but remain available in the studio and rule tester."
-    : "Imported rows will be printable unless a hide-slip rule matches.";
+    : individuallyHidden
+      ? `${individuallyHidden} selected row${individuallyHidden === 1 ? "" : "s"} will be hidden; the rest will be printable unless a hide-slip rule matches.`
+      : "Imported rows will be printable unless a hide-slip rule matches.";
   const columnNotice = overwriteColumns
     ? "Columns: only checked source columns will replace the current columns."
     : "Columns: only checked source columns will be mapped or added; unchecked columns stay out of the studio.";
@@ -1537,6 +1506,11 @@ function confirmImport() {
   const replaceRows = $("#importMode").value === "replace";
   const overwriteColumns = $("#importColumnMode").value === "replace";
   const importHidden = $("#importRowVisibility").value === "hidden";
+  const hiddenSelection = hiddenImportRows(sheet, selection.entries);
+  if (hiddenSelection.invalid.length || hiddenSelection.missing.length || hiddenSelection.unselected.length) {
+    toast("Fix the hidden spreadsheet row numbers before importing.", "error");
+    return;
+  }
   const mappings = currentImportMappings().filter((mapping) => mapping.include && mapping.target !== "__skip__");
   if (!mappings.length) {
     toast("Check at least one sheet column to import.", "error");
@@ -1560,7 +1534,7 @@ function confirmImport() {
         const label = mapping.newName || mapping.header;
         const id = uniqueColumnId(label, nextColumns);
         const type = inferImportedColumnType(mapping.header, sourceRows.map((row) => row[mapping.sourceIndex]));
-        nextColumns.push({ id, label, group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always", width: 1 });
+        nextColumns.push({ id, label, group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always" });
         targetIds.set(mapping.sourceIndex, id);
       } else {
         targetIds.set(mapping.sourceIndex, mapping.target);
@@ -1575,10 +1549,11 @@ function confirmImport() {
       state.columns = nextColumns;
       state.rows.forEach((row) => { state.columns.forEach((column) => { row.values[column.id] ??= ""; }); });
     }
-    const imported = sourceRows.map((source) => {
+    const imported = selection.entries.map((entry) => {
+      const source = entry.values;
       const values = Object.fromEntries(state.columns.map((column) => [column.id, ""]));
       targetIds.forEach((target, sourceIndex) => { values[target] = String(source[sourceIndex] ?? ""); });
-      return { id: uid("row"), values, hidden: importHidden, overrides: {}, layoutOverride: {} };
+      return { id: uid("row"), values, hidden: importHidden || hiddenSelection.numbers.has(entry.rowNumber), overrides: {}, layoutOverride: {} };
     });
     if (replaceRows) state.rows = imported;
     else state.rows.push(...imported);
@@ -1588,7 +1563,8 @@ function confirmImport() {
   ui.dataPage = 0;
   $("#importDialog").close();
   showView("data");
-  toast(`${selection.entries.length} ${importHidden ? "hidden " : ""}row${selection.entries.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"} · ${mappings.length} column${mappings.length === 1 ? "" : "s"} included`);
+  const hiddenCount = importHidden ? selection.entries.length : hiddenSelection.numbers.size;
+  toast(`${selection.entries.length} row${selection.entries.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"}${hiddenCount ? ` · ${hiddenCount} hidden` : ""} · ${mappings.length} field${mappings.length === 1 ? "" : "s"} included`);
 }
 
 function applyImportConfig(configId) {
@@ -1598,7 +1574,12 @@ function applyImportConfig(configId) {
     $("#importMode").value = config.rowMode;
     $("#importColumnMode").value = config.columnMode;
     $("#importRowVisibility").value = config.rowVisibility === "hidden" ? "hidden" : "printable";
+    if (ui.importData && config.sheetName) {
+      const sheetIndex = ui.importData.sheets.findIndex((sheet) => normaliseImportName(sheet.name) === normaliseImportName(config.sheetName));
+      if (sheetIndex >= 0) $("#importSheetSelect").value = String(sheetIndex);
+    }
   }
+  if (ui.importData) rememberImportSheet();
   if (ui.importData) renderImportMapping();
   else renderImportConfigs();
 }
@@ -1620,11 +1601,12 @@ function confirmSaveImportConfig() {
   let id = existing?.id || uid("import");
   commit((state) => {
     state.importConfigs ||= [];
-    const target = state.importConfigs.find((config) => config.id === id) || { id, name, rowMode: "replace", columnMode: "replace", rowVisibility: "printable", mappings: [] };
+    const target = state.importConfigs.find((config) => config.id === id) || { id, name, rowMode: "replace", columnMode: "replace", rowVisibility: "printable", sheetName: "", mappings: [] };
     target.name = name;
     target.rowMode = $("#importMode").value === "append" ? "append" : "replace";
     target.columnMode = $("#importColumnMode").value === "replace" ? "replace" : "merge";
     target.rowVisibility = $("#importRowVisibility").value === "hidden" ? "hidden" : "printable";
+    target.sheetName = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0]?.name || "";
     target.mappings = mappings.map((mapping) => ({ sourceHeader: mapping.header, include: mapping.include, target: mapping.target, newName: mapping.newName }));
     if (!state.importConfigs.some((config) => config.id === target.id)) state.importConfigs.push(target);
   });
@@ -1881,9 +1863,6 @@ function installEvents() {
     if (event.target.classList.contains("column-transform-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueTransform = event.target.value; });
     if (event.target.classList.contains("column-align-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueAlign = event.target.value; });
     if (event.target.classList.contains("column-visibility-input")) commit((state) => { state.columns.find((column) => column.id === columnId).visibility = event.target.value; });
-    if (event.target.classList.contains("column-required-input")) commit((state) => { state.columns.find((column) => column.id === columnId).required = event.target.checked; });
-    if (event.target.classList.contains("column-unique-input")) commit((state) => { state.columns.find((column) => column.id === columnId).unique = event.target.checked; });
-    if (event.target.classList.contains("column-width-input")) commit((state) => { state.columns.find((column) => column.id === columnId).width = Number(event.target.value); });
   });
   $("#columnList").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
@@ -1997,12 +1976,13 @@ function installEvents() {
   $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); event.currentTarget.classList.add("drag-over"); });
   $("#dropZone").addEventListener("dragleave", (event) => event.currentTarget.classList.remove("drag-over"));
   $("#dropZone").addEventListener("drop", (event) => { event.preventDefault(); event.currentTarget.classList.remove("drag-over"); importWorkbook(event.dataTransfer.files[0]); });
-  $("#importSheetSelect").addEventListener("change", renderImportMapping);
+  $("#importSheetSelect").addEventListener("change", () => { rememberImportSheet(); renderImportMapping(); });
   $("#importMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
   $("#importColumnMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
   $("#importRowVisibility").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
   $("#importRowSelectionMode").addEventListener("change", () => { updateImportRowSelectionControls(); updateImportModeNotice(); });
   $("#importRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
+  $("#importHiddenRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
   $("#importConfigSelect").addEventListener("change", (event) => applyImportConfig(event.target.value));
   $("#saveImportConfigButton").addEventListener("click", openSaveImportConfig);
   $("#deleteImportConfigButton").addEventListener("click", deleteImportConfig);

@@ -435,11 +435,9 @@ def _draw_slip(pdf: canvas.Canvas, row: dict[str, Any], columns: list[dict[str, 
 
 def _draw_horizontal(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict[str, Any]], layout: PdfLayout, x: float, y: float, width: float, height: float) -> None:
     label_height = min(height * 0.5, max(10 * MM, layout.label_size * 2.1))
-    weights = [max(0.5, _number(column.get("width", 1), 1, 0.5, 3)) for column in columns]
-    total = sum(weights)
+    cell_width = width / len(columns)
     cursor = x
-    for index, (column, weight) in enumerate(zip(columns, weights)):
-        cell_width = width * weight / total
+    for index, column in enumerate(columns):
         pdf.setFillColor(layout.accent)
         pdf.rect(cursor, y + height - label_height, cell_width, label_height, fill=1, stroke=0)
         padding = max(layout.padding, 1 * MM)
@@ -470,14 +468,23 @@ def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict
         _text(pdf, _display_value(column, values.get(column.get("id"), "")), _font_for(column, layout), layout.value_size, layout.ink, left + label_width + padding, bottom + (row_height - layout.value_size) / 2, block_width - label_width - padding * 2, _value_align(column, layout))
     if layout.field_lines:
         # Draw dividers last so they remain continuous over the filled label
-        # panel instead of being partially painted over by its background.
-        pdf.setStrokeColor(layout.border)
+        # panel. The label-side segment is derived from the accent itself, so
+        # it stays visible even when the configured rule colour matches it.
+        label_divider = Color(
+            layout.accent.red + (1 - layout.accent.red) * 0.58,
+            layout.accent.green + (1 - layout.accent.green) * 0.58,
+            layout.accent.blue + (1 - layout.accent.blue) * 0.58,
+        )
         pdf.setLineWidth(0.6)
         for block in range(blocks):
             left = x + block * block_width
             count = min(rows_per_block, len(columns) - block * rows_per_block)
             for row_index in range(1, count):
                 divider_y = y + height - row_index * row_height
-                pdf.line(left, divider_y, left + block_width, divider_y)
+                pdf.setStrokeColor(label_divider)
+                pdf.line(left, divider_y, left + label_width, divider_y)
+                pdf.setStrokeColor(layout.border)
+                pdf.line(left + label_width, divider_y, left + block_width, divider_y)
             if block:
+                pdf.setStrokeColor(layout.border)
                 pdf.line(left, y, left, y + height)

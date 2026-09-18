@@ -115,7 +115,7 @@
           <button id="addColumnButton" class="button primary">＋ Add field</button>
         </div>
           <div class="column-toolbar">
-          <span>Field</span><span>Value style</span><span>Default visibility</span><span>Validation</span><span>Horizontal size</span><span></span>
+          <span>Field</span><span>Value style</span><span>Default visibility</span><span></span>
         </div>
         <div id="columnList" class="column-list"></div>
       </div>
@@ -223,6 +223,7 @@
           <label>Column handling<select id="importColumnMode"><option value="replace">Overwrite all existing columns</option><option value="merge">Keep columns · map selected</option></select></label>
           <label>Imported slips<select id="importRowVisibility"><option value="printable">Printable</option><option value="hidden">Hidden · keep in studio only</option></select></label>
           <label id="importRowNumbersWrap" class="span-two" hidden>Spreadsheet row numbers <input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Use commas and ranges. Row 1 is the header; hidden rows stay excluded.</small></label>
+          <label class="span-two">Hide selected spreadsheet rows <input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">These rows remain available to rules, but their slips are not printed.</small></label>
           <div class="import-config-control"><label>Mapping configuration<select id="importConfigSelect"><option value="">Ad hoc mapping</option></select></label><button id="saveImportConfigButton" class="button secondary compact" type="button">＋ Save mapping</button><button id="deleteImportConfigButton" class="icon-button small" type="button" title="Delete saved mapping" aria-label="Delete saved mapping" disabled>×</button></div>
           <label class="span-two">Project name <input id="importProjectName" type="text" placeholder="Leave unchanged"></label>
         </div>
