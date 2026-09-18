@@ -5,6 +5,12 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const uid = (prefix = "id") => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+const PREVIEW_MIN_WIDTH = 280;
+const PREVIEW_MAX_WIDTH = 620;
+const clampPreviewWidth = (value) => Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, Number(value) || 390));
+function storedPreviewWidth() {
+  try { return clampPreviewWidth(localStorage.getItem("pss-preview-width")); } catch (_) { return 390; }
+}
 
 const defaultLayout = Object.freeze({
   mode: "grid",
@@ -55,10 +61,10 @@ function safeLogoData(value) {
 
 function starterDocument() {
   const columns = [
-    { id: "name", label: "Name", type: "text", style: "strong", visibility: "always", width: 1.3, required: true },
-    { id: "username", label: "Username", type: "text", style: "standard", visibility: "always", width: 1, required: true, unique: true },
-    { id: "password", label: "Password", type: "password", style: "mono", visibility: "always", width: 1.1, required: true },
-    { id: "recovery", label: "Recovery code", type: "password", style: "mono", visibility: "nonempty", width: 1.1, required: false },
+    { id: "name", label: "Name", group: "", type: "text", style: "strong", visibility: "always", width: 1.3, required: true },
+    { id: "username", label: "Username", group: "", type: "text", style: "standard", visibility: "always", width: 1, required: true, unique: true },
+    { id: "password", label: "Password", group: "", type: "password", style: "mono", visibility: "always", width: 1.1, required: true },
+    { id: "recovery", label: "Recovery code", group: "", type: "password", style: "mono", visibility: "nonempty", width: 1.1, required: false },
   ];
   return {
     version: 1,
@@ -100,6 +106,7 @@ const ui = {
   sortDirection: "asc",
   saveTimer: null,
   dirty: false,
+  previewWidth: storedPreviewWidth(),
 };
 
 function loadDocument() {
@@ -139,6 +146,7 @@ function normaliseDocument(input) {
   document.columns.forEach((column, index) => {
     column.id = String(column.id || uniqueColumnId(`column_${index + 1}`, document.columns));
     column.label = String(column.label || `Column ${index + 1}`);
+    column.group = String(column.group || "").trim();
     column.type = ["text", "password", "number", "date", "url"].includes(column.type) ? column.type : "text";
     column.style ||= column.type === "password" ? "mono" : "standard";
     column.valueTransform = ["as_entered", "upper", "lower", "title", "mask_last4"].includes(column.valueTransform) ? column.valueTransform : "as_entered";
@@ -218,7 +226,7 @@ function showView(view) {
 }
 
 function rowValuesText(row) {
-  return documentState.columns.map((column) => row.values[column.id] || "").join(" ").toLowerCase();
+  return documentState.columns.map((column) => row.values[column.id] ?? "").join(" ").toLowerCase();
 }
 
 function formatValue(value, column) {
@@ -611,7 +619,7 @@ function columnOptions(selected) {
 
 function renderColumns() {
   $("#columnList").innerHTML = documentState.columns.map((column) => `<article class="column-row" data-column-id="${column.id}" draggable="true">
-    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Column label"><span class="column-key">${escapeHtml(column.id)}</span><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select><select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Sheet alignment</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></div></div>
+    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Column label"><input class="column-group-input" value="${escapeHtml(column.group || "")}" aria-label="${escapeHtml(column.label)} group" placeholder="Group (optional)"><span class="column-key">${escapeHtml(column.id)}</span><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select><select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Sheet alignment</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></div></div>
     <select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select>
     <select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select>
     <div class="column-flags"><label><input class="column-required-input" type="checkbox" ${column.required ? "checked" : ""}> Required</label><label><input class="column-unique-input" type="checkbox" ${column.unique ? "checked" : ""}> Unique</label></div>
@@ -743,6 +751,7 @@ const modeDefaults = {
   cards: { columns: 2, label: "top" },
   ledger: { columns: 2, label: "left" },
   hero: { columns: 2, label: "top" },
+  sections: { columns: 2, label: "top" },
 };
 
 function arrangement(layout = documentState.layout) {
@@ -778,8 +787,23 @@ function previewSlip(row) {
   const headerCopy = layout.headerText || layout.subtitle ? `<span class="slip-heading-copy"><strong>${escapeHtml(layout.headerText)}</strong><span>${escapeHtml(layout.subtitle)}</span></span>` : "";
   const header = hasChrome && (layout.headerText || layout.subtitle || layout.logoData) ? `<header class="slip-heading ${escapeHtml(layout.headerStyle)}">${logo}${headerCopy}</header>` : "";
   const footer = layout.footerText ? `<footer class="slip-note">${escapeHtml(layout.footerText)}</footer>` : "";
-  const fields = columns.map((column, index) => { const alignment = column.valueAlign && column.valueAlign !== "default" ? column.valueAlign : layout.valueAlign; return `<div class="preview-field ${layout.mode === "hero" && index === 0 ? "hero-primary" : ""}"><span class="field-label" style="font-size:${Math.max(4, layout.labelSize * .44)}px">${escapeHtml(formattedLabel(column.label, layout))}</span><span class="field-value ${escapeHtml(column.style)}" style="font-size:${Math.max(4, layout.valueSize * .48)}px;text-align:${escapeHtml(alignment)}">${escapeHtml(formatValue(row.values[column.id] || "", column))}</span></div>`; }).join("");
-  return `<div class="${classes}" style="${style}" data-preview-row-id="${row.id}" title="Select row in preview">${header}<div class="slip-fields">${fields}</div>${footer}</div>`;
+  const fieldMarkup = (column, index = 0) => { const alignment = column.valueAlign && column.valueAlign !== "default" ? column.valueAlign : layout.valueAlign; return `<div class="preview-field ${layout.mode === "hero" && index === 0 ? "hero-primary" : ""}"><span class="field-label" style="font-size:${Math.max(4, layout.labelSize * .44)}px">${escapeHtml(formattedLabel(column.label, layout))}</span><span class="field-value ${escapeHtml(column.style)}" style="font-size:${Math.max(4, layout.valueSize * .48)}px;text-align:${escapeHtml(alignment)}">${escapeHtml(formatValue(row.values[column.id] ?? "", column))}</span></div>`; };
+  const fields = layout.mode === "sections" ? (() => {
+    const groups = [];
+    const byGroup = new Map();
+    columns.forEach((column) => {
+      const key = String(column.group || "").trim() || "Fields";
+      if (!byGroup.has(key)) { const group = { name: key, columns: [] }; byGroup.set(key, group); groups.push(group); }
+      byGroup.get(key).columns.push(column);
+    });
+    const sectionColumns = Math.max(1, arranged.columns || 2);
+    return `<div class="slip-sections">${groups.map((group) => {
+      const weights = group.columns.slice(0, sectionColumns).map((column) => Math.max(.5, Number(column.width) || 1));
+      const template = weights.length ? `${weights.join("fr ")}fr` : "1fr";
+      return `<section class="slip-section"><div class="slip-section-heading">${escapeHtml(group.name)}</div><div class="slip-section-fields" style="--section-columns:${Math.min(sectionColumns, group.columns.length)};--section-template:${template}">${group.columns.map((column, index) => fieldMarkup(column, index)).join("")}</div></section>`;
+    }).join("")}</div>`;
+  })() : `<div class="slip-fields">${columns.map((column, index) => fieldMarkup(column, index)).join("")}</div>`;
+  return `<div class="${classes}" style="${style}" data-preview-row-id="${row.id}" title="Select row in preview">${header}${fields}${footer}</div>`;
 }
 
 function renderPreview() {
@@ -840,7 +864,7 @@ function addRow() {
 function addColumn(label = "New column") {
   const id = uniqueColumnId(label);
   commit((state) => {
-    state.columns.push({ id, label, type: "text", style: "standard", valueAlign: "default", visibility: "always", width: 1 });
+    state.columns.push({ id, label, group: "", type: "text", style: "standard", valueAlign: "default", visibility: "always", width: 1 });
     state.rows.forEach((row) => { row.values[id] = ""; });
   });
   showView("columns");
@@ -1312,7 +1336,7 @@ function confirmImport() {
       if (mapping.target === "__create__") {
         const id = uniqueColumnId(mapping.header, state.columns);
         const type = inferImportedColumnType(mapping.header, sheet.rows.map((row) => row[mapping.sourceIndex]));
-        state.columns.push({ id, label: mapping.header, type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always", width: 1 });
+        state.columns.push({ id, label: mapping.header, group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always", width: 1 });
         state.rows.forEach((row) => { row.values[id] = ""; });
         targetIds.set(mapping.sourceIndex, id);
       } else {
@@ -1388,6 +1412,49 @@ function toggleTheme() {
   localStorage.setItem("pss-theme", next);
 }
 
+function setPreviewWidth(value, persist = true) {
+  ui.previewWidth = clampPreviewWidth(value);
+  document.documentElement.style.setProperty("--preview-width", `${ui.previewWidth}px`);
+  const handle = $("#previewResizeHandle");
+  if (handle) handle.setAttribute("aria-valuenow", String(ui.previewWidth));
+  if (persist) {
+    try { localStorage.setItem("pss-preview-width", String(ui.previewWidth)); } catch (_) {}
+  }
+}
+
+function installPreviewResize() {
+  const handle = $("#previewResizeHandle");
+  if (!handle) return;
+  let drag = null;
+  const finish = (event) => {
+    if (!drag) return;
+    if (event?.pointerId != null && handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    drag = null;
+    handle.classList.remove("dragging");
+    setPreviewWidth(ui.previewWidth);
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    if (window.matchMedia("(max-width: 860px)").matches) return;
+    drag = { startX: event.clientX, startWidth: ui.previewWidth };
+    handle.classList.add("dragging");
+    handle.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    setPreviewWidth(drag.startWidth + drag.startX - event.clientX, false);
+  });
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+  handle.addEventListener("keydown", (event) => {
+    const step = event.shiftKey ? 64 : 24;
+    if (event.key === "ArrowLeft") { event.preventDefault(); setPreviewWidth(ui.previewWidth + step); }
+    if (event.key === "ArrowRight") { event.preventDefault(); setPreviewWidth(ui.previewWidth - step); }
+    if (event.key === "Home") { event.preventDefault(); setPreviewWidth(PREVIEW_MIN_WIDTH); }
+    if (event.key === "End") { event.preventDefault(); setPreviewWidth(PREVIEW_MAX_WIDTH); }
+  });
+}
+
 function installEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
   ["#addRowButton", "#addRowRailButton", "#appendRowButton"].forEach((selector) => $(selector).addEventListener("click", addRow));
@@ -1403,6 +1470,7 @@ function installEvents() {
   $("#openProjectButton").addEventListener("click", () => $("#openProjectInput").click());
   $("#openProjectInput").addEventListener("change", (event) => openProjectFile(event.target.files[0]));
   $("#themeButton").addEventListener("click", toggleTheme);
+  installPreviewResize();
   $("#undoButton").addEventListener("click", undo);
   $("#redoButton").addEventListener("click", redo);
   $("#documentName").addEventListener("change", (event) => commit((state) => { state.name = event.target.value.trim() || "Untitled password slips"; }));
@@ -1526,6 +1594,7 @@ function installEvents() {
     if (!row) return;
     const columnId = row.dataset.columnId;
     if (event.target.classList.contains("column-label-input")) commit((state) => { state.columns.find((column) => column.id === columnId).label = event.target.value.trim() || "Untitled column"; });
+    if (event.target.classList.contains("column-group-input")) commit((state) => { state.columns.find((column) => column.id === columnId).group = event.target.value.trim(); });
     if (event.target.classList.contains("column-format-input")) commit((state) => { state.columns.find((column) => column.id === columnId).style = event.target.value; });
     if (event.target.classList.contains("column-type-input")) commit((state) => { state.columns.find((column) => column.id === columnId).type = event.target.value; });
     if (event.target.classList.contains("column-transform-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueTransform = event.target.value; });
@@ -1810,4 +1879,5 @@ function installEvents() {
 }
 
 installEvents();
+setPreviewWidth(ui.previewWidth, false);
 renderAll();

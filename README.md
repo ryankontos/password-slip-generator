@@ -32,13 +32,14 @@ The studio opens at `http://127.0.0.1:8768`. Use `--no-open` to start it without
 - Apply any saved layout preset as a per-row starting point, then refine that slip independently.
 - Select multiple rows and use **Customize slips** to open one row’s options, then copy its complete layout and field-visibility overrides to the selection; customized rows are marked in the grid.
 - Reset selected slip customizations in one confirmed action to return those rows to the sheet layout and automatic field visibility.
-- Choose horizontal, stacked, grid, compact, dense, cards, ledger, or hero layouts. Configure fields per row, label position and case, value alignment, typeface, label width, padding, corner radius, paper and rule colours, alternating cells, dividers, paper, orientation, fill order, slips across, height, spacing, borders, cut marks, and footer.
+- Choose horizontal, stacked, grid, compact, dense, cards, ledger, hero, or grouped sections layouts. Assign optional field groups so large slips can be organised into named panels. Configure fields per row, label position and case, value alignment, typeface, label width, padding, corner radius, paper and rule colours, alternating cells, dividers, paper, orientation, fill order, slips across, height, spacing, borders, cut marks, and footer.
 - Save named layout presets inside a studio file and reapply or remove them as the layout evolves.
 - Add optional neutral header text, subheading, footer note, logo, and line/band/outlined header treatments at sheet level; these are blank by default and can be overridden per slip.
 - Save/open portable `.password-slips.json` studio files. A working copy is also saved automatically in the browser.
 - Export the current included rows as a real PDF with the same rules and layout used by the preview.
 - PDF export performs a preflight for missing required values and duplicate unique values, with an explicit option to continue when those warnings are intentional.
 - Page through the sheet preview before export; page navigation follows the selected paper, slip size, spacing, and slips-across settings.
+- Drag the divider beside the sheet preview to give the preview more or less room; the panel width is remembered locally and can also be adjusted with the keyboard when focused.
 
 Press `⌘K` / `Ctrl+K` for the command palette. Other shortcuts are shown in the interface.
 

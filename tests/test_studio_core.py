@@ -18,8 +18,8 @@ def sample_state() -> dict:
     return {
         "name": "Test slips",
         "columns": [
-            {"id": "name", "label": "Name", "visibility": "always", "style": "strong", "width": 1},
-            {"id": "code", "label": "Code", "visibility": "nonempty", "style": "mono", "width": 1},
+            {"id": "name", "label": "Name", "group": "Identity", "visibility": "always", "style": "strong", "width": 1},
+            {"id": "code", "label": "Code", "group": "Access", "visibility": "nonempty", "style": "mono", "width": 1},
         ],
         "rows": [
             {"id": "one", "values": {"name": "Ava", "code": "A-123"}, "overrides": {}, "disabled": False},
@@ -100,13 +100,18 @@ class RuleTests(unittest.TestCase):
 
 class PdfTests(unittest.TestCase):
     def test_every_layout_mode_produces_a_pdf(self) -> None:
-        for mode in ("horizontal", "stacked", "grid", "compact", "dense", "cards", "ledger", "hero"):
+        for mode in ("horizontal", "stacked", "grid", "compact", "dense", "cards", "ledger", "hero", "sections"):
             with self.subTest(mode=mode):
                 state = sample_state()
                 state["layout"]["mode"] = mode
                 pdf = render_pdf(state)
                 self.assertTrue(pdf.startswith(b"%PDF"))
                 self.assertGreater(len(pdf), 1_000)
+
+    def test_sections_layout_handles_named_field_groups(self) -> None:
+        state = sample_state()
+        state["layout"].update({"mode": "sections", "fieldColumns": 2, "labelPosition": "top"})
+        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
 
     def test_custom_layout_controls_produce_a_pdf(self) -> None:
         state = sample_state()

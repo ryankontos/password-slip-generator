@@ -551,6 +551,8 @@ def _draw_slip(pdf: canvas.Canvas, state: dict[str, Any], row: dict[str, Any], c
         _draw_stacked(pdf, values, columns, layout, x, content_y, width, content_height)
     elif mode == "hero":
         _draw_hero(pdf, values, columns, layout, x, content_y, width, content_height)
+    elif mode == "sections":
+        _draw_sections(pdf, values, columns, layout, x, content_y, width, content_height)
     else:
         defaults = {
             "grid": (2, "top"),
@@ -567,6 +569,55 @@ def _draw_slip(pdf: canvas.Canvas, state: dict[str, Any], row: dict[str, Any], c
             cards=mode == "cards",
         )
     pdf.restoreState()
+
+
+def _draw_sections(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict[str, Any]], layout: PdfLayout, x: float, y: float, width: float, height: float) -> None:
+    """Draw fields in named panels, preserving the order of the first field in each group."""
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for column in columns:
+        name = clean_cell(column.get("group", "")).strip() or "Fields"
+        if name not in by_name:
+            by_name[name] = []
+            groups.append((name, by_name[name]))
+        by_name[name].append(column)
+    if not groups:
+        return
+    section_height = height / len(groups)
+    heading_height = min(6 * MM, max(3 * MM, section_height * 0.24))
+    position = "top" if layout.label_position == "preset" else layout.label_position
+    across = layout.field_columns or 2
+    for index, (name, group_columns) in enumerate(groups):
+        section_top = y + height - index * section_height
+        section_bottom = section_top - section_height
+        if index:
+            pdf.setStrokeColor(layout.border)
+            pdf.setLineWidth(0.45)
+            pdf.line(x, section_top, x + width, section_top)
+        pdf.setFillColor(_blend(layout.paper_color, layout.accent, 0.10))
+        pdf.rect(x, section_top - heading_height, width, heading_height, fill=1, stroke=0)
+        _text(
+            pdf,
+            name,
+            _label_font(layout),
+            max(5, layout.label_size * 0.9),
+            layout.accent,
+            x + max(layout.padding, 1 * MM),
+            section_top - heading_height + max(1.2 * MM, (heading_height - layout.label_size) / 2),
+            max(1, width - 2 * max(layout.padding, 1 * MM)),
+        )
+        _draw_matrix(
+            pdf,
+            values,
+            group_columns,
+            layout,
+            x,
+            section_bottom,
+            width,
+            max(1, section_height - heading_height),
+            across,
+            position,
+        )
 
 
 def _draw_horizontal(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict[str, Any]], layout: PdfLayout, x: float, y: float, width: float, height: float) -> None:
