@@ -1,23 +1,57 @@
-# password-slip-generator
+# Password Slip Studio
 
-Created by Ryan Kontos, 2026. Licensed under the 0BSD licence.
+Password Slip Studio is a local browser workspace for building, editing, and printing password slips. Data and projects stay on the computer running the app.
 
-Download the SharePoint Excel file to `~/Downloads`, then open `run_password_slips.command`.
+## Start
 
-The `.command` launcher lives at the project root, source code is in `src`, and editable JSON files are in `settings`.
+On macOS, double-click `run_password_slip_studio.command` (the existing `run_password_slips.command` now opens the same studio). The first run creates `.venv` and installs the workbook/PDF dependencies.
 
-Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a column letter, such as `B*`, to print that column with `password_font`; add `-`, such as `C-`, when that column can be truncated instead of shrunk. The script remembers your last column combo, saved row filters, and shows a quick preview.
+From a terminal:
 
-Row filters are optional. Choose `0` for no row rule, a saved rule number, `n` to create a rule, or `c` to manually enter spreadsheet row numbers such as `2,5,9` or a range like `10-15`. Hidden spreadsheet rows are always excluded. When creating a rule, the script lists existing values from that column so you can choose one quickly. The script can also add extra blank slips, and pressing Enter reuses the last blank-slip count.
+```bash
+python3 start_password_slip_studio.py
+```
 
-At the finish step, press Enter or type `o` to open a temporary PDF in Preview, type `e` to export a saved PDF, or type `p` to export and print.
+The studio opens at `http://127.0.0.1:8768`. Use `--no-open` to start it without opening a browser.
 
-Page layout lives in `settings/layout_settings.json`. The script creates this file with defaults if it does not exist; edit that file to change slip height, slip padding, margins, colours, spacing, and font sizes.
+## Studio workflow
 
-Field widths are balanced per slip: they stay mostly even, but widen for longer text when needed.
+- Define, rename, type (text, password, number, date/time, or URL), format, resize, transform values (as entered, case changes, or mask-last-four), align each value independently or inherit the sheet alignment, mark as required or unique, duplicate, delete, and drag-reorder columns. Required blanks, duplicate values, and invalid number/date/URL entries are flagged in the data grid.
+- Add and drag-reorder rows, edit cells inline, duplicate selections, export selected rows, sort/filter the working view, and keep rows excluded without deleting them. Required fields are highlighted when a row is incomplete.
+- Browse large sheets through paginated data-grid views with adjustable page sizes while selection, filtering, sorting, and export continue to work across the full result set.
+- Bulk-edit selected rows in one previewed action: set, clear, find/replace, add prefixes or suffixes, change case, or trim whitespace.
+- Paste tab/newline blocks directly from Excel or Sheets into any focused grid cell; additional rows are created automatically when needed.
+- Save named data views for repeatable filter and sort combinations; switch between saved views without changing the underlying rows.
+- Export the currently filtered included rows as a PDF in the same order as the active data view, while keeping the full-project export available.
+- Export the full data table to CSV or copy the currently filtered view as tab-separated text from the data tools or command palette.
+- Import `.xlsx`, `.xlsm`, and `.csv` files. Choose a worksheet and map each source column to an existing field, a new field, or skip it. Mapping suggests exact and common credential-field matches, infers sensible types for newly created fields, shows a review summary, and blocks accidental duplicate mappings. Imports default to replacing every current row, can append instead, and can rename the project during import.
+- Create per-row rules with all/any condition groups and an optional “Not” inversion. Rules can show or hide fields, include rows, or exclude rows. Operators cover blank values, exact/partial text, numeric comparison, and regular expressions. Rules can be named, reordered, duplicated, disabled, and show a live matching-row count while editing.
+- Test the rule stack against any imported or manually entered row; each rule reports whether it matches that test row while you edit conditions.
+- Set field defaults such as **Only with a value**, then override visibility for an individual row when needed.
+- Open Row options to customize an individual slip without changing the sheet: choose its layout mode, field columns, field order, label position, alignment, typography, spacing, text/rule colours, accent, paper colour, row-specific logo, border, dividers, alternating fields, header treatment, header/subheading, or footer note.
+- Apply any saved layout preset as a per-row starting point, then refine that slip independently.
+- Select multiple rows and use **Customize slips** to open one row’s options, then copy its complete layout and field-visibility overrides to the selection; customized rows are marked in the grid.
+- Reset selected slip customizations in one confirmed action to return those rows to the sheet layout and automatic field visibility.
+- Choose horizontal, stacked, grid, compact, dense, cards, ledger, or hero layouts. Configure fields per row, label position and case, value alignment, typeface, label width, padding, corner radius, paper and rule colours, alternating cells, dividers, paper, orientation, fill order, slips across, height, spacing, borders, cut marks, and footer.
+- Save named layout presets inside a studio file and reapply or remove them as the layout evolves.
+- Add optional neutral header text, subheading, footer note, logo, and line/band/outlined header treatments at sheet level; these are blank by default and can be overridden per slip.
+- Save/open portable `.password-slips.json` studio files. A working copy is also saved automatically in the browser.
+- Export the current included rows as a real PDF with the same rules and layout used by the preview.
+- PDF export performs a preflight for missing required values and duplicate unique values, with an explicit option to continue when those warnings are intentional.
+- Page through the sheet preview before export; page navigation follows the selected paper, slip size, spacing, and slips-across settings.
 
-The PDF footer can show the sheet name, generated date/time, and page numbers. These footer options are in `settings/layout_settings.json` and are on by default.
+Press `⌘K` / `Ctrl+K` for the command palette. Other shortcuts are shown in the interface.
 
-General app settings live in `settings/settings.json`. The script creates this file automatically; it stores the input folder, output folder, allowed workbook extensions, last selected column numbers, row filters, and extra blank-slip count.
+New studios start with the editable column schema and no sample rows or example credentials; the repository ships without a demo workbook.
 
-0BSD is a very permissive open-source licence. See `LICENSE` for the full text.
+## Development
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m unittest discover -s tests
+PYTHONPATH=src python3 src/studio_server.py --verbose
+```
+
+The original terminal generator remains in `src/password_slips.py` for compatibility and as a reference implementation.
+
+Created by Ryan Kontos, 2026. Licensed under the [0BSD licence](LICENSE).
