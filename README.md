@@ -4,7 +4,7 @@ Password Slip Studio is a local browser workspace for building, editing, and pri
 
 ## Start
 
-On macOS, double-click `run_password_slip_studio.command` (the existing `run_password_slips.command` now opens the same studio). The first run creates `.venv` and installs the workbook/PDF dependencies.
+On macOS, double-click `run_password_slip_studio.command` for the browser studio, or `run_password_slips.command` for the original interactive terminal generator. Both launchers share the project `.venv` and install the workbook/PDF dependencies on first run.
 
 From a terminal:
 
@@ -13,6 +13,12 @@ python3 start_password_slip_studio.py
 ```
 
 The studio opens at `http://127.0.0.1:8768`. Use `--no-open` to start it without opening a browser.
+
+To run the original command-line generator directly:
+
+```bash
+python3 src/password_slips.py
+```
 
 ## Studio workflow
 
@@ -53,6 +59,6 @@ python3 -m unittest discover -s tests
 PYTHONPATH=src python3 src/studio_server.py --verbose
 ```
 
-The original terminal generator remains in `src/password_slips.py` for compatibility and as a reference implementation.
+The original terminal generator remains in `src/password_slips.py` and is available through `run_password_slips.command` as a separate workflow from the studio.
 
 Created by Ryan Kontos, 2026. Licensed under the [0BSD licence](LICENSE).
