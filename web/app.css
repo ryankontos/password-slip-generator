@@ -74,6 +74,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .brand > span:last-child { white-space: nowrap; }
 .brand-mark { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid #77808a; border-radius: 5px; font-size: 10px; letter-spacing: .06em; }
 .save-status { color: #aeb5bd; font-size: 12px; white-space: nowrap; }
+.title-control { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.title-control input { width: min(360px, 70%); height: 36px; padding: 0 10px; border: 1px solid #525963; border-radius: 5px; outline: 0; background: #15181d; color: #f8f9fa; font-size: 14px; cursor: text; }
+.title-control input:focus { border-color: #8cabff; box-shadow: 0 0 0 2px rgb(103 145 255 / 22%); }
 .header-actions { display: flex; align-items: center; gap: 6px; }
 .header-actions { position: relative; }
 .app-header .icon-button { color: #d7dbe0; border-color: transparent; background: transparent; }
@@ -293,8 +296,8 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .preview-actions { display: flex; align-items: center; gap: 4px; }
 .preview-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
 .preview-actions #zoomLabel { width: 42px; text-align: center; font-variant-numeric: tabular-nums; }
-.preview-viewport { min-height: 0; flex: 1; overflow: auto; position: relative; padding: 20px; background: #73777d; }
-.pdf-preview-image { display: block; height: auto; margin: 0 auto; background: #fff; box-shadow: 0 5px 22px rgb(0 0 0 / 32%); }
+.preview-viewport { min-height: 0; flex: 1; overflow: hidden; position: relative; padding: 0; background: #73777d; }
+.pdf-preview-frame { width: 100%; height: 100%; border: 0; background: #73777d; }
 .pdf-preview-placeholder { height: 100%; display: grid; place-items: center; padding: 28px; color: var(--muted); text-align: center; }
 .legend { width: 7px; height: 7px; border-radius: 50%; }
 .legend.included { background: var(--success); }
@@ -409,11 +412,16 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
   .view-actions { max-width: 70%; }
 }
 
+@media (max-width: 760px) {
+  .app-header { grid-template-columns: 38px minmax(150px, 1fr) auto; gap: 8px; }
+  .brand > span:last-child, #undoButton, #redoButton, #commandButton { display: none; }
+  .title-control input { width: 100%; }
+  .title-control .save-status { display: none; }
+}
+
 @media (max-width: 600px) {
-  .app-header { grid-template-columns: 1fr auto; padding-inline: 10px; }
+  .app-header { padding-inline: 10px; }
   .brand { min-width: 0; font-size: 13px; }
-  .header-actions .button.secondary { display: none; }
-  .save-status { display: none; }
   .workspace { grid-template-rows: auto minmax(640px, auto) 560px; }
   .rail-nav { flex: 1 0 auto; }
   .nav-item { min-width: 102px; }

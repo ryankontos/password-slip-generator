@@ -71,8 +71,6 @@ const ui = {
   rowOptionsId: null,
   ruleTestRowId: "",
   commandIndex: 0,
-  sortColumn: "",
-  sortDirection: "asc",
   saveTimer: null,
   dirty: false,
   previewWidth: storedPreviewWidth(),
@@ -210,17 +208,8 @@ function rowValuesText(row) {
 }
 
 function filteredRows() {
-  if (ui.sortColumn && !documentState.columns.some((column) => column.id === ui.sortColumn)) ui.sortColumn = "";
   const query = ui.search.trim().toLowerCase();
-  const rows = documentState.rows.filter((row) => !query || rowValuesText(row).includes(query));
-  if (!ui.sortColumn) return rows;
-  return rows.slice().sort((left, right) => {
-    const a = String(left.values?.[ui.sortColumn] ?? "").trim();
-    const b = String(right.values?.[ui.sortColumn] ?? "").trim();
-    const numeric = a !== "" && b !== "" && !Number.isNaN(Number(a)) && !Number.isNaN(Number(b));
-    const comparison = numeric ? Number(a) - Number(b) : a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
-    return ui.sortDirection === "desc" ? -comparison : comparison;
-  });
+  return documentState.rows.filter((row) => !query || rowValuesText(row).includes(query));
 }
 
 function conditionMatches(condition, values) {
@@ -267,6 +256,7 @@ function rowHiddenReason(row) {
 }
 
 function renderAll() {
+  $("#documentName").value = documentState.name;
   renderData();
   renderColumns();
   renderRules();
@@ -283,11 +273,7 @@ function renderData() {
   const pageCount = Math.max(1, Math.ceil(allRows.length / ui.pageSize));
   ui.dataPage = Math.min(ui.dataPage, pageCount - 1);
   const rows = allRows.slice(ui.dataPage * ui.pageSize, (ui.dataPage + 1) * ui.pageSize);
-  const previousSort = ui.sortColumn;
   $("#rowSearch").value = ui.search;
-  $("#sortColumn").innerHTML = `<option value="">Original order</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}">${escapeHtml(column.label)}</option>`).join("")}`;
-  $("#sortColumn").value = documentState.columns.some((column) => column.id === previousSort) ? previousSort : "";
-  $("#sortDirection").value = ui.sortDirection;
   $("#dataSummary").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
   $("#dataHead").innerHTML = `<tr><th><input id="selectAllRows" type="checkbox" aria-label="Select all filtered rows" ${allRows.length && allRows.every((row) => ui.selectedRows.has(row.id)) ? "checked" : ""}></th><th class="row-number-head">#</th>${documentState.columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}<th class="row-menu-head"></th></tr>`;
   $("#dataBody").innerHTML = rows.map((row) => {
@@ -533,15 +519,15 @@ function renderLayout() {
 
 function applyPreviewZoom() {
   $("#zoomLabel").textContent = `${ui.zoom}%`;
-  $("#pdfPreviewImage").style.width = `${ui.zoom}%`;
+  if (ui.previewUrl) $("#pdfPreviewFrame").src = `${ui.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
 }
 
 function clearPdfPreview(message = "Add or import rows to preview the PDF.") {
   if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
   ui.previewUrl = null;
-  const image = $("#pdfPreviewImage");
-  image.hidden = true;
-  image.removeAttribute("src");
+  const frame = $("#pdfPreviewFrame");
+  frame.hidden = true;
+  frame.removeAttribute("src");
   $("#previewPlaceholder").hidden = false;
   $("#previewPlaceholder").textContent = message;
 }
@@ -566,7 +552,7 @@ function schedulePdfPreview(immediate = false) {
 async function renderPdfPreview() {
   const revision = ++ui.previewRevision;
   try {
-    const response = await fetch("/api/preview", {
+    const response = await fetch("/api/pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ document: documentState }),
@@ -580,10 +566,9 @@ async function renderPdfPreview() {
     if (revision !== ui.previewRevision) return;
     if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
     ui.previewUrl = URL.createObjectURL(blob);
-    const image = $("#pdfPreviewImage");
-    image.src = ui.previewUrl;
-    image.style.width = `${ui.zoom}%`;
-    image.hidden = false;
+    const frame = $("#pdfPreviewFrame");
+    frame.src = `${ui.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
+    frame.hidden = false;
     $("#previewPlaceholder").hidden = true;
     const printableCount = includedRows().length;
     const storedSuffix = printableCount === documentState.rows.length ? "" : ` · ${documentState.rows.length} stored`;
@@ -955,7 +940,7 @@ function renderImportConfigs() {
   const select = $("#importConfigSelect");
   if (!select) return;
   const configs = documentState.importConfigs || [];
-  select.innerHTML = `<option value="">Ad hoc mapping</option>${configs.map((config) => `<option value="${escapeHtml(config.id)}">${escapeHtml(config.name)}</option>`).join("")}`;
+  select.innerHTML = `<option value="">Custom mapping</option>${configs.map((config) => `<option value="${escapeHtml(config.id)}">${escapeHtml(config.name)}</option>`).join("")}`;
   select.value = configs.some((config) => config.id === ui.importConfigId) ? ui.importConfigId : "";
   $("#deleteImportConfigButton").disabled = !select.value;
 }
@@ -1227,8 +1212,6 @@ async function deleteImportConfig() {
 function resetWorkspaceUi() {
   ui.selectedRows.clear();
   ui.search = "";
-  ui.sortColumn = "";
-  ui.sortDirection = "asc";
   ui.dataPage = 0;
   ui.ruleTestRowId = "";
 }
@@ -1378,6 +1361,7 @@ function installEvents() {
   });
   document.addEventListener("click", closeMoreMenu);
   $("#exportPdfButton").addEventListener("click", () => exportPdf());
+  $("#quickResetButton").addEventListener("click", resetEverything);
   $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
   $("#exportCsvButton").addEventListener("click", exportCsv);
   $("#exportVisibleButton").addEventListener("click", exportVisibleRows);
@@ -1385,14 +1369,15 @@ function installEvents() {
   $("#loadSetupButton").addEventListener("click", () => $("#loadSetupInput").click());
   $("#loadSetupInput").addEventListener("change", (event) => loadSetupFile(event.target.files[0]));
   $("#clearDataButton").addEventListener("click", clearAllData);
-  $("#resetEverythingButton").addEventListener("click", resetEverything);
   $("#themeButton").addEventListener("click", toggleTheme);
   installPreviewResize();
   $("#undoButton").addEventListener("click", undo);
   $("#redoButton").addEventListener("click", redo);
   $("#rowSearch").addEventListener("input", (event) => { ui.search = event.target.value; ui.dataPage = 0; renderData(); });
-  $("#sortColumn").addEventListener("change", (event) => { ui.sortColumn = event.target.value; ui.dataPage = 0; renderData(); });
-  $("#sortDirection").addEventListener("change", (event) => { ui.sortDirection = event.target.value; ui.dataPage = 0; renderData(); });
+  $("#documentName").addEventListener("input", (event) => {
+    documentState.name = event.target.value.trimStart() || "Untitled password slips";
+    changed();
+  });
   $("#pageSizeInput").addEventListener("change", (event) => { ui.pageSize = Math.max(1, Number(event.target.value) || 50); ui.dataPage = 0; renderData(); });
   $("#dataPrevButton").addEventListener("click", () => { ui.dataPage = Math.max(0, ui.dataPage - 1); renderData(); });
   $("#dataNextButton").addEventListener("click", () => { ui.dataPage += 1; renderData(); });

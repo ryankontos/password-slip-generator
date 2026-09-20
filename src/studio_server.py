@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import pymupdf
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
@@ -119,19 +118,6 @@ class StudioHandler(BaseHTTPRequestHandler):
                 pdf = render_pdf(document)
                 name = re.sub(r"[^A-Za-z0-9._ -]+", "", str(document.get("name") or "password-slips")).strip() or "password-slips"
                 self._send(pdf, "application/pdf", disposition=f'attachment; filename="{name}.pdf"')
-                return
-            if path == "/api/preview":
-                document = payload.get("document")
-                if not isinstance(document, dict):
-                    raise StudioError("The studio document was missing.")
-                pdf = render_pdf(document)
-                preview = pymupdf.open(stream=pdf, filetype="pdf")
-                try:
-                    pixmap = preview[0].get_pixmap(matrix=pymupdf.Matrix(2, 2), alpha=False)
-                    png = pixmap.tobytes("png")
-                finally:
-                    preview.close()
-                self._send(png, "image/png")
                 return
             if path == "/api/shutdown":
                 self._json({"ok": True})

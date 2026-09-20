@@ -16,12 +16,13 @@
       <span class="brand-mark">PS</span>
       <span>Password Slip Studio</span>
     </div>
-    <span id="saveStatus" class="save-status">Saved</span>
+    <label class="title-control"><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status">Saved</span></label>
     <div class="header-actions">
       <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
       <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
       <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
       <button id="exportPdfButton" class="button primary compact">Export PDF</button>
+      <button id="quickResetButton" class="button secondary compact" title="Reset everything">Reset</button>
       <button id="moreButton" class="icon-button" title="More actions" aria-label="More actions" aria-expanded="false">•••</button>
       <div id="moreMenu" class="action-menu" hidden>
         <button id="exportCsvButton"><span>↓</span> Export data as CSV</button>
@@ -33,7 +34,6 @@
         <button id="themeButton"><span>◐</span> Toggle theme</button>
         <hr>
         <button id="clearDataButton"><span>⌫</span> Clear all data</button>
-        <button id="resetEverythingButton" class="danger-menu-item"><span>↺</span> Reset everything</button>
       </div>
     </div>
   </header>
@@ -58,7 +58,6 @@
           </div>
           <div class="view-actions">
             <label class="search-control"><span>⌕</span><input id="rowSearch" type="search" placeholder="Filter rows" aria-label="Filter rows"></label>
-            <label class="sort-control"><span>Sort</span><select id="sortColumn" aria-label="Sort rows by"></select><select id="sortDirection" aria-label="Sort direction"><option value="asc">A–Z</option><option value="desc">Z–A</option></select></label>
             <button id="addRowButton" class="button secondary">＋ Add row</button>
             <button id="dataImportButton" class="button primary">⇧ Import</button>
           </div>
@@ -184,7 +183,7 @@
       </div>
       <div id="previewViewport" class="preview-viewport pdf-preview-viewport">
         <div id="previewPlaceholder" class="pdf-preview-placeholder">Add or import rows to preview the PDF.</div>
-        <img id="pdfPreviewImage" class="pdf-preview-image" alt="Rendered first page of the PDF" hidden>
+        <iframe id="pdfPreviewFrame" class="pdf-preview-frame" title="PDF preview" hidden></iframe>
       </div>
     </aside>
   </main>
@@ -207,7 +206,7 @@
           <label>Imported slips<select id="importRowVisibility"><option value="printable">Printable</option><option value="hidden">Hidden · keep in studio only</option></select></label>
           <label id="importRowNumbersWrap" class="span-two" hidden>Spreadsheet row numbers <input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Use commas and ranges. Row 1 is the header; hidden rows stay excluded.</small></label>
           <label class="span-two">Hide selected spreadsheet rows <input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">These rows remain available to rules, but their slips are not printed.</small></label>
-          <div class="import-config-control"><label>Mapping configuration<select id="importConfigSelect"><option value="">Ad hoc mapping</option></select></label><button id="saveImportConfigButton" class="button secondary compact" type="button">＋ Save mapping</button><button id="deleteImportConfigButton" class="icon-button small" type="button" title="Delete saved mapping" aria-label="Delete saved mapping" disabled>×</button></div>
+          <div class="import-config-control"><label>Mapping configuration<select id="importConfigSelect"><option value="">Custom mapping</option></select></label><button id="saveImportConfigButton" class="button secondary compact" type="button">＋ Save mapping</button><button id="deleteImportConfigButton" class="icon-button small" type="button" title="Delete saved mapping" aria-label="Delete saved mapping" disabled>×</button></div>
         </div>
         <p id="importModeNotice" class="import-mode-notice"></p>
         <div class="mapping-toolbar"><strong>Source columns</strong><span>Nothing is included until you check it.</span><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
