@@ -11,7 +11,7 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from studio_core import _display_value, _value_align, included_rows, parse_workbook, pdf_layout, render_pdf, visible_columns  # noqa: E402
+from studio_core import MM, _display_value, _footer_baseline, _value_align, included_rows, parse_workbook, pdf_layout, render_pdf, visible_columns  # noqa: E402
 
 
 def sample_state() -> dict:
@@ -115,6 +115,16 @@ class RuleTests(unittest.TestCase):
 
 
 class PdfTests(unittest.TestCase):
+    def test_footer_position_follows_the_page_margin(self) -> None:
+        state = sample_state()
+        state["layout"]["margin"] = 10
+        small_margin_y = _footer_baseline(pdf_layout(state))
+        state["layout"]["margin"] = 30
+        large_margin_y = _footer_baseline(pdf_layout(state))
+        self.assertAlmostEqual(small_margin_y, 5.5 * MM)
+        self.assertAlmostEqual(large_margin_y, 16.5 * MM)
+        self.assertGreater(large_margin_y, small_margin_y)
+
     def test_both_layout_modes_produce_a_pdf(self) -> None:
         for mode in ("horizontal", "stacked"):
             with self.subTest(mode=mode):

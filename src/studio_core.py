@@ -298,6 +298,11 @@ def row_pdf_layout(state: dict[str, Any], row: dict[str, Any], base: PdfLayout) 
     return base
 
 
+def _footer_baseline(layout: PdfLayout) -> float:
+    """Place footer text inside, and relative to, the bottom page margin."""
+    return max(2.5 * MM, layout.margin * 0.55)
+
+
 def render_pdf(state: dict[str, Any]) -> bytes:
     rows = included_rows(state)
     if not rows:
@@ -321,6 +326,7 @@ def render_pdf(state: dict[str, Any]) -> bytes:
     stream = io.BytesIO()
     pdf = canvas.Canvas(stream, pagesize=layout.page_size, pageCompression=1)
     pdf.setTitle(str(state.get("name") or "Password Slip Studio"))
+    exported_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     for page_index in range(pages):
         page_rows = rows[page_index * per_page : (page_index + 1) * per_page]
         for index, row in enumerate(page_rows):
@@ -331,7 +337,9 @@ def render_pdf(state: dict[str, Any]) -> bytes:
         if layout.footer:
             pdf.setFillColor(layout.muted)
             pdf.setFont("Helvetica", 7)
-            pdf.drawRightString(width - layout.margin, 4.5 * MM, f"Page {page_index + 1} of {pages}")
+            footer_y = _footer_baseline(layout)
+            pdf.drawString(layout.margin, footer_y, f"Exported {exported_at}")
+            pdf.drawRightString(width - layout.margin, footer_y, f"Page {page_index + 1} of {pages}")
         pdf.showPage()
     pdf.save()
     return stream.getvalue()
