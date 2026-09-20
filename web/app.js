@@ -1306,7 +1306,13 @@ function installEvents() {
   installPreviewResize();
   $("#undoButton").addEventListener("click", undo);
   $("#redoButton").addEventListener("click", redo);
-  $("#rowSearch").addEventListener("input", (event) => { ui.search = event.target.value; ui.dataPage = 0; renderData(); });
+  $("#rowSearch").addEventListener("input", (event) => {
+    ui.search = event.target.value;
+    ui.dataPage = 0;
+    ui.selectedRows.clear();
+    renderData();
+    schedulePdfPreview();
+  });
   $("#documentName").addEventListener("input", (event) => {
     documentState.name = event.target.value.trimStart() || "Untitled password slips";
     changed();
