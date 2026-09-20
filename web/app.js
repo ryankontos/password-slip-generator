@@ -12,6 +12,27 @@ function storedPreviewWidth() {
   try { return clampPreviewWidth(localStorage.getItem("pss-preview-width")); } catch (_) { return 520; }
 }
 
+function loadRecentColors() {
+  try { return JSON.parse(localStorage.getItem("pss-recent-colors") || "[]").filter((color) => /^#[0-9a-f]{6}$/i.test(color)).slice(0, 12); } catch (_) { return []; }
+}
+
+function saveRecentColors(colors) {
+  const clean = [...new Set(colors.filter((color) => /^#[0-9a-f]{6}$/i.test(color)).map((color) => color.toLowerCase()))].slice(0, 12);
+  try { localStorage.setItem("pss-recent-colors", JSON.stringify(clean)); } catch (_) {}
+  renderRecentColors();
+}
+
+function rememberColor(color) {
+  saveRecentColors([String(color).toLowerCase(), ...loadRecentColors().filter((item) => item.toLowerCase() !== String(color).toLowerCase())]);
+}
+
+function renderRecentColors() {
+  const list = $("#recentColorList");
+  if (!list) return;
+  const colors = loadRecentColors();
+  list.innerHTML = colors.length ? colors.map((color) => `<button class="recent-color-swatch" type="button" data-color="${color}" title="${color}" aria-label="Use ${color}" style="background:${color}"></button>`).join("") : `<span class="field-help">Colours you use will appear here.</span>`;
+}
+
 const defaultLayout = Object.freeze({
   mode: "horizontal",
   paper: "a4",
@@ -41,10 +62,10 @@ const defaultLayout = Object.freeze({
 
 function starterDocument() {
   const columns = [
-    { id: "name", label: "Name", group: "", type: "text", style: "strong", visibility: "always" },
-    { id: "username", label: "Username", group: "", type: "text", style: "standard", visibility: "always" },
-    { id: "password", label: "Password", group: "", type: "password", style: "mono", visibility: "always" },
-    { id: "recovery", label: "Recovery code", group: "", type: "password", style: "mono", visibility: "always" },
+    { id: "name", label: "Name", sourceNames: [], group: "", type: "text", style: "strong", visibility: "always" },
+    { id: "username", label: "Username", sourceNames: [], group: "", type: "text", style: "standard", visibility: "always" },
+    { id: "password", label: "Password", sourceNames: [], group: "", type: "password", style: "mono", visibility: "always" },
+    { id: "recovery", label: "Recovery code", sourceNames: [], group: "", type: "password", style: "mono", visibility: "always" },
   ];
   return {
     version: 1,
@@ -52,7 +73,6 @@ function starterDocument() {
     columns,
     rows: [],
     rules: [],
-    importConfigs: [],
     layout: clone(defaultLayout),
   };
 }
@@ -67,7 +87,6 @@ const ui = {
   dataPage: 0,
   pageSize: 50,
   importData: null,
-  importConfigId: "",
   rowOptionsId: null,
   ruleTestRowId: "",
   commandIndex: 0,
@@ -104,20 +123,7 @@ function normaliseDocument(input) {
   document.rows = Array.isArray(document.rows) ? document.rows : [];
   document.rules = Array.isArray(document.rules) ? document.rules.filter((rule) => ["show_field", "hide_field", "hide_slip"].includes(rule?.action)) : [];
   delete document.views;
-  document.importConfigs = Array.isArray(document.importConfigs) ? document.importConfigs.filter((config) => config && typeof config === "object").map((config) => ({
-    id: String(config.id || uid("import")),
-    name: String(config.name || "Import mapping"),
-    rowMode: config.rowMode === "append" ? "append" : "replace",
-    columnMode: config.columnMode === "replace" ? "replace" : "merge",
-    rowVisibility: config.rowVisibility === "hidden" ? "hidden" : "printable",
-    sheetName: String(config.sheetName || ""),
-    mappings: Array.isArray(config.mappings) ? config.mappings.map((mapping) => ({
-      sourceHeader: String(mapping?.sourceHeader || ""),
-      include: Boolean(mapping?.include),
-      target: String(mapping?.target || "__create__"),
-      newName: String(mapping?.newName || ""),
-    })).filter((mapping) => mapping.sourceHeader) : [],
-  })) : [];
+  delete document.importConfigs;
   document.layout = { ...defaultLayout, ...(document.layout || {}) };
   document.layout.mode = document.layout.mode === "stacked" ? "stacked" : "horizontal";
   document.layout.stackedColumns = Number(document.layout.stackedColumns) === 2 ? 2 : 1;
@@ -130,6 +136,7 @@ function normaliseDocument(input) {
     column.valueTransform = ["as_entered", "upper", "lower", "title", "mask_last4"].includes(column.valueTransform) ? column.valueTransform : "as_entered";
     column.valueAlign = ["default", "left", "center", "right"].includes(column.valueAlign) ? column.valueAlign : "default";
     column.visibility ||= "always";
+    column.sourceNames = [...new Set((Array.isArray(column.sourceNames) ? column.sourceNames : []).map((name) => String(name).trim()).filter(Boolean))];
     delete column.width;
     delete column.required;
     delete column.unique;
@@ -261,6 +268,7 @@ function renderAll() {
   renderColumns();
   renderRules();
   renderLayout();
+  renderRecentColors();
   schedulePdfPreview();
   $("#columnCount").textContent = documentState.columns.length;
   $("#ruleCount").textContent = documentState.rules.length;
@@ -595,7 +603,7 @@ function addRow() {
 function addColumn(label = "New field") {
   const id = uniqueColumnId(label);
   commit((state) => {
-    state.columns.push({ id, label, group: "", type: "text", style: "standard", valueAlign: "default", visibility: "always" });
+    state.columns.push({ id, label, sourceNames: [], group: "", type: "text", style: "standard", valueAlign: "default", visibility: "always" });
     state.rows.forEach((row) => { row.values[id] = ""; });
   });
   showView("columns");
@@ -764,31 +772,33 @@ async function exportVisibleRows() {
   await exportPdf(source, "-view", $("#exportVisibleButton") || $("#exportPdfButton"));
 }
 
-function downloadSetup() {
-  const blob = new Blob([JSON.stringify(documentState, null, 2)], { type: "application/json" });
-  downloadBlob(blob, "password-slip-setup.password-slips.json");
-  toast("Setup downloaded");
+function downloadWorkspace() {
+  const workspace = { format: "password-slip-studio-workspace", version: 1, document: documentState, recentColors: loadRecentColors() };
+  const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: "application/json" });
+  downloadBlob(blob, `${safeFilename(documentState.name)}.password-slip-workspace`);
+  toast("Workspace saved");
 }
 
-async function loadSetupFile(file) {
+async function loadWorkspaceFile(file) {
   try {
     const parsed = JSON.parse(await file.text());
-    if (!parsed || !Array.isArray(parsed.columns) || !Array.isArray(parsed.rows)) throw new Error("This is not a Password Slip Studio file.");
+    const incoming = parsed?.format === "password-slip-studio-workspace" ? parsed.document : parsed;
+    if (!incoming || !Array.isArray(incoming.columns) || !Array.isArray(incoming.rows)) throw new Error("This is not a Password Slip Studio workspace.");
     pushHistory();
-    documentState = normaliseDocument(parsed);
+    documentState = normaliseDocument(incoming);
+    if (Array.isArray(parsed.recentColors)) saveRecentColors(parsed.recentColors);
     ui.selectedRows.clear();
     ui.dataPage = 0;
     changed();
     renderAll();
-    toast("Setup loaded");
+    toast("Workspace opened");
   } catch (error) {
-    toast(error.message || "The setup file could not be opened.", "error");
+    toast(error.message || "The workspace could not be opened.", "error");
   }
 }
 
 function resetImportDialog() {
   ui.importData = null;
-  ui.importConfigId = "";
   $("#importChoose").hidden = false;
   $("#importMap").hidden = true;
   $("#confirmImportButton").hidden = true;
@@ -801,7 +811,6 @@ function resetImportDialog() {
   $("#importRowNumbers").value = "";
   $("#importHiddenRowNumbers").value = "";
   $("#importColumnMode").value = "replace";
-  renderImportConfigs();
   updateImportModeNotice();
 }
 
@@ -827,7 +836,7 @@ async function importWorkbook(file) {
     if (!Array.isArray(payload.sheets) || !payload.sheets.length) throw new Error("The workbook has no readable, visible worksheets.");
     ui.importData = payload;
     $("#importSheetSelect").innerHTML = payload.sheets.map((sheet, index) => `<option value="${index}">${escapeHtml(sheet.name)} · ${sheet.rows.length} rows</option>`).join("");
-    const preferredSheet = selectedImportConfig()?.sheetName || ui.lastImportSheetName;
+    const preferredSheet = ui.lastImportSheetName;
     const preferredIndex = payload.sheets.findIndex((sheet) => normaliseImportName(sheet.name) === normaliseImportName(preferredSheet));
     if (preferredIndex >= 0) $("#importSheetSelect").value = String(preferredIndex);
     rememberImportSheet();
@@ -855,7 +864,7 @@ function rememberImportSheet() {
 
 function guessedMapping(header) {
   const normal = normaliseImportName(header);
-  const match = documentState.columns.find((column) => column.id.toLowerCase().replace(/[^a-z0-9]+/g, "") === normal || column.label.toLowerCase().replace(/[^a-z0-9]+/g, "") === normal);
+  const match = documentState.columns.find((column) => [column.id, column.label, ...(column.sourceNames || [])].some((name) => normaliseImportName(name) === normal));
   if (match) return match.id;
   const semantic = (pattern) => documentState.columns.find((column) => pattern.test(`${column.id} ${column.label}`.toLowerCase()));
   if (/(password|passcode|passwd|pwd|temporarypass)/.test(normal)) return semantic(/password|passcode|passwd|pwd/ )?.id || "__create__";
@@ -930,25 +939,6 @@ function updateImportRowSelectionControls() {
 
 function importTargetOptions(selected) {
   return `<option value="__create__" ${selected === "__create__" ? "selected" : ""}>Create new field</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}" ${column.id === selected ? "selected" : ""}>Add to “${escapeHtml(column.label)}”</option>`).join("")}`;
-}
-
-function selectedImportConfig() {
-  return (documentState.importConfigs || []).find((config) => config.id === ui.importConfigId) || null;
-}
-
-function renderImportConfigs() {
-  const select = $("#importConfigSelect");
-  if (!select) return;
-  const configs = documentState.importConfigs || [];
-  select.innerHTML = `<option value="">Custom mapping</option>${configs.map((config) => `<option value="${escapeHtml(config.id)}">${escapeHtml(config.name)}</option>`).join("")}`;
-  select.value = configs.some((config) => config.id === ui.importConfigId) ? ui.importConfigId : "";
-  $("#deleteImportConfigButton").disabled = !select.value;
-}
-
-function markImportConfigAdHoc() {
-  if (!ui.importConfigId) return;
-  ui.importConfigId = "";
-  renderImportConfigs();
 }
 
 function updateImportMappingControls() {
@@ -1027,16 +1017,14 @@ function renderImportMapping() {
   if (!sheet) return;
   updateImportRowSelectionControls();
   const selectedRows = selectedImportRows(sheet).entries;
-  const config = selectedImportConfig();
   $("#mappingList").innerHTML = sheet.headers.map((header, index) => {
-    const saved = config?.mappings.find((mapping) => normaliseImportName(mapping.sourceHeader) === normaliseImportName(header));
     const guessed = guessedMapping(header);
-    const target = saved?.target && (saved.target === "__create__" || documentState.columns.some((column) => column.id === saved.target)) ? saved.target : guessed;
-    const include = saved ? Boolean(saved.include) : false;
-    const newName = target === "__create__" ? (saved?.newName || header) : "";
+    const target = guessed;
+    const include = target !== "__create__";
+    const matchedLabel = documentState.columns.find((column) => column.id === target)?.label;
+    const newName = target === "__create__" ? header : (matchedLabel || header);
     return `<div class="mapping-row" data-source-index="${index}" data-source-header="${escapeHtml(header)}"><input class="mapping-include" type="checkbox" aria-label="Include ${escapeHtml(header)}" ${include ? "checked" : ""}><span class="mapping-source">${escapeHtml(header)}</span><select class="mapping-select" aria-label="How to import ${escapeHtml(header)}">${importTargetOptions(target)}</select><input class="mapping-new-name" type="text" value="${escapeHtml(newName)}" placeholder="New column name" aria-label="New name for ${escapeHtml(header)}"><span class="mapping-sample">${escapeHtml(selectedRows.find((entry) => entry.values[index])?.values[index] || sheet.rows.find((row) => row[index])?.[index] || "—")}</span></div>`;
   }).join("");
-  renderImportConfigs();
   $("#importMeta").textContent = `${ui.importData.filename} · ${sheet.rows.length} non-empty rows · ${selectedRows.length} selected`;
   updateImportMappingControls();
   updateImportWarning();
@@ -1067,8 +1055,8 @@ function updateImportModeNotice() {
       ? `${individuallyHidden} selected row${individuallyHidden === 1 ? "" : "s"} will be hidden; the rest will be printable unless a hide-slip rule matches.`
       : "Imported rows will be printable unless a hide-slip rule matches.";
   const columnNotice = overwriteColumns
-    ? "Columns: only checked source columns will replace the current columns."
-    : "Columns: only checked source columns will be mapped or added; unchecked columns stay out of the studio.";
+    ? "Fields: checked spreadsheet fields will replace the current fields. Recognised names stay selected and keep their display names."
+    : "Fields: checked spreadsheet fields will be mapped or added; unchecked fields stay out of the studio.";
   $("#importModeNotice").textContent = `${rowNotice} ${visibilityNotice} ${columnNotice}`;
   $("#confirmImportButton").textContent = replace ? "Replace rows" : "Import rows";
   updateImportMappingControls();
@@ -1118,9 +1106,11 @@ function confirmImport() {
         const label = mapping.newName || mapping.header;
         const id = uniqueColumnId(label, nextColumns);
         const type = inferImportedColumnType(mapping.header, sourceRows.map((row) => row[mapping.sourceIndex]));
-        nextColumns.push({ id, label, group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always" });
+        nextColumns.push({ id, label, sourceNames: [mapping.header], group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always" });
         targetIds.set(mapping.sourceIndex, id);
       } else {
+        const targetColumn = nextColumns.find((column) => column.id === mapping.target);
+        if (targetColumn) targetColumn.sourceNames = [...new Set([...(targetColumn.sourceNames || []), mapping.header])];
         targetIds.set(mapping.sourceIndex, mapping.target);
       }
     });
@@ -1149,66 +1139,6 @@ function confirmImport() {
   toast(`${selection.entries.length} row${selection.entries.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"}${hiddenCount ? ` · ${hiddenCount} hidden` : ""} · ${mappings.length} field${mappings.length === 1 ? "" : "s"} included`);
 }
 
-function applyImportConfig(configId) {
-  ui.importConfigId = configId;
-  const config = selectedImportConfig();
-  if (config) {
-    $("#importMode").value = config.rowMode;
-    $("#importColumnMode").value = config.columnMode;
-    $("#importRowVisibility").value = config.rowVisibility === "hidden" ? "hidden" : "printable";
-    if (ui.importData && config.sheetName) {
-      const sheetIndex = ui.importData.sheets.findIndex((sheet) => normaliseImportName(sheet.name) === normaliseImportName(config.sheetName));
-      if (sheetIndex >= 0) $("#importSheetSelect").value = String(sheetIndex);
-    }
-  }
-  if (ui.importData) rememberImportSheet();
-  if (ui.importData) renderImportMapping();
-  else renderImportConfigs();
-}
-
-function openSaveImportConfig() {
-  if (!ui.importData) { toast("Choose a workbook before saving a mapping", "error"); return; }
-  const existing = selectedImportConfig();
-  $("#saveImportConfigName").value = existing?.name || "";
-  $("#saveImportConfigDialog").showModal();
-  requestAnimationFrame(() => { $("#saveImportConfigName").focus(); $("#saveImportConfigName").select(); });
-}
-
-function confirmSaveImportConfig() {
-  const name = $("#saveImportConfigName").value.trim();
-  if (!name) { toast("Give this import configuration a name first", "error"); $("#saveImportConfigName").focus(); return; }
-  const mappings = currentImportMappings();
-  if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) { toast("Check at least one column before saving a mapping", "error"); return; }
-  const existing = selectedImportConfig();
-  let id = existing?.id || uid("import");
-  commit((state) => {
-    state.importConfigs ||= [];
-    const target = state.importConfigs.find((config) => config.id === id) || { id, name, rowMode: "replace", columnMode: "replace", rowVisibility: "printable", sheetName: "", mappings: [] };
-    target.name = name;
-    target.rowMode = $("#importMode").value === "append" ? "append" : "replace";
-    target.columnMode = $("#importColumnMode").value === "replace" ? "replace" : "merge";
-    target.rowVisibility = $("#importRowVisibility").value === "hidden" ? "hidden" : "printable";
-    target.sheetName = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0]?.name || "";
-    target.mappings = mappings.map((mapping) => ({ sourceHeader: mapping.header, include: mapping.include, target: mapping.target, newName: mapping.newName }));
-    if (!state.importConfigs.some((config) => config.id === target.id)) state.importConfigs.push(target);
-  });
-  ui.importConfigId = id;
-  renderImportConfigs();
-  $("#saveImportConfigDialog").close();
-  toast(existing ? `Updated “${name}”` : `Saved “${name}”`);
-}
-
-async function deleteImportConfig() {
-  const config = selectedImportConfig();
-  if (!config) return;
-  if (!await confirmAction("Delete import configuration?", `“${config.name}” will be removed.`, "Delete")) return;
-  commit((state) => { state.importConfigs = (state.importConfigs || []).filter((item) => item.id !== config.id); });
-  ui.importConfigId = "";
-  renderImportConfigs();
-  if (ui.importData) renderImportMapping();
-  toast("Import configuration removed");
-}
-
 function resetWorkspaceUi() {
   ui.selectedRows.clear();
   ui.search = "";
@@ -1218,7 +1148,7 @@ function resetWorkspaceUi() {
 
 async function clearAllData() {
   if (!documentState.rows.length) { toast("There is no data to clear"); return; }
-  if (!await confirmAction("Clear all data?", `Remove all ${documentState.rows.length} rows? Fields, rules, layout and import templates will stay.`, "Clear data")) return;
+  if (!await confirmAction("Clear all data?", `Remove all ${documentState.rows.length} rows? Fields, rules and layout will stay.`, "Clear data")) return;
   commit((state) => { state.rows = []; });
   resetWorkspaceUi();
   renderAll();
@@ -1227,7 +1157,7 @@ async function clearAllData() {
 }
 
 async function resetEverything() {
-  if (!await confirmAction("Reset everything?", "Remove all data, fields, rules, layout changes and import templates? This cannot be undone.", "Reset everything")) return;
+  if (!await confirmAction("Reset everything?", "Remove all data, fields, rules and layout changes? This cannot be undone.", "Reset everything")) return;
   documentState = starterDocument();
   ui.history = [];
   ui.future = [];
@@ -1254,7 +1184,8 @@ function commandActions() {
     { icon: "↓", label: "Export CSV", detail: "Data", run: exportCsv },
     { icon: "⧉", label: "Copy visible rows", detail: "Data", run: copyVisibleRows },
     { icon: "✎", label: "Bulk edit selected rows", detail: "Selection", run: openBulkEdit },
-    { icon: "◇", label: "Download setup", detail: "Backup", run: downloadSetup },
+    { icon: "◇", label: "Save workspace", detail: "File", run: downloadWorkspace },
+    { icon: "◇", label: "Open workspace", detail: "File", run: () => $("#loadWorkspaceInput").click() },
     { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout", run: clearAllData },
     { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
     { icon: "◐", label: "Toggle theme", detail: "", run: toggleTheme },
@@ -1365,9 +1296,9 @@ function installEvents() {
   $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
   $("#exportCsvButton").addEventListener("click", exportCsv);
   $("#exportVisibleButton").addEventListener("click", exportVisibleRows);
-  $("#downloadSetupButton").addEventListener("click", downloadSetup);
-  $("#loadSetupButton").addEventListener("click", () => $("#loadSetupInput").click());
-  $("#loadSetupInput").addEventListener("change", (event) => loadSetupFile(event.target.files[0]));
+  $("#downloadWorkspaceButton").addEventListener("click", downloadWorkspace);
+  $("#loadWorkspaceButton").addEventListener("click", () => $("#loadWorkspaceInput").click());
+  $("#loadWorkspaceInput").addEventListener("change", (event) => loadWorkspaceFile(event.target.files[0]));
   $("#clearDataButton").addEventListener("click", clearAllData);
   $("#themeButton").addEventListener("click", toggleTheme);
   installPreviewResize();
@@ -1593,6 +1524,13 @@ function installEvents() {
       } else commit((state) => { state.layout[key] = cast(event.target.value); });
     });
   });
+  ["accentInput", "inkInput", "paperColorInput", "borderColorInput"].forEach((id) => $("#" + id).addEventListener("change", (event) => rememberColor(event.target.value)));
+  $("#recentColorList").addEventListener("click", (event) => {
+    const swatch = event.target.closest("[data-color]");
+    if (!swatch) return;
+    const key = $("#recentColorTarget").value;
+    commit((state) => { state.layout[key] = swatch.dataset.color; });
+  });
   [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
   $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
   $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); applyPreviewZoom(); });
@@ -1604,37 +1542,28 @@ function installEvents() {
   $("#dropZone").addEventListener("dragleave", (event) => event.currentTarget.classList.remove("drag-over"));
   $("#dropZone").addEventListener("drop", (event) => { event.preventDefault(); event.currentTarget.classList.remove("drag-over"); importWorkbook(event.dataTransfer.files[0]); });
   $("#importSheetSelect").addEventListener("change", () => { rememberImportSheet(); renderImportMapping(); });
-  $("#importMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
-  $("#importColumnMode").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
-  $("#importRowVisibility").addEventListener("change", () => { markImportConfigAdHoc(); updateImportModeNotice(); });
+  $("#importMode").addEventListener("change", updateImportModeNotice);
+  $("#importColumnMode").addEventListener("change", updateImportModeNotice);
+  $("#importRowVisibility").addEventListener("change", updateImportModeNotice);
   $("#importRowSelectionMode").addEventListener("change", () => { updateImportRowSelectionControls(); updateImportModeNotice(); });
   $("#importRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
   $("#importHiddenRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
-  $("#importConfigSelect").addEventListener("change", (event) => applyImportConfig(event.target.value));
-  $("#saveImportConfigButton").addEventListener("click", openSaveImportConfig);
-  $("#deleteImportConfigButton").addEventListener("click", deleteImportConfig);
-  $("#confirmSaveImportConfigButton").addEventListener("click", () => confirmSaveImportConfig());
-  $("#saveImportConfigName").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); confirmSaveImportConfig(); } });
   $("#includeAllColumnsButton").addEventListener("click", () => {
-    markImportConfigAdHoc();
     $$(".mapping-include", $("#mappingList")).forEach((input) => { input.checked = true; });
     updateImportMappingControls();
     updateImportWarning();
   });
   $("#clearAllColumnsButton").addEventListener("click", () => {
-    markImportConfigAdHoc();
     $$(".mapping-include", $("#mappingList")).forEach((input) => { input.checked = false; });
     updateImportMappingControls();
     updateImportWarning();
   });
   $("#mappingList").addEventListener("change", (event) => {
-    markImportConfigAdHoc();
     if (event.target.classList.contains("mapping-select") || event.target.classList.contains("mapping-include")) updateImportMappingControls();
     updateImportWarning();
   });
   $("#mappingList").addEventListener("input", (event) => {
     if (!event.target.classList.contains("mapping-new-name")) return;
-    markImportConfigAdHoc();
     updateImportWarning();
   });
   $("#confirmImportButton").addEventListener("click", confirmImport);

@@ -28,9 +28,9 @@
         <button id="exportCsvButton"><span>↓</span> Export data as CSV</button>
         <button id="exportVisibleButton"><span>↓</span> Export filtered rows</button>
         <hr>
-        <button id="downloadSetupButton"><span>↓</span> Download setup</button>
-        <button id="loadSetupButton"><span>↑</span> Load setup</button>
-        <input id="loadSetupInput" type="file" accept=".json,.password-slips" hidden>
+        <button id="downloadWorkspaceButton"><span>↓</span> Save workspace</button>
+        <button id="loadWorkspaceButton"><span>↑</span> Open workspace</button>
+        <input id="loadWorkspaceInput" type="file" accept=".json,.password-slips,.password-slip-workspace" hidden>
         <button id="themeButton"><span>◐</span> Toggle theme</button>
         <hr>
         <button id="clearDataButton"><span>⌫</span> Clear all data</button>
@@ -160,6 +160,7 @@
               <label>Label typeface<select id="labelFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
               <label>Value typeface<select id="fontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
               <label>Label case<select id="labelCaseInput"><option value="original">Original</option><option value="upper">UPPERCASE</option><option value="title">Title Case</option></select></label>
+              <div class="recent-color-row span-two"><span>Recent colours</span><div id="recentColorList" class="recent-color-list"></div><select id="recentColorTarget" aria-label="Apply recent colour to"><option value="accent">Accent</option><option value="ink">Text</option><option value="paperColor">Paper</option><option value="borderColor">Rules</option></select></div>
             </div>
           </section>
           <section class="settings-section span-two">
@@ -202,15 +203,14 @@
           <label>Sheet<select id="importSheetSelect"></select></label>
           <label>Data handling<select id="importMode"><option value="replace">Replace all existing rows</option><option value="append">Append to existing rows</option></select></label>
           <label>Which rows<select id="importRowSelectionMode"><option value="all">All non-empty rows</option><option value="manual">Specific row numbers</option></select></label>
-          <label>Column handling<select id="importColumnMode"><option value="replace">Overwrite all existing columns</option><option value="merge">Keep columns · map selected</option></select></label>
+          <label>Field handling<select id="importColumnMode"><option value="replace">Replace existing fields</option><option value="merge">Keep fields · map selected</option></select></label>
           <label>Imported slips<select id="importRowVisibility"><option value="printable">Printable</option><option value="hidden">Hidden · keep in studio only</option></select></label>
           <label id="importRowNumbersWrap" class="span-two" hidden>Spreadsheet row numbers <input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Use commas and ranges. Row 1 is the header; hidden rows stay excluded.</small></label>
           <label class="span-two">Hide selected spreadsheet rows <input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">These rows remain available to rules, but their slips are not printed.</small></label>
-          <div class="import-config-control"><label>Mapping configuration<select id="importConfigSelect"><option value="">Custom mapping</option></select></label><button id="saveImportConfigButton" class="button secondary compact" type="button">＋ Save mapping</button><button id="deleteImportConfigButton" class="icon-button small" type="button" title="Delete saved mapping" aria-label="Delete saved mapping" disabled>×</button></div>
         </div>
         <p id="importModeNotice" class="import-mode-notice"></p>
-        <div class="mapping-toolbar"><strong>Source columns</strong><span>Nothing is included until you check it.</span><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
-        <div class="mapping-head"><span>Include</span><span>Sheet column</span><span>How to import</span><span>New name / target</span><span>Sample</span></div>
+        <div class="mapping-toolbar"><strong>Spreadsheet fields</strong><span>Recognised fields are selected automatically.</span><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
+        <div class="mapping-head"><span>Include</span><span>Spreadsheet field</span><span>Import into</span><span>Display name</span><span>Sample</span></div>
         <p id="mappingSummary" class="mapping-summary"></p>
         <div id="mappingList" class="mapping-list"></div>
         <p id="importWarning" class="inline-notice" hidden></p>
@@ -250,14 +250,6 @@
       <div id="commandList" class="command-list" role="listbox"></div>
       <footer class="command-footer"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> run</span><span><kbd>Esc</kbd> close</span></footer>
     </section>
-  </dialog>
-
-  <dialog id="saveImportConfigDialog" class="modal">
-    <form method="dialog" class="modal-card confirm-card">
-      <header class="modal-header"><div><h2>Save import configuration</h2><p>Remember the selected columns and mappings, without the workbook or sheet.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
-      <div class="modal-body simple-form-body"><label>Configuration name<input id="saveImportConfigName" type="text" maxlength="80" placeholder="e.g. Access sheet mapping"></label></div>
-      <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="confirmSaveImportConfigButton" class="button primary" type="button">Save mapping</button></footer>
-    </form>
   </dialog>
 
   <dialog id="confirmDialog" class="modal">
