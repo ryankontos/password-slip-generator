@@ -51,7 +51,6 @@ function starterDocument() {
     columns,
     rows: [],
     rules: [],
-    views: [],
     importConfigs: [],
     layout: clone(defaultLayout),
   };
@@ -69,7 +68,6 @@ const ui = {
   importData: null,
   importConfigId: "",
   rowOptionsId: null,
-  activeDataViewId: "",
   ruleTestRowId: "",
   commandIndex: 0,
   sortColumn: "",
@@ -106,13 +104,7 @@ function normaliseDocument(input) {
   document.columns = Array.isArray(document.columns) ? document.columns : [];
   document.rows = Array.isArray(document.rows) ? document.rows : [];
   document.rules = Array.isArray(document.rules) ? document.rules.filter((rule) => ["show_field", "hide_field", "hide_slip"].includes(rule?.action)) : [];
-  document.views = Array.isArray(document.views) ? document.views.filter((view) => view && typeof view === "object").map((view) => ({
-    id: String(view.id || uid("view")),
-    name: String(view.name || "Saved view"),
-    search: String(view.search || ""),
-    sortColumn: String(view.sortColumn || ""),
-    sortDirection: view.sortDirection === "desc" ? "desc" : "asc",
-  })) : [];
+  delete document.views;
   document.importConfigs = Array.isArray(document.importConfigs) ? document.importConfigs.filter((config) => config && typeof config === "object").map((config) => ({
     id: String(config.id || uid("import")),
     name: String(config.name || "Import mapping"),
@@ -146,7 +138,7 @@ function normaliseDocument(input) {
     row.id ||= uid("row");
     row.values = row.values && typeof row.values === "object" ? row.values : {};
     row.overrides = row.overrides && typeof row.overrides === "object" ? row.overrides : {};
-    row.layoutOverride = {};
+    delete row.layoutOverride;
     row.hidden = Boolean(row.hidden || row.disabled);
     delete row.disabled;
   });
@@ -178,7 +170,7 @@ function changed() {
     try {
       localStorage.setItem("password-slip-studio-document", snapshot());
       ui.dirty = false;
-      $("#saveStatus").textContent = "Saved locally";
+      $("#saveStatus").textContent = "Saved";
     } catch (_) {
       $("#saveStatus").textContent = "Storage unavailable";
     }
@@ -215,17 +207,6 @@ function rowValuesText(row) {
   return documentState.columns.map((column) => row.values[column.id] ?? "").join(" ").toLowerCase();
 }
 
-function formatValue(value, column) {
-  const text = String(value ?? "");
-  switch (column.valueTransform) {
-    case "upper": return text.toUpperCase();
-    case "lower": return text.toLowerCase();
-    case "title": return text.replace(/\b\w/g, (letter) => letter.toUpperCase());
-    case "mask_last4": return text.length > 4 ? `${"•".repeat(Math.max(4, text.length - 4))}${text.slice(-4)}` : text;
-    default: return text;
-  }
-}
-
 function filteredRows() {
   if (ui.sortColumn && !documentState.columns.some((column) => column.id === ui.sortColumn)) ui.sortColumn = "";
   const query = ui.search.trim().toLowerCase();
@@ -238,88 +219,6 @@ function filteredRows() {
     const comparison = numeric ? Number(a) - Number(b) : a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
     return ui.sortDirection === "desc" ? -comparison : comparison;
   });
-}
-
-function currentDataViewState() {
-  return { search: ui.search, sortColumn: ui.sortColumn, sortDirection: ui.sortDirection === "desc" ? "desc" : "asc" };
-}
-
-function matchingDataView() {
-  const current = currentDataViewState();
-  return (documentState.views || []).find((view) => view.search === current.search && view.sortColumn === current.sortColumn && view.sortDirection === current.sortDirection) || null;
-}
-
-function renderDataViews() {
-  const select = $("#savedViewSelect");
-  if (!select) return;
-  const matching = matchingDataView();
-  if (matching) ui.activeDataViewId = matching.id;
-  else ui.activeDataViewId = "";
-  select.innerHTML = `<option value="">Ad hoc view</option>${(documentState.views || []).map((view) => `<option value="${escapeHtml(view.id)}">${escapeHtml(view.name)}</option>`).join("")}`;
-  select.value = ui.activeDataViewId;
-  $("#deleteDataViewButton").disabled = !ui.activeDataViewId;
-}
-
-function applyDataView(viewId) {
-  const view = (documentState.views || []).find((item) => item.id === viewId);
-  if (!view) {
-    ui.activeDataViewId = "";
-    ui.search = "";
-    ui.sortColumn = "";
-    ui.sortDirection = "asc";
-    ui.dataPage = 0;
-  } else {
-    ui.activeDataViewId = view.id;
-    ui.search = view.search;
-    ui.sortColumn = documentState.columns.some((column) => column.id === view.sortColumn) ? view.sortColumn : "";
-    ui.sortDirection = view.sortDirection === "desc" ? "desc" : "asc";
-    ui.dataPage = 0;
-  }
-  $("#rowSearch").value = ui.search;
-  renderData();
-}
-
-function suggestedDataViewName() {
-  const current = currentDataViewState();
-  const existing = matchingDataView();
-  return existing?.name || (current.search ? `Filter: ${current.search}` : current.sortColumn ? `Sorted by ${documentState.columns.find((column) => column.id === current.sortColumn)?.label || "field"}` : "New data view");
-}
-
-function saveDataView() {
-  $("#saveDataViewName").value = suggestedDataViewName();
-  $("#saveViewDialog").showModal();
-  requestAnimationFrame(() => { $("#saveDataViewName").focus(); $("#saveDataViewName").select(); });
-}
-
-function commitDataView(name) {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) { toast("Give this view a name first", "error"); $("#saveDataViewName").focus(); return; }
-  const current = currentDataViewState();
-  const existing = matchingDataView();
-  let finalName = trimmed;
-  commit((state) => {
-    const duplicateName = state.views.find((view) => view.name.toLowerCase() === name.toLowerCase() && view.id !== existing?.id);
-    const target = existing || { id: uid("view"), name: trimmed, ...current };
-    if (duplicateName) finalName = `${trimmed} copy`;
-    target.name = finalName;
-    target.search = current.search;
-    target.sortColumn = current.sortColumn;
-    target.sortDirection = current.sortDirection;
-    if (!existing) state.views.push(target);
-    ui.activeDataViewId = target.id;
-  });
-  $("#saveViewDialog").close();
-  toast(`Saved view “${finalName}”`);
-}
-
-async function deleteDataView() {
-  const view = (documentState.views || []).find((item) => item.id === ui.activeDataViewId);
-  if (!view) return;
-  if (!await confirmAction("Delete saved view?", `“${view.name}” will be removed. The current filter and sort will stay in place.`, "Delete")) return;
-  commit((state) => { state.views = state.views.filter((item) => item.id !== view.id); });
-  ui.activeDataViewId = "";
-  renderData();
-  toast("Saved view removed");
 }
 
 function conditionMatches(condition, values) {
@@ -365,26 +264,7 @@ function rowHiddenReason(row) {
   return rule ? `Hidden by rule: ${rule.name || "Unnamed rule"}` : "";
 }
 
-function visibleColumns(row) {
-  const rules = documentState.rules.filter((rule) => rule.enabled !== false);
-  const visible = documentState.columns.filter((column) => {
-    let shown = column.visibility === "always" || (column.visibility === "nonempty" && (documentState.layout.showBlankFields || Boolean(String(row.values[column.id] ?? "").trim())));
-    const matchingActions = new Set(rules.filter((rule) => rule.target === column.id && ruleMatches(rule, row.values)).map((rule) => rule.action));
-    if (matchingActions.has("hide_field")) shown = false;
-    else if (matchingActions.has("show_field")) shown = true;
-    if (row.overrides?.[column.id] === true) shown = true;
-    if (row.overrides?.[column.id] === false) shown = false;
-    return shown;
-  });
-  return visible;
-}
-
-function sortColumnsForRow(columns, row) {
-  return columns;
-}
-
 function renderAll() {
-  $("#documentName").value = documentState.name;
   renderData();
   renderColumns();
   renderRules();
@@ -402,7 +282,6 @@ function renderData() {
   ui.dataPage = Math.min(ui.dataPage, pageCount - 1);
   const rows = allRows.slice(ui.dataPage * ui.pageSize, (ui.dataPage + 1) * ui.pageSize);
   const previousSort = ui.sortColumn;
-  renderDataViews();
   $("#rowSearch").value = ui.search;
   $("#sortColumn").innerHTML = `<option value="">Original order</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}">${escapeHtml(column.label)}</option>`).join("")}`;
   $("#sortColumn").value = documentState.columns.some((column) => column.id === previousSort) ? previousSort : "";
@@ -616,176 +495,6 @@ function renderRules() {
   $("#rulesEmpty").hidden = Boolean(documentState.rules.length);
 }
 
-function renderLayout() {
-  const layout = documentState.layout;
-  $$(".layout-mode").forEach((button) => button.classList.toggle("active", button.dataset.mode === layout.mode));
-  const bindings = {
-    paperInput: layout.paper,
-    orientationInput: layout.orientation,
-    acrossInput: layout.across,
-    flowInput: layout.flow,
-    marginInput: layout.margin,
-    gapInput: layout.gap,
-    slipHeightInput: layout.slipHeight,
-    accentInput: layout.accent,
-    inkInput: layout.ink,
-    paperColorInput: layout.paperColor,
-    borderColorInput: layout.borderColor,
-    labelSizeInput: layout.labelSize,
-    valueSizeInput: layout.valueSize,
-    fontInput: layout.font,
-    labelFontInput: layout.labelFont,
-    labelCaseInput: layout.labelCase,
-    fieldColumnsInput: layout.fieldColumns,
-    labelPositionInput: layout.labelPosition,
-    valueAlignInput: layout.valueAlign,
-    labelWidthInput: layout.labelWidth,
-    paddingInput: layout.padding,
-    radiusInput: layout.radius,
-    headerTextInput: layout.headerText,
-    subtitleInput: layout.subtitle,
-    footerTextInput: layout.footerText,
-    headerStyleInput: layout.headerStyle,
-  };
-  Object.entries(bindings).forEach(([id, value]) => { $("#" + id).value = value; });
-  $("#borderInput").checked = layout.showBorder;
-  $("#cutMarksInput").checked = layout.cutMarks;
-  $("#footerInput").checked = layout.footer;
-  $("#fieldLinesInput").checked = layout.fieldLines;
-  $("#zebraInput").checked = layout.zebra;
-  $("#showBlankFieldsInput").checked = layout.showBlankFields;
-  $("#logoStatus").textContent = layout.logoData ? "Logo loaded" : "No logo selected";
-  $("#clearLogoButton").disabled = !layout.logoData;
-  $("#slipHeightOutput").textContent = `${layout.slipHeight} mm`;
-  renderLayoutPresets();
-}
-
-function renderLayoutPresets() {
-  const presets = documentState.presets || [];
-  $("#layoutPresetList").innerHTML = presets.length ? presets.map((preset) => `<div class="layout-preset" data-preset-id="${escapeHtml(preset.id)}"><button class="preset-apply" data-action="apply-preset"><strong>${escapeHtml(preset.name)}</strong><small>${escapeHtml(preset.layout.mode)} · ${String(preset.layout.paper || "a4").toUpperCase()} · ${preset.layout.across} across</small></button><button class="icon-button small" data-action="delete-preset" title="Delete saved layout">×</button></div>`).join("") : `<span class="preset-empty">No saved layouts yet.</span>`;
-}
-
-function saveLayoutPreset() {
-  const input = $("#layoutPresetName");
-  const name = input.value.trim();
-  if (!name) { toast("Give this layout a name first", "error"); input.focus(); return; }
-  commit((state) => { state.presets ||= []; state.presets.push({ id: uid("preset"), name, layout: clone(state.layout) }); });
-  input.value = "";
-  toast("Layout saved");
-}
-
-const modeDefaults = {
-  horizontal: { columns: 0, label: "top" },
-  stacked: { columns: 1, label: "left" },
-  grid: { columns: 2, label: "top" },
-  compact: { columns: 3, label: "inline" },
-  dense: { columns: 4, label: "top" },
-  cards: { columns: 2, label: "top" },
-  ledger: { columns: 2, label: "left" },
-  hero: { columns: 2, label: "top" },
-  sections: { columns: 2, label: "top" },
-};
-
-function arrangement(layout = documentState.layout) {
-  const preset = modeDefaults[layout.mode] || modeDefaults.grid;
-  return {
-    columns: Number(layout.fieldColumns) || preset.columns,
-    label: layout.labelPosition === "preset" ? preset.label : layout.labelPosition,
-  };
-}
-
-function effectiveLayout(row) {
-  return { ...documentState.layout, ...(row.layoutOverride || {}) };
-}
-
-function formattedLabel(label, layout = documentState.layout) {
-  if (layout.labelCase === "upper") return String(label).toUpperCase();
-  if (layout.labelCase === "title") return String(label).replace(/\b\w/g, (letter) => letter.toUpperCase());
-  return String(label);
-}
-
-function previewSlip(row) {
-  const layout = effectiveLayout(row);
-  const columns = visibleColumns(row);
-  if (!columns.length) return `<div class="slip-preview blank-slip ${layout.showBorder ? "" : "no-border"}">Blank slip</div>`;
-  const arranged = arrangement(layout);
-  const selected = ui.selectedPreviewRow === row.id ? "selected-slip" : "";
-  const font = layout.font === "Times-Roman" ? "Georgia, serif" : layout.font === "Courier" ? "ui-monospace, monospace" : "Inter, Arial, sans-serif";
-  const weights = Array.from({ length: arranged.columns || columns.length }, (_, index) => Math.max(0.5, Number(columns[index]?.width) || 1));
-  const style = `--field-columns:${arranged.columns || columns.length};--field-template:${weights.join("fr ")}fr;--label-width:${layout.labelWidth}%;--field-padding:${Math.max(1, layout.padding * .7)}px;--field-radius:${layout.radius * .7}px;--slip-bg:${layout.paperColor};--slip-ink:${layout.ink};--slip-border:${layout.borderColor};--preview-accent:${layout.accent};--value-align:${layout.valueAlign};--slip-font:${font};color:${layout.ink};`;
-  const hasChrome = Boolean(layout.headerText || layout.subtitle || layout.footerText || layout.logoData);
-  const classes = ["slip-preview", layout.mode, `labels-${arranged.label}`, hasChrome ? "with-chrome" : "", layout.showBorder ? "" : "no-border", layout.fieldLines ? "" : "no-field-lines", layout.zebra ? "zebra" : "", selected].filter(Boolean).join(" ");
-  const logo = layout.logoData ? `<img class="slip-logo" src="${escapeHtml(layout.logoData)}" alt="">` : "";
-  const headerCopy = layout.headerText || layout.subtitle ? `<span class="slip-heading-copy"><strong>${escapeHtml(layout.headerText)}</strong><span>${escapeHtml(layout.subtitle)}</span></span>` : "";
-  const header = hasChrome && (layout.headerText || layout.subtitle || layout.logoData) ? `<header class="slip-heading ${escapeHtml(layout.headerStyle)}">${logo}${headerCopy}</header>` : "";
-  const footer = layout.footerText ? `<footer class="slip-note">${escapeHtml(layout.footerText)}</footer>` : "";
-  const fieldMarkup = (column, index = 0) => { const alignment = column.valueAlign && column.valueAlign !== "default" ? column.valueAlign : layout.valueAlign; return `<div class="preview-field ${layout.mode === "hero" && index === 0 ? "hero-primary" : ""}"><span class="field-label" style="font-size:${Math.max(4, layout.labelSize * .44)}px">${escapeHtml(formattedLabel(column.label, layout))}</span><span class="field-value ${escapeHtml(column.style)}" style="font-size:${Math.max(4, layout.valueSize * .48)}px;text-align:${escapeHtml(alignment)}">${escapeHtml(formatValue(row.values[column.id] ?? "", column))}</span></div>`; };
-  const fields = layout.mode === "sections" ? (() => {
-    const groups = [];
-    const byGroup = new Map();
-    columns.forEach((column) => {
-      const key = String(column.group || "").trim() || "Fields";
-      if (!byGroup.has(key)) { const group = { name: key, columns: [] }; byGroup.set(key, group); groups.push(group); }
-      byGroup.get(key).columns.push(column);
-    });
-    const sectionColumns = Math.max(1, arranged.columns || 2);
-    return `<div class="slip-sections">${groups.map((group) => {
-      const weights = group.columns.slice(0, sectionColumns).map(() => 1);
-      const template = weights.length ? `${weights.join("fr ")}fr` : "1fr";
-      return `<section class="slip-section"><div class="slip-section-heading">${escapeHtml(group.name)}</div><div class="slip-section-fields" style="--section-columns:${Math.min(sectionColumns, group.columns.length)};--section-template:${template}">${group.columns.map((column, index) => fieldMarkup(column, index)).join("")}</div></section>`;
-    }).join("")}</div>`;
-  })() : `<div class="slip-fields">${columns.map((column, index) => fieldMarkup(column, index)).join("")}</div>`;
-  return `<div class="${classes}" style="${style}" data-preview-row-id="${row.id}" title="Select row in preview">${header}${fields}${footer}</div>`;
-}
-
-function renderPreview() {
-  const layout = documentState.layout;
-  const rows = includedRows();
-  if (ui.selectedPreviewRow && !rows.some((row) => row.id === ui.selectedPreviewRow)) ui.selectedPreviewRow = null;
-  const paper = $("#paperPreview");
-  const portraitWidth = layout.paper === "letter" ? 306 : 298;
-  const portraitHeight = layout.paper === "letter" ? 396 : 421;
-  const landscape = layout.orientation === "landscape";
-  const width = landscape ? portraitHeight : portraitWidth;
-  const height = landscape ? portraitWidth : portraitHeight;
-  const pxPerMm = width / (landscape ? (layout.paper === "letter" ? 279.4 : 297) : (layout.paper === "letter" ? 215.9 : 210));
-  const margin = layout.margin * pxPerMm;
-  const gap = layout.gap * pxPerMm;
-  const slipHeight = layout.slipHeight * pxPerMm;
-  const footerRoom = layout.footer ? 12 : 0;
-  const down = Math.max(1, Math.floor((height - margin * 2 - footerRoom + gap) / (slipHeight + gap)));
-  const perPage = down * layout.across;
-  paper.classList.toggle("landscape", landscape);
-  paper.dataset.across = layout.across;
-  paper.style.width = `${width}px`;
-  paper.style.minHeight = `${height}px`;
-  paper.style.setProperty("--preview-scale", ui.zoom);
-  paper.style.setProperty("--paper-margin", `${margin}px`);
-  paper.style.setProperty("--paper-gap", `${gap}px`);
-  paper.style.setProperty("--slip-height", `${slipHeight}px`);
-  paper.style.setProperty("--preview-accent", layout.accent);
-  paper.style.setProperty("--slip-border", layout.borderColor);
-  paper.style.gridTemplateRows = `repeat(${down}, ${slipHeight}px)`;
-  if (layout.flow === "columns") {
-    paper.style.gridAutoFlow = "column";
-    paper.style.gridTemplateRows = `repeat(${down}, ${slipHeight}px)`;
-  } else {
-    paper.style.gridAutoFlow = "row";
-  }
-  const pages = rows.length ? Math.ceil(rows.length / perPage) : 0;
-  ui.previewPage = Math.min(ui.previewPage, Math.max(0, pages - 1));
-  const pageNumber = pages ? ui.previewPage + 1 : 0;
-  const shown = rows.slice(ui.previewPage * perPage, (ui.previewPage + 1) * perPage);
-  paper.innerHTML = shown.map(previewSlip).join("") + (layout.footer && rows.length ? `<div class="paper-footer"><span>${escapeHtml(documentState.name)}</span><span>Page ${pageNumber} of ${pages}</span></div>` : "");
-  $("#previewStats").textContent = rows.length ? `${layout.paper.toUpperCase()} · ${perPage} per page · ${pages} page${pages === 1 ? "" : "s"}` : `${layout.paper.toUpperCase()} · 0 slips`;
-  $("#previewPageLabel").textContent = rows.length ? `Page ${pageNumber} / ${pages}` : "No pages";
-  $("#previewPrevButton").disabled = !rows.length || ui.previewPage <= 0;
-  $("#previewNextButton").disabled = !rows.length || ui.previewPage >= pages - 1;
-  $("#includedCount").textContent = `${rows.length} included`;
-  $("#excludedCount").textContent = `${documentState.rows.length - rows.length} excluded`;
-  $("#zoomLabel").textContent = `${Math.round(ui.zoom * 100)}%`;
-}
-
 // The preview is the real server-rendered PDF. The browser's PDF viewer handles
 // pagination and crisp scaling; the studio only controls when it is regenerated.
 function renderLayout() {
@@ -898,7 +607,7 @@ function renderPreview() {
 }
 
 function addRow() {
-  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, ""])), hidden: false, overrides: {}, layoutOverride: {} };
+  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, ""])), hidden: false, overrides: {} };
   commit((state) => state.rows.push(row));
   showView("data");
   requestAnimationFrame(() => $(`[data-row-id="${row.id}"] .cell-input`)?.focus());
@@ -938,107 +647,6 @@ function openRowOptions(rowId) {
   $("#rowPrintableInput").checked = !row.hidden;
   $("#rowOverrideList").innerHTML = documentState.columns.map((column) => `<label class="override-row"><strong>${escapeHtml(column.label)}</strong><select data-column-id="${column.id}"><option value="auto" ${row.overrides[column.id] == null ? "selected" : ""}>Automatic</option><option value="show" ${row.overrides[column.id] === true ? "selected" : ""}>Always show</option><option value="hide" ${row.overrides[column.id] === false ? "selected" : ""}>Always hide</option></select></label>`).join("");
   if (!$("#rowOptionsDialog").open) $("#rowOptionsDialog").showModal();
-}
-
-function renderRowPresetOptions() {
-  const select = $("#rowPresetInput");
-  if (!select) return;
-  const presets = documentState.presets || [];
-  select.innerHTML = `<option value="">${presets.length ? "Choose a saved layout" : "No saved layouts yet"}</option>${presets.map((preset) => `<option value="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</option>`).join("")}`;
-  select.disabled = !presets.length;
-  $("#applyRowPresetButton").disabled = !presets.length;
-}
-
-function applyRowPreset() {
-  const preset = (documentState.presets || []).find((item) => item.id === $("#rowPresetInput").value);
-  const row = documentState.rows.find((item) => item.id === ui.rowOptionsId);
-  if (!preset || !row) { toast("Choose a saved layout first", "error"); return; }
-  const override = Object.fromEntries(rowPresetKeys.filter((key) => Object.prototype.hasOwnProperty.call(preset.layout || {}, key)).map((key) => [key, clone(preset.layout[key])]));
-  if (!override.logoData) delete override.logoData;
-  commit((state) => {
-    const target = state.rows.find((item) => item.id === ui.rowOptionsId);
-    if (target) target.layoutOverride = override;
-  });
-  openRowOptions(row.id);
-  toast(`Applied “${preset.name}” to this slip`);
-}
-
-function syncRowLogoStatus(row, override = row?.layoutOverride || {}) {
-  const hasOverride = Object.prototype.hasOwnProperty.call(override, "logoData");
-  const hasLogo = Boolean(override.logoData);
-  const sheetHasLogo = Boolean(documentState.layout.logoData);
-  $("#rowLogoStatus").textContent = hasOverride ? (hasLogo ? "Row logo loaded" : "Sheet logo hidden for this row") : (sheetHasLogo ? "Using sheet logo" : "No logo selected");
-  $("#clearRowLogoButton").disabled = !hasOverride || !$("#rowLayoutEnabledInput").checked;
-}
-
-function setRowLogoData(logoData) {
-  commit((state) => {
-    const row = state.rows.find((item) => item.id === ui.rowOptionsId);
-    if (!row) return;
-    row.layoutOverride ||= {};
-    row.layoutOverride.logoData = logoData;
-  });
-  const row = documentState.rows.find((item) => item.id === ui.rowOptionsId);
-  if (row) {
-    $("#rowLayoutEnabledInput").checked = Boolean(row.layoutOverride && Object.keys(row.layoutOverride).length);
-    syncRowLayoutControls();
-    syncRowLogoStatus(row);
-  }
-}
-
-function clearRowLogoOverride() {
-  commit((state) => {
-    const row = state.rows.find((item) => item.id === ui.rowOptionsId);
-    if (!row) return;
-    if (row.layoutOverride) {
-      delete row.layoutOverride.logoData;
-      if (!Object.keys(row.layoutOverride).length) delete row.layoutOverride;
-    }
-  });
-  const row = documentState.rows.find((item) => item.id === ui.rowOptionsId);
-  if (row) {
-    $("#rowLayoutEnabledInput").checked = Boolean(row.layoutOverride && Object.keys(row.layoutOverride).length);
-    syncRowLayoutControls();
-    syncRowLogoStatus(row);
-  }
-}
-
-function renderRowFieldOrder(row) {
-  const ordered = sortColumnsForRow(documentState.columns, row);
-  $("#rowFieldOrderList").innerHTML = ordered.map((column) => `<div class="row-order-item" data-column-id="${escapeHtml(column.id)}" draggable="true"><button class="drag-handle" type="button" tabindex="-1" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><span>${escapeHtml(column.label)}</span><small>${escapeHtml(column.id)}</small></div>`).join("");
-}
-
-function syncRowLayoutControls() {
-  const enabled = $("#rowLayoutEnabledInput").checked;
-  $("#rowLayoutControls").classList.toggle("disabled-controls", !enabled);
-  $("#rowLayoutControls").querySelectorAll("select, input, button").forEach((control) => { control.disabled = !enabled; });
-  $("#rowLayoutEnabledInput").disabled = false;
-}
-
-function updateRowLayout(key, value, enabled = true) {
-  commit((state) => {
-    const row = state.rows.find((item) => item.id === ui.rowOptionsId);
-    if (!row) return;
-    row.layoutOverride ||= {};
-    if (value === "") delete row.layoutOverride[key];
-    else row.layoutOverride[key] = value;
-    if (!Object.keys(row.layoutOverride).length) delete row.layoutOverride;
-  });
-  if (enabled) syncRowLayoutControls();
-}
-
-function setRowFieldOrder(order) {
-  commit((state) => {
-    const row = state.rows.find((item) => item.id === ui.rowOptionsId);
-    if (!row) return;
-    const globalOrder = state.columns.map((column) => column.id);
-    row.layoutOverride ||= {};
-    if (order.join("|") === globalOrder.join("|")) delete row.layoutOverride.columnOrder;
-    else row.layoutOverride.columnOrder = order;
-    if (!Object.keys(row.layoutOverride).length) delete row.layoutOverride;
-  });
-  const row = documentState.rows.find((item) => item.id === ui.rowOptionsId);
-  if (row) renderRowFieldOrder(row);
 }
 
 function toast(message, type = "") {
@@ -1104,7 +712,7 @@ function pasteIntoDataGrid(event) {
   event.preventDefault();
   commit((state) => {
     for (let index = 0; index < additions; index += 1) {
-      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, ""])), hidden: false, overrides: {}, layoutOverride: {} };
+      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, ""])), hidden: false, overrides: {} };
       state.rows.push(row);
       rowIds.push(row.id);
     }
@@ -1177,13 +785,13 @@ async function exportVisibleRows() {
   await exportPdf(source, "-view", $("#exportVisibleButton"));
 }
 
-function saveProject() {
+function downloadSetup() {
   const blob = new Blob([JSON.stringify(documentState, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `${safeFilename(documentState.name)}.password-slips.json`);
-  toast("Studio file saved");
+  downloadBlob(blob, "password-slip-setup.password-slips.json");
+  toast("Setup downloaded");
 }
 
-async function openProjectFile(file) {
+async function loadSetupFile(file) {
   try {
     const parsed = JSON.parse(await file.text());
     if (!parsed || !Array.isArray(parsed.columns) || !Array.isArray(parsed.rows)) throw new Error("This is not a Password Slip Studio file.");
@@ -1193,9 +801,9 @@ async function openProjectFile(file) {
     ui.dataPage = 0;
     changed();
     renderAll();
-    toast("Studio file opened");
+    toast("Setup loaded");
   } catch (error) {
-    toast(error.message || "The studio file could not be opened.", "error");
+    toast(error.message || "The setup file could not be opened.", "error");
   }
 }
 
@@ -1214,8 +822,6 @@ function resetImportDialog() {
   $("#importRowNumbers").value = "";
   $("#importHiddenRowNumbers").value = "";
   $("#importColumnMode").value = "replace";
-  $("#importProjectName").value = "";
-  $("#importProjectName").placeholder = documentState.name;
   renderImportConfigs();
   updateImportModeNotice();
 }
@@ -1250,7 +856,6 @@ async function importWorkbook(file) {
     $("#importMap").hidden = false;
     $("#confirmImportButton").hidden = false;
     $("#importStepLabel").textContent = "Choose rows and columns";
-    $("#importProjectName").placeholder = String(file.name).replace(/\.(xlsx|xlsm|csv)$/i, "") || documentState.name;
     renderImportMapping();
   } catch (error) {
     $("#importMeta").textContent = error.message || "The workbook could not be imported.";
@@ -1544,7 +1149,7 @@ function confirmImport() {
       state.columns = nextColumns;
       const validColumns = new Set(state.columns.map((column) => column.id));
       state.rules = state.rules.filter((rule) => (rule.action === "hide_slip" || validColumns.has(rule.target)) && Array.isArray(rule.conditions) && rule.conditions.every((condition) => validColumns.has(condition.field)));
-      state.rows.forEach((row) => { row.values = Object.fromEntries(state.columns.map((column) => [column.id, ""])); row.overrides = {}; row.layoutOverride = {}; });
+      state.rows.forEach((row) => { row.values = Object.fromEntries(state.columns.map((column) => [column.id, ""])); row.overrides = {}; });
     } else {
       state.columns = nextColumns;
       state.rows.forEach((row) => { state.columns.forEach((column) => { row.values[column.id] ??= ""; }); });
@@ -1553,12 +1158,10 @@ function confirmImport() {
       const source = entry.values;
       const values = Object.fromEntries(state.columns.map((column) => [column.id, ""]));
       targetIds.forEach((target, sourceIndex) => { values[target] = String(source[sourceIndex] ?? ""); });
-      return { id: uid("row"), values, hidden: importHidden || hiddenSelection.numbers.has(entry.rowNumber), overrides: {}, layoutOverride: {} };
+      return { id: uid("row"), values, hidden: importHidden || hiddenSelection.numbers.has(entry.rowNumber), overrides: {} };
     });
     if (replaceRows) state.rows = imported;
     else state.rows.push(...imported);
-    const customName = $("#importProjectName").value.trim();
-    if (customName) state.name = customName;
   });
   ui.dataPage = 0;
   $("#importDialog").close();
@@ -1627,6 +1230,38 @@ async function deleteImportConfig() {
   toast("Import configuration removed");
 }
 
+function resetWorkspaceUi() {
+  ui.selectedRows.clear();
+  ui.search = "";
+  ui.sortColumn = "";
+  ui.sortDirection = "asc";
+  ui.dataPage = 0;
+  ui.ruleTestRowId = "";
+}
+
+async function clearAllData() {
+  if (!documentState.rows.length) { toast("There is no data to clear"); return; }
+  if (!await confirmAction("Clear all data?", `Remove all ${documentState.rows.length} rows? Fields, rules, layout and import templates will stay.`, "Clear data")) return;
+  commit((state) => { state.rows = []; });
+  resetWorkspaceUi();
+  renderAll();
+  showView("data");
+  toast("All data cleared");
+}
+
+async function resetEverything() {
+  if (!await confirmAction("Reset everything?", "Remove all data, fields, rules, layout changes and import templates? This cannot be undone.", "Reset everything")) return;
+  documentState = starterDocument();
+  ui.history = [];
+  ui.future = [];
+  resetWorkspaceUi();
+  try { localStorage.removeItem("password-slip-studio-document"); } catch (_) {}
+  changed();
+  renderAll();
+  showView("data");
+  toast("Studio reset");
+}
+
 function commandActions() {
   return [
     { icon: "⇧", label: "Import spreadsheet", detail: "XLSX, XLSM or CSV", run: openImport },
@@ -1642,8 +1277,9 @@ function commandActions() {
     { icon: "↓", label: "Export CSV", detail: "Data", run: exportCsv },
     { icon: "⧉", label: "Copy visible rows", detail: "Data", run: copyVisibleRows },
     { icon: "✎", label: "Bulk edit selected rows", detail: "Selection", run: openBulkEdit },
-    { icon: "☆", label: "Save data view", detail: "Filter and sort", run: saveDataView },
-    { icon: "◇", label: "Save studio file", detail: "", run: saveProject },
+    { icon: "◇", label: "Download setup", detail: "Backup", run: downloadSetup },
+    { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout", run: clearAllData },
+    { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
     { icon: "◐", label: "Toggle theme", detail: "", run: toggleTheme },
   ];
 }
@@ -1734,26 +1370,21 @@ function installEvents() {
   $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
   $("#exportCsvButton").addEventListener("click", exportCsv);
   $("#exportVisibleButton").addEventListener("click", exportVisibleRows);
-  $("#saveProjectButton").addEventListener("click", saveProject);
-  $("#openProjectButton").addEventListener("click", () => $("#openProjectInput").click());
-  $("#openProjectInput").addEventListener("change", (event) => openProjectFile(event.target.files[0]));
+  $("#downloadSetupButton").addEventListener("click", downloadSetup);
+  $("#loadSetupButton").addEventListener("click", () => $("#loadSetupInput").click());
+  $("#loadSetupInput").addEventListener("change", (event) => loadSetupFile(event.target.files[0]));
+  $("#clearDataButton").addEventListener("click", clearAllData);
+  $("#resetEverythingButton").addEventListener("click", resetEverything);
   $("#themeButton").addEventListener("click", toggleTheme);
   installPreviewResize();
   $("#undoButton").addEventListener("click", undo);
   $("#redoButton").addEventListener("click", redo);
-  $("#documentName").addEventListener("change", (event) => commit((state) => { state.name = event.target.value.trim() || "Untitled password slips"; }));
   $("#rowSearch").addEventListener("input", (event) => { ui.search = event.target.value; ui.dataPage = 0; renderData(); });
   $("#sortColumn").addEventListener("change", (event) => { ui.sortColumn = event.target.value; ui.dataPage = 0; renderData(); });
   $("#sortDirection").addEventListener("change", (event) => { ui.sortDirection = event.target.value; ui.dataPage = 0; renderData(); });
   $("#pageSizeInput").addEventListener("change", (event) => { ui.pageSize = Math.max(1, Number(event.target.value) || 50); ui.dataPage = 0; renderData(); });
   $("#dataPrevButton").addEventListener("click", () => { ui.dataPage = Math.max(0, ui.dataPage - 1); renderData(); });
   $("#dataNextButton").addEventListener("click", () => { ui.dataPage += 1; renderData(); });
-  $("#savedViewSelect").addEventListener("change", (event) => applyDataView(event.target.value));
-  $("#saveDataViewButton").addEventListener("click", saveDataView);
-  $("#deleteDataViewButton").addEventListener("click", deleteDataView);
-  $("#confirmSaveDataViewButton").addEventListener("click", () => commitDataView($("#saveDataViewName").value));
-  $("#saveDataViewName").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); commitDataView(event.target.value); } });
-
   $("#dataView").addEventListener("click", (event) => {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action === "add-row") addRow();
@@ -2020,95 +1651,6 @@ function installEvents() {
     });
   });
 
-  // Legacy per-row layout controls are intentionally retired. Row options now
-  // only contain field visibility overrides.
-  if (false) {
-  $("#rowIncludedInput").addEventListener("change", (event) => commit((state) => { state.rows.find((row) => row.id === ui.rowOptionsId).disabled = !event.target.checked; }));
-  $("#applyRowPresetButton").addEventListener("click", applyRowPreset);
-  $("#rowLayoutEnabledInput").addEventListener("change", (event) => {
-    commit((state) => {
-      const row = state.rows.find((item) => item.id === ui.rowOptionsId);
-      if (!row) return;
-      if (event.target.checked) row.layoutOverride ||= {};
-      else delete row.layoutOverride;
-    });
-    syncRowLayoutControls();
-    const row = documentState.rows.find((item) => item.id === ui.rowOptionsId);
-    if (row) syncRowLogoStatus(row);
-  });
-  $("#rowLogoInput").addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!/^image\/(png|jpeg)$/i.test(file.type)) { toast("Choose a PNG or JPEG logo.", "error"); event.target.value = ""; return; }
-    if (file.size > 1024 * 1024) { toast("Logo files must be 1 MB or smaller.", "error"); event.target.value = ""; return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const logoData = safeLogoData(reader.result);
-      if (!logoData) { toast("That logo could not be read.", "error"); return; }
-      setRowLogoData(logoData);
-      event.target.value = "";
-      toast("Row logo added");
-    };
-    reader.onerror = () => toast("That logo could not be read.", "error");
-    reader.readAsDataURL(file);
-  });
-  $("#clearRowLogoButton").addEventListener("click", clearRowLogoOverride);
-  [["rowModeInput", "mode", String], ["rowFieldColumnsInput", "fieldColumns", Number], ["rowLabelPositionInput", "labelPosition", String], ["rowValueAlignInput", "valueAlign", String], ["rowAccentInput", "accent", String], ["rowPaperColorInput", "paperColor", String], ["rowHeaderTextInput", "headerText", String], ["rowSubtitleInput", "subtitle", String], ["rowFooterTextInput", "footerText", String], ["rowHeaderStyleInput", "headerStyle", String], ["rowFontInput", "font", String], ["rowLabelCaseInput", "labelCase", String], ["rowLabelSizeInput", "labelSize", Number], ["rowValueSizeInput", "valueSize", Number], ["rowLabelWidthInput", "labelWidth", Number], ["rowPaddingInput", "padding", Number], ["rowRadiusInput", "radius", Number], ["rowInkInput", "ink", String], ["rowBorderColorInput", "borderColor", String]].forEach(([id, key, cast]) => $("#" + id).addEventListener("change", (event) => updateRowLayout(key, event.target.value === "" ? "" : cast(event.target.value))));
-  $("#rowBorderInput").addEventListener("change", (event) => updateRowLayout("showBorder", event.target.checked));
-  $("#rowFieldLinesInput").addEventListener("change", (event) => updateRowLayout("fieldLines", event.target.checked));
-  $("#rowZebraInput").addEventListener("change", (event) => updateRowLayout("zebra", event.target.checked));
-  let draggedFieldId = null;
-  $("#rowFieldOrderList").addEventListener("dragstart", (event) => {
-    if (!$("#rowLayoutEnabledInput").checked) return event.preventDefault();
-    const item = event.target.closest(".row-order-item");
-    if (!item) return;
-    draggedFieldId = item.dataset.columnId;
-    item.classList.add("dragging");
-    event.dataTransfer.effectAllowed = "move";
-  });
-  $("#rowFieldOrderList").addEventListener("dragover", (event) => {
-    if (!draggedFieldId) return;
-    event.preventDefault();
-    $$(".row-order-item.drag-over", $("#rowFieldOrderList")).forEach((item) => item.classList.remove("drag-over"));
-    const target = event.target.closest(".row-order-item");
-    if (target && target.dataset.columnId !== draggedFieldId) target.classList.add("drag-over");
-  });
-  $("#rowFieldOrderList").addEventListener("drop", (event) => {
-    event.preventDefault();
-    if (!$("#rowLayoutEnabledInput").checked) return;
-    const targetId = event.target.closest(".row-order-item")?.dataset.columnId;
-    if (!draggedFieldId || !targetId || draggedFieldId === targetId) return;
-    const row = documentState.rows.find((item) => item.id === ui.rowOptionsId);
-    if (!row) return;
-    const order = sortColumnsForRow(documentState.columns, row).map((column) => column.id);
-    const from = order.indexOf(draggedFieldId);
-    const to = order.indexOf(targetId);
-    if (from < 0 || to < 0) return;
-    order.splice(to, 0, order.splice(from, 1)[0]);
-    setRowFieldOrder(order);
-    draggedFieldId = null;
-  });
-  $("#rowFieldOrderList").addEventListener("dragend", () => { draggedFieldId = null; $$(".row-order-item").forEach((item) => item.classList.remove("dragging", "drag-over")); });
-  $("#resetRowFieldOrderButton").addEventListener("click", () => setRowFieldOrder(documentState.columns.map((column) => column.id)));
-  $("#applyRowLayoutToSelectionButton").addEventListener("click", () => {
-    const selected = new Set([...ui.selectedRows].filter((id) => documentState.rows.some((row) => row.id === id)));
-    const source = documentState.rows.find((row) => row.id === ui.rowOptionsId);
-    if (!source || !selected.size) return;
-    const override = clone(source.layoutOverride || {});
-    const fieldOverrides = clone(source.overrides || {});
-    commit((state) => state.rows.forEach((row) => {
-      if (!selected.has(row.id)) return;
-      row.layoutOverride = clone(override);
-      row.overrides = clone(fieldOverrides);
-    }));
-    syncRowLayoutControls();
-    toast(`Copied this customization to ${selected.size} slip${selected.size === 1 ? "" : "s"}`);
-  });
-  $("#resetRowLayoutButton").addEventListener("click", () => {
-    commit((state) => { const row = state.rows.find((item) => item.id === ui.rowOptionsId); if (row) delete row.layoutOverride; });
-    openRowOptions(ui.rowOptionsId);
-  });
-  }
   $("#rowOverrideList").addEventListener("change", (event) => {
     const columnId = event.target.dataset.columnId;
     commit((state) => {
@@ -2127,11 +1669,6 @@ function installEvents() {
   });
   $("#commandList").addEventListener("click", (event) => { const item = event.target.closest("[data-command-index]"); if (item) runCommand(Number(item.dataset.commandIndex)); });
   $$(".modal").forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog && dialog.id !== "confirmDialog") dialog.close(); }));
-
-  $("#newProjectButton").addEventListener("click", async () => {
-    if (!await confirmAction("Start a new project?", "The current studio is saved locally, but unsaved studio-file changes will be replaced.", "New project")) return;
-    pushHistory(); documentState = starterDocument(); ui.selectedRows.clear(); ui.dataPage = 0; changed(); renderAll(); showView("data");
-  });
 
   document.addEventListener("keydown", (event) => {
     const modifier = event.metaKey || event.ctrlKey;

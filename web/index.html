@@ -16,10 +16,7 @@
       <span class="brand-mark">PS</span>
       <span>Password Slip Studio</span>
     </div>
-    <div class="document-title-wrap">
-      <input id="documentName" class="document-title" value="Untitled password slips" aria-label="Document name">
-      <span id="saveStatus" class="save-status">Saved locally</span>
-    </div>
+    <span id="saveStatus" class="save-status">Saved</span>
     <div class="header-actions">
       <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
       <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
@@ -43,16 +40,16 @@
         <button id="addRowRailButton" class="tool-button"><span class="tool-icon">＋</span><span><strong>New row</strong><small>Manual entry</small></span><kbd>N</kbd></button>
       </div>
 
-      <div class="rail-group project-tools">
-        <div class="rail-label">Project</div>
-        <button id="saveProjectButton" class="rail-link"><span>↓</span> Save studio file</button>
-        <button id="openProjectButton" class="rail-link"><span>↑</span> Open studio file</button>
-        <input id="openProjectInput" type="file" accept=".json,.password-slips" hidden>
-        <button id="newProjectButton" class="rail-link"><span>◇</span> New project</button>
+      <div class="rail-group file-tools">
+        <div class="rail-label">File</div>
+        <button id="downloadSetupButton" class="rail-link"><span>↓</span> Download setup</button>
+        <button id="loadSetupButton" class="rail-link"><span>↑</span> Load setup</button>
+        <input id="loadSetupInput" type="file" accept=".json,.password-slips" hidden>
+        <button id="clearDataButton" class="rail-link"><span>⌫</span> Clear all data</button>
+        <button id="resetEverythingButton" class="rail-link danger-link"><span>↺</span> Reset everything</button>
       </div>
 
       <div class="rail-footer">
-        <span class="status-dot"></span> Local only
         <button id="themeButton" class="icon-button small" title="Toggle theme" aria-label="Toggle theme">◐</button>
       </div>
     </aside>
@@ -67,9 +64,6 @@
           <div class="view-actions">
             <label class="search-control"><span>⌕</span><input id="rowSearch" type="search" placeholder="Filter rows" aria-label="Filter rows"></label>
             <label class="sort-control"><span>Sort</span><select id="sortColumn" aria-label="Sort rows by"></select><select id="sortDirection" aria-label="Sort direction"><option value="asc">A–Z</option><option value="desc">Z–A</option></select></label>
-            <label class="saved-view-control"><span>View</span><select id="savedViewSelect" aria-label="Saved data view"><option value="">Ad hoc view</option></select></label>
-            <button id="saveDataViewButton" class="button quiet compact" title="Save the current filter and sort as a reusable view">＋ Save view</button>
-            <button id="deleteDataViewButton" class="icon-button small" title="Delete selected saved view" aria-label="Delete selected saved view" disabled>×</button>
             <button id="addRowButton" class="button secondary">＋ Add row</button>
             <button id="exportCsvButton" class="button secondary">↓ CSV</button>
             <button id="exportVisibleButton" class="button quiet compact" title="Export the currently filtered rows as a PDF">↓ View PDF</button>
@@ -140,7 +134,7 @@
       <div id="layoutView" class="view">
         <div class="view-header">
           <div><h1>Layout</h1><p>Changes render in the PDF preview automatically.</p></div>
-          <button id="resetLayoutButton" class="button secondary">Reset</button>
+          <button id="resetLayoutButton" class="button secondary">Reset layout</button>
         </div>
         <div class="settings-grid">
           <section class="settings-section span-two">
@@ -225,7 +219,6 @@
           <label id="importRowNumbersWrap" class="span-two" hidden>Spreadsheet row numbers <input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Use commas and ranges. Row 1 is the header; hidden rows stay excluded.</small></label>
           <label class="span-two">Hide selected spreadsheet rows <input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">These rows remain available to rules, but their slips are not printed.</small></label>
           <div class="import-config-control"><label>Mapping configuration<select id="importConfigSelect"><option value="">Ad hoc mapping</option></select></label><button id="saveImportConfigButton" class="button secondary compact" type="button">＋ Save mapping</button><button id="deleteImportConfigButton" class="icon-button small" type="button" title="Delete saved mapping" aria-label="Delete saved mapping" disabled>×</button></div>
-          <label class="span-two">Project name <input id="importProjectName" type="text" placeholder="Leave unchanged"></label>
         </div>
         <p id="importModeNotice" class="import-mode-notice"></p>
         <div class="mapping-toolbar"><strong>Source columns</strong><span>Nothing is included until you check it.</span><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
@@ -271,18 +264,10 @@
     </section>
   </dialog>
 
-  <dialog id="saveViewDialog" class="modal">
-    <form method="dialog" class="modal-card confirm-card">
-      <header class="modal-header"><div><h2>Save data view</h2><p>Keep this filter and sort combination for quick reuse.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
-      <div class="modal-body save-view-body"><label>View name<input id="saveDataViewName" type="text" maxlength="80" placeholder="e.g. Ready for print"></label></div>
-      <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="confirmSaveDataViewButton" class="button primary" type="button">Save view</button></footer>
-    </form>
-  </dialog>
-
   <dialog id="saveImportConfigDialog" class="modal">
     <form method="dialog" class="modal-card confirm-card">
       <header class="modal-header"><div><h2>Save import configuration</h2><p>Remember the selected columns and mappings, without the workbook or sheet.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
-      <div class="modal-body save-view-body"><label>Configuration name<input id="saveImportConfigName" type="text" maxlength="80" placeholder="e.g. Access sheet mapping"></label></div>
+      <div class="modal-body simple-form-body"><label>Configuration name<input id="saveImportConfigName" type="text" maxlength="80" placeholder="e.g. Access sheet mapping"></label></div>
       <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="confirmSaveImportConfigButton" class="button primary" type="button">Save mapping</button></footer>
     </form>
   </dialog>
