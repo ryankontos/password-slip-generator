@@ -216,7 +216,7 @@ function rowValuesText(row) {
 
 function filteredRows() {
   const query = ui.search.trim().toLowerCase();
-  return documentState.rows.filter((row) => !query || rowValuesText(row).includes(query));
+  return documentState.rows.filter((row) => !row.hidden && (!query || rowValuesText(row).includes(query)));
 }
 
 function conditionMatches(condition, values) {
@@ -256,6 +256,17 @@ function includedRows() {
   return includedRowsFor(documentState);
 }
 
+function printScopeRows() {
+  const printable = includedRows();
+  return ui.selectedRows.size ? printable.filter((row) => ui.selectedRows.has(row.id)) : printable;
+}
+
+function printScopeSource() {
+  const source = clone(documentState);
+  source.rows = printScopeRows().map((row) => clone(row));
+  return source;
+}
+
 function rowHiddenReason(row) {
   if (row.hidden) return "Hidden manually";
   const rule = documentState.rules.find((item) => item.enabled !== false && item.action === "hide_slip" && ruleMatches(item, row.values));
@@ -277,6 +288,7 @@ function renderAll() {
 }
 
 function renderData() {
+  [...ui.selectedRows].forEach((id) => { if (!documentState.rows.some((row) => row.id === id && !row.hidden)) ui.selectedRows.delete(id); });
   const allRows = filteredRows();
   const pageCount = Math.max(1, Math.ceil(allRows.length / ui.pageSize));
   ui.dataPage = Math.min(ui.dataPage, pageCount - 1);
@@ -296,11 +308,11 @@ function renderData() {
     </tr>`;
   }).join("");
   $("#dataEmpty").hidden = Boolean(allRows.length);
-  const hidden = documentState.rows.filter((row) => rowHiddenReason(row)).length;
-  const rowText = ui.search ? `${allRows.length} of ${documentState.rows.length} rows` : `${documentState.rows.length} rows`;
-  const warnings = [hidden ? `${hidden} hidden` : ""].filter(Boolean);
-  $("#visibleRowCount").textContent = warnings.length ? `${rowText} · ${warnings.join(" · ")}` : rowText;
-  $("#visibleRowCount").classList.toggle("warning-text", warnings.length > 0);
+  const hidden = documentState.rows.filter((row) => row.hidden).length;
+  const visibleTotal = documentState.rows.length - hidden;
+  const rowText = ui.search ? `${allRows.length} of ${visibleTotal} rows` : `${allRows.length} rows`;
+  $("#visibleRowCount").textContent = hidden ? `${rowText} · ${hidden} hidden` : rowText;
+  $("#visibleRowCount").classList.toggle("warning-text", hidden > 0);
   $("#pageSizeInput").value = String(ui.pageSize);
   $("#dataPageLabel").textContent = allRows.length ? `Page ${ui.dataPage + 1} / ${pageCount}` : "No pages";
   $("#dataPrevButton").disabled = !allRows.length || ui.dataPage <= 0;
@@ -547,7 +559,7 @@ function schedulePdfPreview(immediate = false) {
     $("#previewStats").textContent = documentState.rows.length ? "No columns" : "No rows";
     return;
   }
-  const printableCount = includedRows().length;
+  const printableCount = printScopeRows().length;
   if (!printableCount) {
     clearPdfPreview("No printable slips. Show a hidden row or change the hide-slip rules to render a PDF.");
     $("#previewStats").textContent = `0 printable · ${documentState.rows.length} stored`;
@@ -563,7 +575,7 @@ async function renderPdfPreview() {
     const response = await fetch("/api/pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document: documentState }),
+      body: JSON.stringify({ document: printScopeSource() }),
     });
     if (!response.ok) {
       let message = "The PDF preview could not be rendered.";
@@ -578,9 +590,9 @@ async function renderPdfPreview() {
     frame.src = `${ui.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
     frame.hidden = false;
     $("#previewPlaceholder").hidden = true;
-    const printableCount = includedRows().length;
-    const storedSuffix = printableCount === documentState.rows.length ? "" : ` · ${documentState.rows.length} stored`;
-    $("#previewStats").textContent = `${printableCount} printable${storedSuffix} · ${documentState.layout.mode}`;
+    const printableCount = printScopeRows().length;
+    const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
+    $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${documentState.layout.mode}`;
     $("#zoomLabel").textContent = `${ui.zoom}%`;
   } catch (error) {
     if (revision !== ui.previewRevision) return;
@@ -755,21 +767,13 @@ async function exportPdf(source = documentState, filenameSuffix = "", triggerBut
 }
 
 async function exportSelectedRows() {
-  const ids = new Set(ui.selectedRows);
-  const rows = includedRows().filter((row) => ids.has(row.id));
-  if (!rows.length) { toast("The selected rows are hidden by their row setting or a rule", "error"); return; }
-  const source = clone(documentState);
-  source.rows = rows.map((row) => clone(row));
-  await exportPdf(source, "-selected");
+  await exportCurrentScope();
 }
 
-async function exportVisibleRows() {
-  const printable = new Set(includedRows().map((row) => row.id));
-  const rows = filteredRows().filter((row) => printable.has(row.id));
-  if (!rows.length) { toast("No printable rows match the current view", "error"); return; }
-  const source = clone(documentState);
-  source.rows = rows.map((row) => clone(row));
-  await exportPdf(source, "-view", $("#exportVisibleButton") || $("#exportPdfButton"));
+async function exportCurrentScope(triggerButton = null) {
+  const rows = printScopeRows();
+  if (!rows.length) { toast(ui.selectedRows.size ? "No selected rows can be printed." : "There are no printable rows to export.", "error"); return; }
+  await exportPdf(printScopeSource(), ui.selectedRows.size ? "-selected" : "", triggerButton);
 }
 
 function downloadWorkspace() {
@@ -1179,8 +1183,7 @@ function commandActions() {
     { icon: "⫶", label: "Go to Fields", detail: "", run: () => showView("columns") },
     { icon: "⌁", label: "Go to Rules", detail: "", run: () => showView("rules") },
     { icon: "▤", label: "Go to Layout", detail: "L", run: () => showView("layout") },
-    { icon: "↓", label: "Export PDF", detail: "⇧⌘E", run: exportPdf },
-    { icon: "↓", label: "Export current view", detail: "Filtered PDF", run: exportVisibleRows },
+    { icon: "↓", label: "Export PDF", detail: "Selected rows or all", run: exportCurrentScope },
     { icon: "↓", label: "Export CSV", detail: "Data", run: exportCsv },
     { icon: "⧉", label: "Copy visible rows", detail: "Data", run: copyVisibleRows },
     { icon: "✎", label: "Bulk edit selected rows", detail: "Selection", run: openBulkEdit },
@@ -1291,11 +1294,10 @@ function installEvents() {
     if (event.target.closest("button")) requestAnimationFrame(closeMoreMenu);
   });
   document.addEventListener("click", closeMoreMenu);
-  $("#exportPdfButton").addEventListener("click", () => exportPdf());
+  $("#exportPdfButton").addEventListener("click", () => exportCurrentScope());
   $("#quickResetButton").addEventListener("click", resetEverything);
   $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
   $("#exportCsvButton").addEventListener("click", exportCsv);
-  $("#exportVisibleButton").addEventListener("click", exportVisibleRows);
   $("#downloadWorkspaceButton").addEventListener("click", downloadWorkspace);
   $("#loadWorkspaceButton").addEventListener("click", () => $("#loadWorkspaceInput").click());
   $("#loadWorkspaceInput").addEventListener("change", (event) => loadWorkspaceFile(event.target.files[0]));
@@ -1322,6 +1324,7 @@ function installEvents() {
     if (event.target.id !== "selectAllRows") return;
     filteredRows().forEach((row) => event.target.checked ? ui.selectedRows.add(row.id) : ui.selectedRows.delete(row.id));
     renderData();
+    schedulePdfPreview();
   });
 
   $("#dataBody").addEventListener("change", (event) => {
@@ -1331,6 +1334,7 @@ function installEvents() {
     if (event.target.classList.contains("row-select")) {
       event.target.checked ? ui.selectedRows.add(rowId) : ui.selectedRows.delete(rowId);
       renderData();
+      schedulePdfPreview();
       return;
     }
     if (event.target.classList.contains("cell-input")) {
@@ -1362,7 +1366,7 @@ function installEvents() {
     draggedRowId = null;
   });
 
-  $("#clearSelectionButton").addEventListener("click", () => { ui.selectedRows.clear(); renderData(); });
+  $("#clearSelectionButton").addEventListener("click", () => { ui.selectedRows.clear(); renderData(); schedulePdfPreview(); });
   $("#bulkEditButton").addEventListener("click", openBulkEdit);
   $("#bulkEditColumn").addEventListener("change", updateBulkEditPreview);
   $("#bulkEditOperation").addEventListener("change", renderBulkEditFields);
