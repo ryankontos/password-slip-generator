@@ -68,10 +68,17 @@ class RuleTests(unittest.TestCase):
         state["rows"][1]["overrides"]["code"] = True
         self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name", "code"])
 
-    def test_layout_can_reserve_empty_conditional_fields(self) -> None:
+    def test_nonempty_visibility_requires_an_alphanumeric_character(self) -> None:
+        state = sample_state()
+        state["rows"][1]["values"]["code"] = " - / _ "
+        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name"])
+        state["rows"][1]["values"]["code"] = " - É - "
+        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name", "code"])
+
+    def test_layout_cannot_override_only_with_a_value(self) -> None:
         state = sample_state()
         state["layout"]["showBlankFields"] = True
-        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name", "code"])
+        self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][1])], ["name"])
 
     def test_global_column_order_is_used_for_every_slip(self) -> None:
         state = sample_state()
@@ -169,7 +176,8 @@ class PdfTests(unittest.TestCase):
             "values": {column["id"]: f"Value {index}" for index, column in enumerate(state["columns"])},
             "overrides": {},
         }]
-        state["layout"].update({"mode": "stacked", "slipHeight": 72})
+        state["layout"].update({"mode": "stacked", "stackedColumns": 2, "slipHeight": 72})
+        self.assertEqual(pdf_layout(state).stacked_columns, 2)
         self.assertTrue(render_pdf(state).startswith(b"%PDF"))
 
 

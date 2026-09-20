@@ -13,7 +13,7 @@ from typing import Any, Iterable
 from openpyxl import load_workbook
 from reportlab.lib.colors import Color, HexColor
 from reportlab.lib.pagesizes import A4, LETTER
-from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfbase.pdfmetrics import getAscentDescent, stringWidth
 from reportlab.pdfgen import canvas
 
 
@@ -197,8 +197,10 @@ def visible_columns(state: dict[str, Any], row: dict[str, Any]) -> list[dict[str
     for column in state.get("columns", []):
         column_id = str(column.get("id", ""))
         mode = column.get("visibility", "always")
-        keep_empty = bool(state.get("layout", {}).get("showBlankFields", False))
-        shown = mode == "always" or (mode == "nonempty" and (keep_empty or bool(clean_cell(values.get(column_id, "")).strip())))
+        # Field visibility is authoritative. A sheet-level layout preference
+        # must never turn an empty "Only with a value" field back on.
+        value_has_content = any(character.isalnum() for character in clean_cell(values.get(column_id, "")))
+        shown = mode == "always" or (mode == "nonempty" and value_has_content)
         matching_actions = {
             rule.get("action") for rule in active_rules
             if rule.get("target") == column_id and rule_matches(rule, values)
@@ -242,6 +244,7 @@ class PdfLayout:
     cut_marks: bool
     footer: bool
     field_lines: bool
+    stacked_columns: int
 
 
 def _number(value: Any, default: float, low: float, high: float) -> float:
@@ -286,6 +289,7 @@ def pdf_layout(state: dict[str, Any]) -> PdfLayout:
         cut_marks=bool(source.get("cutMarks", True)),
         footer=bool(source.get("footer", True)),
         field_lines=bool(source.get("fieldLines", True)),
+        stacked_columns=2 if source.get("stackedColumns") == 2 else 1,
     )
 
 
@@ -327,8 +331,6 @@ def render_pdf(state: dict[str, Any]) -> bytes:
         if layout.footer:
             pdf.setFillColor(layout.muted)
             pdf.setFont("Helvetica", 7)
-            left = str(state.get("name") or "Password Slip Studio")
-            pdf.drawString(layout.margin, 4.5 * MM, left[:80])
             pdf.drawRightString(width - layout.margin, 4.5 * MM, f"Page {page_index + 1} of {pages}")
         pdf.showPage()
     pdf.save()
@@ -413,6 +415,21 @@ def _text(pdf: canvas.Canvas, text: Any, font: str, size: float, color: Color, x
         pdf.drawString(x, baseline, cleaned)
 
 
+def _centered_text(pdf: canvas.Canvas, text: Any, font: str, size: float, color: Color, x: float, bottom: float, width: float, height: float, align: str = "left") -> None:
+    """Draw fitted text optically centred within a field row."""
+    cleaned, fitted = _fit(clean_cell(text), font, size, max(1, width))
+    ascent, descent = getAscentDescent(font, fitted)
+    baseline = bottom + (height - (ascent - descent)) / 2 - descent
+    pdf.setFillColor(color)
+    pdf.setFont(font, fitted)
+    if align == "center":
+        pdf.drawCentredString(x + width / 2, baseline, cleaned)
+    elif align == "right":
+        pdf.drawRightString(x + width, baseline, cleaned)
+    else:
+        pdf.drawString(x, baseline, cleaned)
+
+
 def _draw_slip(pdf: canvas.Canvas, row: dict[str, Any], columns: list[dict[str, Any]], layout: PdfLayout, x: float, y: float, width: float, height: float) -> None:
     pdf.saveState()
     pdf.setFillColor(layout.paper_color)
@@ -450,7 +467,7 @@ def _draw_horizontal(pdf: canvas.Canvas, values: dict[str, Any], columns: list[d
 
 
 def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict[str, Any]], layout: PdfLayout, x: float, y: float, width: float, height: float) -> None:
-    blocks = 2 if len(columns) > 6 else 1
+    blocks = layout.stacked_columns
     rows_per_block = math.ceil(len(columns) / blocks)
     block_width = width / blocks
     row_height = height / rows_per_block
@@ -462,10 +479,9 @@ def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict
         bottom = y + height - (row_index + 1) * row_height
         pdf.setFillColor(layout.accent)
         pdf.rect(left, bottom, label_width, row_height, fill=1, stroke=0)
-        baseline = bottom + (row_height - layout.label_size) / 2
         padding = max(layout.padding, 1 * MM)
-        _text(pdf, _label(column.get("label", ""), layout), _label_font(layout), layout.label_size, HexColor("#FFFFFF"), left + padding, baseline, label_width - padding * 2)
-        _text(pdf, _display_value(column, values.get(column.get("id"), "")), _font_for(column, layout), layout.value_size, layout.ink, left + label_width + padding, bottom + (row_height - layout.value_size) / 2, block_width - label_width - padding * 2, _value_align(column, layout))
+        _centered_text(pdf, _label(column.get("label", ""), layout), _label_font(layout), layout.label_size, HexColor("#FFFFFF"), left + padding, bottom, label_width - padding * 2, row_height)
+        _centered_text(pdf, _display_value(column, values.get(column.get("id"), "")), _font_for(column, layout), layout.value_size, layout.ink, left + label_width + padding, bottom, block_width - label_width - padding * 2, row_height, _value_align(column, layout))
     if layout.field_lines:
         # Draw dividers last so they remain continuous over the filled label
         # panel. The label-side segment is derived from the accent itself, so

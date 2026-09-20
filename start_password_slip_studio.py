@@ -41,7 +41,7 @@ def ensure_environment() -> Path:
         say("Creating the project environment (first run only)…")
         subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True)
     available = subprocess.run(
-        [str(python), "-c", "import openpyxl, reportlab"],
+        [str(python), "-c", "import openpyxl, reportlab, pymupdf"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,

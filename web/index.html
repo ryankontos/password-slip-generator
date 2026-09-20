@@ -22,6 +22,19 @@
       <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
       <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
       <button id="exportPdfButton" class="button primary compact">Export PDF</button>
+      <button id="moreButton" class="icon-button" title="More actions" aria-label="More actions" aria-expanded="false">•••</button>
+      <div id="moreMenu" class="action-menu" hidden>
+        <button id="exportCsvButton"><span>↓</span> Export data as CSV</button>
+        <button id="exportVisibleButton"><span>↓</span> Export filtered rows</button>
+        <hr>
+        <button id="downloadSetupButton"><span>↓</span> Download setup</button>
+        <button id="loadSetupButton"><span>↑</span> Load setup</button>
+        <input id="loadSetupInput" type="file" accept=".json,.password-slips" hidden>
+        <button id="themeButton"><span>◐</span> Toggle theme</button>
+        <hr>
+        <button id="clearDataButton"><span>⌫</span> Clear all data</button>
+        <button id="resetEverythingButton" class="danger-menu-item"><span>↺</span> Reset everything</button>
+      </div>
     </div>
   </header>
 
@@ -34,24 +47,6 @@
         <button class="nav-item" data-view="layout"><span class="nav-icon">▤</span><span>Layout</span><kbd>L</kbd></button>
       </nav>
 
-      <div class="rail-group">
-        <div class="rail-label">Add data</div>
-        <button id="importButton" class="tool-button"><span class="tool-icon">⇧</span><span><strong>Import sheet</strong><small>XLSX, XLSM or CSV</small></span><kbd>I</kbd></button>
-        <button id="addRowRailButton" class="tool-button"><span class="tool-icon">＋</span><span><strong>New row</strong><small>Manual entry</small></span><kbd>N</kbd></button>
-      </div>
-
-      <div class="rail-group file-tools">
-        <div class="rail-label">File</div>
-        <button id="downloadSetupButton" class="rail-link"><span>↓</span> Download setup</button>
-        <button id="loadSetupButton" class="rail-link"><span>↑</span> Load setup</button>
-        <input id="loadSetupInput" type="file" accept=".json,.password-slips" hidden>
-        <button id="clearDataButton" class="rail-link"><span>⌫</span> Clear all data</button>
-        <button id="resetEverythingButton" class="rail-link danger-link"><span>↺</span> Reset everything</button>
-      </div>
-
-      <div class="rail-footer">
-        <button id="themeButton" class="icon-button small" title="Toggle theme" aria-label="Toggle theme">◐</button>
-      </div>
     </aside>
 
     <section class="editor-panel">
@@ -65,8 +60,6 @@
             <label class="search-control"><span>⌕</span><input id="rowSearch" type="search" placeholder="Filter rows" aria-label="Filter rows"></label>
             <label class="sort-control"><span>Sort</span><select id="sortColumn" aria-label="Sort rows by"></select><select id="sortDirection" aria-label="Sort direction"><option value="asc">A–Z</option><option value="desc">Z–A</option></select></label>
             <button id="addRowButton" class="button secondary">＋ Add row</button>
-            <button id="exportCsvButton" class="button secondary">↓ CSV</button>
-            <button id="exportVisibleButton" class="button quiet compact" title="Export the currently filtered rows as a PDF">↓ View PDF</button>
             <button id="dataImportButton" class="button primary">⇧ Import</button>
           </div>
         </div>
@@ -109,7 +102,7 @@
           <button id="addColumnButton" class="button primary">＋ Add field</button>
         </div>
           <div class="column-toolbar">
-          <span>Field</span><span>Value style</span><span>Default visibility</span><span></span>
+          <span>Field</span><span>Appearance</span><span>Visibility</span><span></span>
         </div>
         <div id="columnList" class="column-list"></div>
       </div>
@@ -143,6 +136,7 @@
               <button class="layout-mode active" data-mode="horizontal"><span class="mode-diagram horizontal-mode"><i></i><i></i><i></i></span><strong>Horizontal</strong><small>Blue label band, values below</small></button>
               <button class="layout-mode" data-mode="stacked"><span class="mode-diagram stacked-mode"><i></i><i></i><i></i></span><strong>Stacked</strong><small>Handles many fields</small></button>
             </div>
+            <label id="stackedColumnsControl" class="inline-setting" hidden>Stacked columns<select id="stackedColumnsInput"><option value="1">1 column</option><option value="2">2 columns</option></select></label>
           </section>
           <section class="settings-section">
             <h2>Sheet</h2>
@@ -174,9 +168,8 @@
             <div class="toggle-grid">
               <label class="toggle-row"><input id="borderInput" type="checkbox"><span class="switch"></span><span><strong>Slip border</strong><small>Outline each finished slip</small></span></label>
               <label class="toggle-row"><input id="cutMarksInput" type="checkbox"><span class="switch"></span><span><strong>Cut marks</strong><small>Show trim ticks at sheet edges</small></span></label>
-              <label class="toggle-row"><input id="footerInput" type="checkbox"><span class="switch"></span><span><strong>Page footer</strong><small>Document name and page count</small></span></label>
+              <label class="toggle-row"><input id="footerInput" type="checkbox"><span class="switch"></span><span><strong>Page number</strong><small>Show the current page and total</small></span></label>
               <label class="toggle-row"><input id="fieldLinesInput" type="checkbox"><span class="switch"></span><span><strong>Field dividers</strong><small>Rules between field cells</small></span></label>
-              <label class="toggle-row"><input id="showBlankFieldsInput" type="checkbox"><span class="switch"></span><span><strong>Keep empty fields</strong><small>Layout can reserve empty values</small></span></label>
             </div>
           </section>
         </div>
@@ -191,11 +184,7 @@
       </div>
       <div id="previewViewport" class="preview-viewport pdf-preview-viewport">
         <div id="previewPlaceholder" class="pdf-preview-placeholder">Add or import rows to preview the PDF.</div>
-        <iframe id="pdfPreviewFrame" class="pdf-preview-frame" title="Rendered PDF preview" hidden></iframe>
-      </div>
-      <div class="preview-footer">
-        <span id="previewStatus">Actual exported PDF</span>
-        <button id="openPreviewButton" class="text-button" type="button" disabled>Open PDF</button>
+        <img id="pdfPreviewImage" class="pdf-preview-image" alt="Rendered first page of the PDF" hidden>
       </div>
     </aside>
   </main>

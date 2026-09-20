@@ -30,6 +30,7 @@ const defaultLayout = Object.freeze({
   labelCase: "original",
   valueAlign: "left",
   labelWidth: 34,
+  stackedColumns: 1,
   padding: 2,
   showBorder: false,
   cutMarks: true,
@@ -121,6 +122,7 @@ function normaliseDocument(input) {
   })) : [];
   document.layout = { ...defaultLayout, ...(document.layout || {}) };
   document.layout.mode = document.layout.mode === "stacked" ? "stacked" : "horizontal";
+  document.layout.stackedColumns = Number(document.layout.stackedColumns) === 2 ? 2 : 1;
   document.columns.forEach((column, index) => {
     column.id = String(column.id || uniqueColumnId(`column_${index + 1}`, document.columns));
     column.label = String(column.label || `Column ${index + 1}`);
@@ -431,8 +433,8 @@ function columnOptions(selected) {
 
 function renderColumns() {
   $("#columnList").innerHTML = documentState.columns.map((column) => `<article class="column-row" data-column-id="${column.id}" draggable="true">
-    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select><select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default alignment</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></div></div>
-    <select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select>
+    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select></div></div>
+    <div class="column-appearance"><select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select><details class="field-options"><summary>More options</summary><div><label>Text<select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select></label><label>Alignment<select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></label></div></details></div>
     <select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select>
     <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field">×</button></div>
   </article>`).join("");
@@ -520,7 +522,8 @@ function renderLayout() {
   $("#cutMarksInput").checked = layout.cutMarks;
   $("#footerInput").checked = layout.footer;
   $("#fieldLinesInput").checked = layout.fieldLines;
-  $("#showBlankFieldsInput").checked = layout.showBlankFields;
+  $("#stackedColumnsInput").value = String(layout.stackedColumns || 1);
+  $("#stackedColumnsControl").hidden = layout.mode !== "stacked";
   $("#slipHeightOutput").textContent = `${layout.slipHeight} mm`;
   const pageHeight = layout.orientation === "landscape" ? (layout.paper === "letter" ? 215.9 : 210) : (layout.paper === "letter" ? 279.4 : 297);
   const usable = pageHeight - (2 * Number(layout.margin || 0)) - (layout.footer ? 7 : 0);
@@ -528,24 +531,19 @@ function renderLayout() {
   $("#sheetCapacity").textContent = `${perPage} slip${perPage === 1 ? "" : "s"} per page · full sheet width`;
 }
 
-function previewFragment() {
-  return `#page=1&zoom=${ui.zoom}`;
-}
-
 function applyPreviewZoom() {
   $("#zoomLabel").textContent = `${ui.zoom}%`;
-  if (ui.previewUrl) $("#pdfPreviewFrame").src = `${ui.previewUrl}${previewFragment()}`;
+  $("#pdfPreviewImage").style.width = `${ui.zoom}%`;
 }
 
 function clearPdfPreview(message = "Add or import rows to preview the PDF.") {
   if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
   ui.previewUrl = null;
-  const frame = $("#pdfPreviewFrame");
-  frame.hidden = true;
-  frame.removeAttribute("src");
+  const image = $("#pdfPreviewImage");
+  image.hidden = true;
+  image.removeAttribute("src");
   $("#previewPlaceholder").hidden = false;
   $("#previewPlaceholder").textContent = message;
-  $("#openPreviewButton").disabled = true;
 }
 
 function schedulePdfPreview(immediate = false) {
@@ -553,24 +551,22 @@ function schedulePdfPreview(immediate = false) {
   if (!documentState.rows.length || !documentState.columns.length) {
     clearPdfPreview();
     $("#previewStats").textContent = documentState.rows.length ? "No columns" : "No rows";
-    $("#previewStatus").textContent = "Actual exported PDF";
     return;
   }
   const printableCount = includedRows().length;
   if (!printableCount) {
     clearPdfPreview("No printable slips. Show a hidden row or change the hide-slip rules to render a PDF.");
     $("#previewStats").textContent = `0 printable · ${documentState.rows.length} stored`;
-    $("#previewStatus").textContent = "Nothing to preview";
     return;
   }
-  $("#previewStatus").textContent = "Rendering PDF…";
+  $("#previewStats").textContent = "Rendering…";
   ui.previewTimer = setTimeout(renderPdfPreview, immediate ? 0 : 400);
 }
 
 async function renderPdfPreview() {
   const revision = ++ui.previewRevision;
   try {
-    const response = await fetch("/api/pdf", {
+    const response = await fetch("/api/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ document: documentState }),
@@ -584,21 +580,19 @@ async function renderPdfPreview() {
     if (revision !== ui.previewRevision) return;
     if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
     ui.previewUrl = URL.createObjectURL(blob);
-    const frame = $("#pdfPreviewFrame");
-    frame.src = `${ui.previewUrl}${previewFragment()}`;
-    frame.hidden = false;
+    const image = $("#pdfPreviewImage");
+    image.src = ui.previewUrl;
+    image.style.width = `${ui.zoom}%`;
+    image.hidden = false;
     $("#previewPlaceholder").hidden = true;
-    $("#openPreviewButton").disabled = false;
     const printableCount = includedRows().length;
     const storedSuffix = printableCount === documentState.rows.length ? "" : ` · ${documentState.rows.length} stored`;
     $("#previewStats").textContent = `${printableCount} printable${storedSuffix} · ${documentState.layout.mode}`;
-    $("#previewStatus").textContent = "Actual exported PDF · up to date";
     $("#zoomLabel").textContent = `${ui.zoom}%`;
   } catch (error) {
     if (revision !== ui.previewRevision) return;
     clearPdfPreview(`PDF preview error: ${error.message}`);
     $("#previewStats").textContent = "Preview unavailable";
-    $("#previewStatus").textContent = "Fix the error, then refresh";
   }
 }
 
@@ -782,7 +776,7 @@ async function exportVisibleRows() {
   if (!rows.length) { toast("No printable rows match the current view", "error"); return; }
   const source = clone(documentState);
   source.rows = rows.map((row) => clone(row));
-  await exportPdf(source, "-view", $("#exportVisibleButton"));
+  await exportPdf(source, "-view", $("#exportVisibleButton") || $("#exportPdfButton"));
 }
 
 function downloadSetup() {
@@ -1316,6 +1310,17 @@ function toggleTheme() {
   localStorage.setItem("pss-theme", next);
 }
 
+function closeMoreMenu() {
+  $("#moreMenu").hidden = true;
+  $("#moreButton").setAttribute("aria-expanded", "false");
+}
+
+function toggleMoreMenu() {
+  const menu = $("#moreMenu");
+  menu.hidden = !menu.hidden;
+  $("#moreButton").setAttribute("aria-expanded", String(!menu.hidden));
+}
+
 function setPreviewWidth(value, persist = true) {
   ui.previewWidth = clampPreviewWidth(value);
   document.documentElement.style.setProperty("--preview-width", `${ui.previewWidth}px`);
@@ -1361,11 +1366,17 @@ function installPreviewResize() {
 
 function installEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
-  ["#addRowButton", "#addRowRailButton", "#appendRowButton"].forEach((selector) => $(selector).addEventListener("click", addRow));
-  ["#importButton", "#dataImportButton"].forEach((selector) => $(selector).addEventListener("click", openImport));
+  ["#addRowButton", "#appendRowButton"].forEach((selector) => $(selector).addEventListener("click", addRow));
+  $("#dataImportButton").addEventListener("click", openImport);
   $("#addColumnButton").addEventListener("click", () => addColumn());
   $("#addRuleButton").addEventListener("click", addRule);
   $("#commandButton").addEventListener("click", openCommands);
+  $("#moreButton").addEventListener("click", (event) => { event.stopPropagation(); toggleMoreMenu(); });
+  $("#moreMenu").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target.closest("button")) requestAnimationFrame(closeMoreMenu);
+  });
+  document.addEventListener("click", closeMoreMenu);
   $("#exportPdfButton").addEventListener("click", () => exportPdf());
   $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
   $("#exportCsvButton").addEventListener("click", exportCsv);
@@ -1585,6 +1596,7 @@ function installEvents() {
   });
 
   $$(".layout-mode").forEach((button) => button.addEventListener("click", () => commit((state) => { state.layout.mode = button.dataset.mode; })));
+  $("#stackedColumnsInput").addEventListener("change", (event) => commit((state) => { state.layout.stackedColumns = Number(event.target.value) === 2 ? 2 : 1; }));
   const layoutBindings = {
     paperInput: ["paper", String], orientationInput: ["orientation", String], marginInput: ["margin", Number], gapInput: ["gap", Number], slipHeightInput: ["slipHeight", Number], accentInput: ["accent", String], inkInput: ["ink", String], paperColorInput: ["paperColor", String], borderColorInput: ["borderColor", String], labelSizeInput: ["labelSize", Number], valueSizeInput: ["valueSize", Number], fontInput: ["font", String], labelFontInput: ["labelFont", String], labelCaseInput: ["labelCase", String],
   };
@@ -1596,12 +1608,11 @@ function installEvents() {
       } else commit((state) => { state.layout[key] = cast(event.target.value); });
     });
   });
-  [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"], ["showBlankFieldsInput", "showBlankFields"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
+  [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
   $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
   $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); applyPreviewZoom(); });
   $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); applyPreviewZoom(); });
   $("#refreshPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
-  $("#openPreviewButton").addEventListener("click", () => { if (ui.previewUrl) window.open(`${ui.previewUrl}${previewFragment()}`, "_blank", "noopener"); });
 
   $("#workbookInput").addEventListener("change", (event) => importWorkbook(event.target.files[0]));
   $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); event.currentTarget.classList.add("drag-over"); });
