@@ -8,9 +8,53 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character
 const PREVIEW_MIN_WIDTH = 360;
 const PREVIEW_MAX_WIDTH = 920;
 const clampPreviewWidth = (value) => Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, Number(value) || 520));
-function storedPreviewWidth() {
-  try { return clampPreviewWidth(localStorage.getItem("pss-preview-width")); } catch (_) { return 520; }
+const DOCUMENT_STORAGE_KEY = "password-slip-studio-document";
+const PREFERENCES_STORAGE_KEY = "password-slip-studio-preferences";
+const IMPORT_PREFERENCES_STORAGE_KEY = "password-slip-studio-import-preferences";
+const PREFERENCE_DEFAULTS = Object.freeze({ view: "data", pageSize: 50, zoom: 110, previewWidth: 520, lastImportSheetName: "", theme: "light" });
+
+function loadStudioPreferences() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(PREFERENCES_STORAGE_KEY) || "{}"); } catch (_) {}
+  const legacyTheme = (() => { try { return localStorage.getItem("pss-theme") || ""; } catch (_) { return ""; } })();
+  const legacySheet = (() => { try { return localStorage.getItem("pss-last-import-sheet") || ""; } catch (_) { return ""; } })();
+  const legacyPreviewWidth = (() => { try { return localStorage.getItem("pss-preview-width"); } catch (_) { return null; } })();
+  const allowedViews = new Set(["data", "columns", "rules", "layout"]);
+  const allowedPageSizes = new Set([25, 50, 100, 250]);
+  const theme = saved.theme === "dark" || legacyTheme === "dark" ? "dark" : "light";
+  const pageSize = Number(saved.pageSize);
+  const zoom = Number(saved.zoom);
+  return {
+    view: allowedViews.has(saved.view) ? saved.view : PREFERENCE_DEFAULTS.view,
+    pageSize: allowedPageSizes.has(pageSize) ? pageSize : PREFERENCE_DEFAULTS.pageSize,
+    zoom: Number.isFinite(zoom) ? Math.min(300, Math.max(50, zoom)) : PREFERENCE_DEFAULTS.zoom,
+    previewWidth: clampPreviewWidth(saved.previewWidth ?? legacyPreviewWidth ?? PREFERENCE_DEFAULTS.previewWidth),
+    lastImportSheetName: String(saved.lastImportSheetName ?? legacySheet ?? ""),
+    theme,
+  };
 }
+
+function saveStudioPreferences(patch = {}) {
+  const current = loadStudioPreferences();
+  const next = { ...current, ...patch };
+  next.previewWidth = clampPreviewWidth(next.previewWidth);
+  next.zoom = Math.min(300, Math.max(50, Number(next.zoom) || PREFERENCE_DEFAULTS.zoom));
+  next.pageSize = [25, 50, 100, 250].includes(Number(next.pageSize)) ? Number(next.pageSize) : PREFERENCE_DEFAULTS.pageSize;
+  next.lastImportSheetName = String(next.lastImportSheetName || "");
+  next.view = ["data", "columns", "rules", "layout"].includes(next.view) ? next.view : PREFERENCE_DEFAULTS.view;
+  next.theme = next.theme === "dark" ? "dark" : "light";
+  try {
+    localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(next));
+    localStorage.setItem("pss-theme", next.theme);
+    localStorage.setItem("pss-last-import-sheet", next.lastImportSheetName);
+    localStorage.setItem("pss-preview-width", String(next.previewWidth));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+const initialPreferences = loadStudioPreferences();
 
 const COLOR_KEYS = ["accent", "ink", "paperColor", "borderColor"];
 const PALETTE_STORAGE_KEY = "pss-color-palettes";
@@ -101,6 +145,62 @@ function saveSavedTemplates(templates) {
   }
 }
 
+function loadImportPreferences() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(IMPORT_PREFERENCES_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function importPreferenceKey(sheet) {
+  if (!sheet) return "";
+  const name = normaliseImportName(sheet.name);
+  const headers = (sheet.headers || []).map(normaliseImportName).join("|");
+  return `${name}::${headers}`;
+}
+
+function savedImportMappings(sheet) {
+  const preferences = loadImportPreferences();
+  const exact = preferences[importPreferenceKey(sheet)];
+  if (exact && Array.isArray(exact.mappings)) return exact.mappings;
+  const sheetName = normaliseImportName(sheet?.name);
+  if (!sheetName) return null;
+  const fallback = Object.values(preferences).find((item) => item?.sheetName && normaliseImportName(item.sheetName) === sheetName && Array.isArray(item.mappings));
+  return fallback?.mappings || null;
+}
+
+function saveImportMappings(sheet, mappings) {
+  if (!sheet || !Array.isArray(mappings) || !mappings.length) return;
+  const preferences = loadImportPreferences();
+  const key = importPreferenceKey(sheet);
+  if (!key) return;
+  preferences[key] = {
+    sheetName: sheet.name,
+    headers: [...(sheet.headers || [])],
+    mappings: mappings.map((mapping) => ({
+      sourceIndex: Number(mapping.sourceIndex),
+      header: String(mapping.header || ""),
+      include: Boolean(mapping.include),
+      target: String(mapping.target || "__create__"),
+      newName: String(mapping.newName || ""),
+    })),
+    savedAt: new Date().toISOString(),
+  };
+  const entries = Object.entries(preferences).sort(([, left], [, right]) => String(right?.savedAt || "").localeCompare(String(left?.savedAt || ""))).slice(0, 40);
+  try { localStorage.setItem(IMPORT_PREFERENCES_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries))); } catch (_) {}
+}
+
+function importPreferencesSnapshot() {
+  return loadImportPreferences();
+}
+
+function restoreImportPreferences(preferences) {
+  if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return;
+  try { localStorage.setItem(IMPORT_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences)); } catch (_) {}
+}
+
 const defaultLayout = Object.freeze({
   mode: "horizontal",
   paper: "a4",
@@ -147,30 +247,30 @@ function starterDocument() {
 }
 
 const ui = {
-  view: "data",
+  view: initialPreferences.view,
   selectedRows: new Set(),
   search: "",
   history: [],
   future: [],
-  zoom: 110,
+  zoom: initialPreferences.zoom,
   dataPage: 0,
-  pageSize: 50,
+  pageSize: initialPreferences.pageSize,
   importData: null,
   rowOptionsId: null,
   ruleTestRowId: "",
   commandIndex: 0,
   saveTimer: null,
   dirty: false,
-  previewWidth: storedPreviewWidth(),
+  previewWidth: initialPreferences.previewWidth,
   previewUrl: null,
   previewTimer: null,
   previewRevision: 0,
-  lastImportSheetName: (() => { try { return localStorage.getItem("pss-last-import-sheet") || ""; } catch (_) { return ""; } })(),
+  lastImportSheetName: initialPreferences.lastImportSheetName,
 };
 
 function loadDocument() {
   try {
-    const saved = JSON.parse(localStorage.getItem("password-slip-studio-document"));
+    const saved = JSON.parse(localStorage.getItem(DOCUMENT_STORAGE_KEY));
     if (saved && Array.isArray(saved.columns) && Array.isArray(saved.rows)) {
       const legacyNames = ["Ava Chen", "Noah Williams", "Mia Patel", "Leo Martin", "Zoe Taylor", "Eli Brown"];
       const isLegacySample = saved.rows.length === legacyNames.length && saved.rows.every((row, index) => row?.values?.name === legacyNames[index]);
@@ -178,7 +278,7 @@ function loadDocument() {
         if (!saved.rows.length && saved.name === "Term 3 password slips") saved.name = "Untitled password slips";
         return normaliseDocument(saved);
       }
-      localStorage.removeItem("password-slip-studio-document");
+      localStorage.removeItem(DOCUMENT_STORAGE_KEY);
     }
   } catch (_) {}
   return starterDocument();
@@ -227,6 +327,18 @@ let documentState = loadDocument();
 
 function snapshot() { return JSON.stringify(documentState); }
 
+function persistDocumentNow() {
+  try {
+    localStorage.setItem(DOCUMENT_STORAGE_KEY, snapshot());
+    ui.dirty = false;
+    $("#saveStatus").textContent = "Saved";
+    return true;
+  } catch (_) {
+    $("#saveStatus").textContent = "Storage unavailable";
+    return false;
+  }
+}
+
 function pushHistory() {
   ui.history.push(snapshot());
   if (ui.history.length > 60) ui.history.shift();
@@ -244,15 +356,12 @@ function changed() {
   ui.dirty = true;
   $("#saveStatus").textContent = "Saving…";
   clearTimeout(ui.saveTimer);
-  ui.saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem("password-slip-studio-document", snapshot());
-      ui.dirty = false;
-      $("#saveStatus").textContent = "Saved";
-    } catch (_) {
-      $("#saveStatus").textContent = "Storage unavailable";
-    }
-  }, 220);
+  ui.saveTimer = setTimeout(persistDocumentNow, 220);
+}
+
+function flushPersistence() {
+  clearTimeout(ui.saveTimer);
+  if (ui.dirty) persistDocumentNow();
 }
 
 function restore(serialised) {
@@ -276,6 +385,7 @@ function redo() {
 
 function showView(view) {
   ui.view = view;
+  saveStudioPreferences({ view });
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach((panel) => panel.classList.toggle("active", panel.id === `${view}View`));
   if (view === "data") requestAnimationFrame(() => $("#rowSearch").focus());
@@ -350,6 +460,7 @@ function renderAll() {
   renderColumns();
   renderRules();
   renderLayout();
+  applyPreviewZoom();
   schedulePdfPreview();
   $("#columnCount").textContent = documentState.columns.length;
   $("#ruleCount").textContent = documentState.rules.length;
@@ -876,8 +987,41 @@ async function exportCurrentScope(triggerButton = null) {
   await exportPdf(printScopeSource(), ui.selectedRows.size ? "-selected" : "", triggerButton);
 }
 
+function currentWorkspacePreferences() {
+  return {
+    ...loadStudioPreferences(),
+    view: ui.view,
+    pageSize: ui.pageSize,
+    zoom: ui.zoom,
+    previewWidth: ui.previewWidth,
+    lastImportSheetName: ui.lastImportSheetName,
+    theme: document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+  };
+}
+
+function applyWorkspacePreferences(preferences, restoreView = false) {
+  if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return;
+  saveStudioPreferences(preferences);
+  const next = loadStudioPreferences();
+  ui.pageSize = next.pageSize;
+  ui.zoom = next.zoom;
+  ui.previewWidth = next.previewWidth;
+  ui.lastImportSheetName = next.lastImportSheetName;
+  if (restoreView) ui.view = next.view;
+  document.documentElement.dataset.theme = next.theme;
+  setPreviewWidth(ui.previewWidth, false);
+}
+
 function downloadWorkspace() {
-  const workspace = { format: "password-slip-studio-workspace", version: 1, document: documentState, palettes: loadColorPalettes() };
+  const workspace = {
+    format: "password-slip-studio-workspace",
+    version: 2,
+    savedAt: new Date().toISOString(),
+    document: documentState,
+    palettes: loadColorPalettes(),
+    preferences: currentWorkspacePreferences(),
+    importPreferences: importPreferencesSnapshot(),
+  };
   const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: "application/json" });
   downloadBlob(blob, `${safeFilename(documentState.name)}.password-slip-workspace`);
   toast("Workspace saved");
@@ -887,19 +1031,27 @@ function studioFilePayload(parsed) {
   const format = parsed?.format || "legacy";
   const document = format === "password-slip-studio-workspace" || format === "password-slip-studio-template" ? parsed.document : parsed;
   if (!document || !Array.isArray(document.columns) || !Array.isArray(document.rows)) throw new Error("This file is not a valid Password Slip Studio document.");
-  return { document, palettes: Array.isArray(parsed?.palettes) ? parsed.palettes : null, format };
+  return {
+    document,
+    palettes: Array.isArray(parsed?.palettes) ? parsed.palettes : null,
+    preferences: parsed?.preferences && typeof parsed.preferences === "object" ? parsed.preferences : null,
+    importPreferences: parsed?.importPreferences && typeof parsed.importPreferences === "object" ? parsed.importPreferences : null,
+    format,
+  };
 }
 
-function applyOpenedDocument(incoming, palettes, message) {
+function applyOpenedDocument(incoming, palettes, message, preferences = null, importPreferences = null, restoreView = false) {
   pushHistory();
   documentState = normaliseDocument(incoming);
   if (Array.isArray(palettes)) saveColorPalettes(palettes);
+  if (importPreferences) restoreImportPreferences(importPreferences);
+  applyWorkspacePreferences(preferences, restoreView);
   ui.selectedRows.clear();
   ui.search = "";
   ui.dataPage = 0;
   changed();
   renderAll();
-  showView("data");
+  showView(restoreView ? ui.view : "data");
   toast(message);
 }
 
@@ -908,7 +1060,7 @@ async function loadWorkspaceFile(file) {
     const parsed = JSON.parse(await file.text());
     const payload = studioFilePayload(parsed);
     if (payload.format === "password-slip-studio-template") throw new Error("This is a template. Open it from Templates.");
-    applyOpenedDocument(payload.document, payload.palettes, "Workspace opened");
+    applyOpenedDocument(payload.document, payload.palettes, "Workspace opened", payload.preferences, payload.importPreferences, true);
   } catch (error) {
     toast(error.message || "The workspace could not be opened.", "error");
   }
@@ -919,11 +1071,29 @@ function templateRecordFromDocument(document, name, includeData) {
   templateDocument.name = name;
   if (!includeData) templateDocument.rows = [];
   const existing = loadSavedTemplates().find((item) => String(item.name || "").trim().toLowerCase() === name.trim().toLowerCase());
-  return { id: existing?.id || uid("template"), name, savedAt: new Date().toISOString(), includeData, document: normaliseDocument(templateDocument), palettes: loadColorPalettes() };
+  return {
+    id: existing?.id || uid("template"),
+    name,
+    savedAt: new Date().toISOString(),
+    includeData,
+    document: normaliseDocument(templateDocument),
+    palettes: loadColorPalettes(),
+    preferences: currentWorkspacePreferences(),
+    importPreferences: importPreferencesSnapshot(),
+  };
 }
 
 function templateFilePayload(record) {
-  return { format: "password-slip-studio-template", version: 1, name: record.name, includeData: record.includeData, document: record.document, palettes: record.palettes || [] };
+  return {
+    format: "password-slip-studio-template",
+    version: 2,
+    name: record.name,
+    includeData: record.includeData,
+    document: record.document,
+    palettes: record.palettes || [],
+    preferences: record.preferences || null,
+    importPreferences: record.importPreferences || {},
+  };
 }
 
 function downloadTemplateRecord(record) {
@@ -971,7 +1141,7 @@ function saveTemplateFromDialog() {
 
 function openTemplateRecord(record) {
   if (!record?.document) return;
-  applyOpenedDocument(record.document, record.palettes, `Template “${record.name || record.document.name || "Untitled"}” opened`);
+  applyOpenedDocument(record.document, record.palettes, `Template “${record.name || record.document.name || "Untitled"}” opened`, record.preferences, record.importPreferences, false);
   $("#templatesDialog").close();
 }
 
@@ -981,7 +1151,16 @@ async function loadTemplateFile(file) {
     const parsed = JSON.parse(await file.text());
     const payload = studioFilePayload(parsed);
     if (payload.format !== "password-slip-studio-template") throw new Error("Choose a .password-slip-template file.");
-    const record = { id: uid("template"), name: String(parsed.name || payload.document.name || file.name.replace(/\.[^.]+$/, "")), savedAt: new Date().toISOString(), includeData: parsed.includeData !== false, document: normaliseDocument(payload.document), palettes: payload.palettes || [] };
+    const record = {
+      id: uid("template"),
+      name: String(parsed.name || payload.document.name || file.name.replace(/\.[^.]+$/, "")),
+      savedAt: new Date().toISOString(),
+      includeData: parsed.includeData !== false,
+      document: normaliseDocument(payload.document),
+      palettes: payload.palettes || [],
+      preferences: payload.preferences || null,
+      importPreferences: payload.importPreferences || {},
+    };
     storeTemplateRecord(record);
     openTemplateRecord(record);
   } catch (error) {
@@ -1053,7 +1232,7 @@ function rememberImportSheet() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect")?.value) || 0];
   if (!sheet) return;
   ui.lastImportSheetName = sheet.name;
-  try { localStorage.setItem("pss-last-import-sheet", sheet.name); } catch (_) {}
+  saveStudioPreferences({ lastImportSheetName: sheet.name });
 }
 
 function guessedMapping(header) {
@@ -1169,6 +1348,14 @@ function currentImportMappings() {
   });
 }
 
+function rememberCurrentImportMappings(sheet) {
+  const mappings = currentImportMappings();
+  $$(".mapping-row", $("#mappingList")).forEach((row, index) => {
+    if (mappings[index] && row.dataset.mergeTarget) mappings[index].target = row.dataset.mergeTarget;
+  });
+  saveImportMappings(sheet, mappings);
+}
+
 function updateMappingSummary() {
   const mappings = currentImportMappings();
   const mapped = mappings.filter((item) => item.include && item.target !== "__skip__");
@@ -1211,12 +1398,15 @@ function renderImportMapping() {
   if (!sheet) return;
   updateImportRowSelectionControls();
   const selectedRows = selectedImportRows(sheet).entries;
+  const savedMappings = savedImportMappings(sheet) || [];
   $("#mappingList").innerHTML = sheet.headers.map((header, index) => {
+    const saved = savedMappings.find((mapping) => Number(mapping.sourceIndex) === index || normaliseImportName(mapping.header) === normaliseImportName(header));
     const guessed = guessedMapping(header);
-    const target = guessed;
-    const include = target !== "__create__";
+    const savedTarget = saved?.target && (saved.target === "__create__" || saved.target === "__skip__" || documentState.columns.some((column) => column.id === saved.target)) ? saved.target : null;
+    const target = savedTarget && savedTarget !== "__skip__" ? savedTarget : guessed;
+    const include = saved ? Boolean(saved.include) : target !== "__create__";
     const matchedLabel = documentState.columns.find((column) => column.id === target)?.label;
-    const newName = target === "__create__" ? header : (matchedLabel || header);
+    const newName = saved?.newName || (target === "__create__" ? header : (matchedLabel || header));
     return `<div class="mapping-row" data-source-index="${index}" data-source-header="${escapeHtml(header)}"><input class="mapping-include" type="checkbox" aria-label="Include ${escapeHtml(header)}" ${include ? "checked" : ""}><span class="mapping-source">${escapeHtml(header)}</span><select class="mapping-select" aria-label="How to import ${escapeHtml(header)}">${importTargetOptions(target)}</select><input class="mapping-new-name" type="text" value="${escapeHtml(newName)}" placeholder="New column name" aria-label="New name for ${escapeHtml(header)}"><span class="mapping-sample">${escapeHtml(selectedRows.find((entry) => entry.values[index])?.values[index] || sheet.rows.find((row) => row[index])?.[index] || "—")}</span></div>`;
   }).join("");
   $("#importMeta").textContent = `${ui.importData.filename} · ${sheet.rows.length} non-empty rows · ${selectedRows.length} selected`;
@@ -1291,6 +1481,7 @@ function confirmImport() {
     toast("Overwrite mode creates a new column for each checked source column.", "error");
     return;
   }
+  rememberCurrentImportMappings(sheet);
   commit((state) => {
     const targetIds = new Map();
     const nextColumns = overwriteColumns ? [] : state.columns;
@@ -1356,7 +1547,7 @@ async function resetEverything() {
   ui.history = [];
   ui.future = [];
   resetWorkspaceUi();
-  try { localStorage.removeItem("password-slip-studio-document"); } catch (_) {}
+  try { localStorage.removeItem(DOCUMENT_STORAGE_KEY); } catch (_) {}
   changed();
   renderAll();
   showView("data");
@@ -1416,7 +1607,7 @@ function runCommand(index) {
 function toggleTheme() {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
-  localStorage.setItem("pss-theme", next);
+  saveStudioPreferences({ theme: next });
 }
 
 function closeMoreMenu() {
@@ -1436,7 +1627,7 @@ function setPreviewWidth(value, persist = true) {
   const handle = $("#previewResizeHandle");
   if (handle) handle.setAttribute("aria-valuenow", String(ui.previewWidth));
   if (persist) {
-    try { localStorage.setItem("pss-preview-width", String(ui.previewWidth)); } catch (_) {}
+    saveStudioPreferences({ previewWidth: ui.previewWidth });
   }
 }
 
@@ -1515,7 +1706,7 @@ function installEvents() {
     documentState.name = event.target.value.trimStart() || "Untitled password slips";
     changed();
   });
-  $("#pageSizeInput").addEventListener("change", (event) => { ui.pageSize = Math.max(1, Number(event.target.value) || 50); ui.dataPage = 0; renderData(); });
+  $("#pageSizeInput").addEventListener("change", (event) => { ui.pageSize = [25, 50, 100, 250].includes(Number(event.target.value)) ? Number(event.target.value) : 50; ui.dataPage = 0; saveStudioPreferences({ pageSize: ui.pageSize }); renderData(); });
   $("#dataPrevButton").addEventListener("click", () => { ui.dataPage = Math.max(0, ui.dataPage - 1); renderData(); });
   $("#dataNextButton").addEventListener("click", () => { ui.dataPage += 1; renderData(); });
   $("#dataView").addEventListener("click", (event) => {
@@ -1760,8 +1951,8 @@ function installEvents() {
   $("#deletePaletteButton").addEventListener("click", deleteSelectedColorPalette);
   [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
   $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
-  $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); applyPreviewZoom(); });
-  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); applyPreviewZoom(); });
+  $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); });
+  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); });
   $("#refreshPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
 
   $("#workbookInput").addEventListener("change", (event) => importWorkbook(event.target.files[0]));
@@ -1840,6 +2031,9 @@ function installEvents() {
   });
 }
 
+window.addEventListener("pagehide", flushPersistence);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushPersistence(); });
 installEvents();
 setPreviewWidth(ui.previewWidth, false);
 renderAll();
+showView(ui.view);
