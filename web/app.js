@@ -314,6 +314,27 @@ function normaliseDocument(input) {
     delete column.required;
     delete column.unique;
   });
+  const columnIds = new Set(document.columns.map((column) => column.id));
+  const operatorIds = new Set(["not_empty", "empty", "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "greater_than", "less_than", "matches"]);
+  document.rules = document.rules.map((rule, index) => {
+    const action = ["show_field", "hide_field", "hide_slip"].includes(rule.action) ? rule.action : "hide_field";
+    const fallbackField = document.columns[0]?.id || "";
+    const conditions = Array.isArray(rule.conditions) ? rule.conditions.filter((condition) => condition && typeof condition === "object").map((condition) => ({
+      field: columnIds.has(String(condition.field || "")) ? String(condition.field) : fallbackField,
+      operator: operatorIds.has(condition.operator) ? condition.operator : "not_empty",
+      value: String(condition.value ?? ""),
+    })) : [];
+    return {
+      id: String(rule.id || uid(`rule_${index + 1}`)),
+      name: String(rule.name || "Rule"),
+      enabled: rule.enabled !== false,
+      action,
+      target: action === "hide_slip" ? "" : (columnIds.has(String(rule.target || "")) ? String(rule.target) : fallbackField),
+      match: rule.match === "any" ? "any" : "all",
+      negate: Boolean(rule.negate),
+      conditions,
+    };
+  });
   document.rows.forEach((row) => {
     row.id ||= uid("row");
     row.values = row.values && typeof row.values === "object" ? row.values : {};
@@ -416,8 +437,16 @@ function conditionMatches(condition, values) {
     case "not_contains": return !left.includes(right);
     case "starts_with": return left.startsWith(right);
     case "ends_with": return left.endsWith(right);
-    case "greater_than": return Number(actual) > Number(expected);
-    case "less_than": return Number(actual) < Number(expected);
+    case "greater_than": {
+      const actualNumber = actual.trim() === "" ? NaN : Number(actual);
+      const expectedNumber = expected.trim() === "" ? NaN : Number(expected);
+      return Number.isFinite(actualNumber) && Number.isFinite(expectedNumber) && actualNumber > expectedNumber;
+    }
+    case "less_than": {
+      const actualNumber = actual.trim() === "" ? NaN : Number(actual);
+      const expectedNumber = expected.trim() === "" ? NaN : Number(expected);
+      return Number.isFinite(actualNumber) && Number.isFinite(expectedNumber) && actualNumber < expectedNumber;
+    }
     case "matches": try { return new RegExp(expected, "i").test(actual); } catch (_) { return false; }
     default: return false;
   }

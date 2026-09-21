@@ -11,7 +11,7 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from studio_core import MM, _display_value, _footer_baseline, _value_align, included_rows, parse_workbook, pdf_layout, render_pdf, visible_columns  # noqa: E402
+from studio_core import MM, _display_value, _footer_baseline, _value_align, condition_matches, included_rows, parse_workbook, pdf_layout, render_pdf, visible_columns  # noqa: E402
 
 
 def sample_state() -> dict:
@@ -112,6 +112,11 @@ class RuleTests(unittest.TestCase):
             {"enabled": True, "action": "show_field", "target": "code", "conditions": condition},
         ]
         self.assertEqual([column["id"] for column in visible_columns(state, state["rows"][0])], ["name"])
+
+    def test_numeric_rules_do_not_treat_blank_as_zero(self) -> None:
+        self.assertFalse(condition_matches({"field": "code", "operator": "greater_than", "value": "-1"}, {"code": ""}))
+        self.assertFalse(condition_matches({"field": "code", "operator": "less_than", "value": "1"}, {"code": "   "}))
+        self.assertTrue(condition_matches({"field": "code", "operator": "greater_than", "value": "1"}, {"code": "2"}))
 
 
 class PdfTests(unittest.TestCase):

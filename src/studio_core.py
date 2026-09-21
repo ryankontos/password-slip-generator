@@ -122,6 +122,8 @@ def _parse_csv(content: bytes) -> dict[str, Any]:
 
 
 def condition_matches(condition: dict[str, Any], values: dict[str, Any]) -> bool:
+    if not isinstance(condition, dict) or not isinstance(values, dict):
+        return False
     actual = clean_cell(values.get(str(condition.get("field", "")), ""))
     expected = clean_cell(condition.get("value", ""))
     operator = str(condition.get("operator", "not_empty"))
@@ -162,6 +164,8 @@ def condition_matches(condition: dict[str, Any], values: dict[str, Any]) -> bool
 
 
 def rule_matches(rule: dict[str, Any], values: dict[str, Any]) -> bool:
+    if not isinstance(rule, dict) or not isinstance(values, dict):
+        return False
     conditions = rule.get("conditions")
     if not isinstance(conditions, list) or not conditions:
         return False
@@ -190,9 +194,9 @@ def included_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def visible_columns(state: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any]]:
-    values = row.get("values", {})
-    overrides = row.get("overrides", {})
-    active_rules = [rule for rule in state.get("rules", []) if rule.get("enabled", True)]
+    values = row.get("values", {}) if isinstance(row.get("values", {}), dict) else {}
+    overrides = row.get("overrides", {}) if isinstance(row.get("overrides", {}), dict) else {}
+    active_rules = [rule for rule in state.get("rules", []) if isinstance(rule, dict) and rule.get("enabled", True)]
     visible = []
     for column in state.get("columns", []):
         column_id = str(column.get("id", ""))
@@ -462,7 +466,7 @@ def _draw_slip(pdf: canvas.Canvas, row: dict[str, Any], columns: list[dict[str, 
     pdf.setStrokeColor(layout.border)
     pdf.setLineWidth(0.6)
     pdf.rect(x, y, width, height, fill=1, stroke=int(layout.show_border))
-    values = row.get("values", {})
+    values = row.get("values", {}) if isinstance(row.get("values", {}), dict) else {}
     if not columns:
         pdf.setFillColor(layout.muted)
         pdf.setFont("Helvetica-Oblique", layout.value_size)
