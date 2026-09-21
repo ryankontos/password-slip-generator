@@ -1,10 +1,10 @@
 # Password Slip Studio
 
-Password Slip Studio is a local browser workspace for building, editing, and printing password slips. Data and projects stay on the computer running the app.
+Password Slip Studio is a local browser tool for turning spreadsheet rows into printable password slips. It keeps the working document in the browser and can save portable workspace and template files.
 
 ## Start
 
-On macOS, double-click `run_password_slip_studio.command` for the browser studio, or `run_password_slips.command` for the original interactive terminal generator. Both launchers share the project `.venv` and install the workbook/PDF dependencies on first run.
+On macOS, double-click `run_password_slip_studio.command` to launch the browser studio, or `run_password_slips.command` to use the original terminal generator. Both launchers use the repository's `.venv` and install workbook/PDF dependencies on first run.
 
 From a terminal:
 
@@ -12,7 +12,7 @@ From a terminal:
 python3 start_password_slip_studio.py
 ```
 
-The studio opens at `http://127.0.0.1:8768`. Use `--no-open` to start it without opening a browser.
+The studio opens at `http://127.0.0.1:8768`. Pass `--no-open` to start it without opening a browser.
 
 To run the original command-line generator directly:
 
@@ -22,34 +22,19 @@ python3 src/password_slips.py
 
 ## Studio workflow
 
-- Define, rename, type (text, password, number, date/time, or URL), format, resize, transform values (as entered, case changes, or mask-last-four), align each value independently or inherit the sheet alignment, mark as required or unique, duplicate, delete, and drag-reorder columns. Required blanks, duplicate values, and invalid number/date/URL entries are flagged in the data grid.
-- Add and drag-reorder rows, edit cells inline, duplicate selections, export selected rows, sort/filter the working view, and keep rows excluded without deleting them. Required fields are highlighted when a row is incomplete.
-- Browse large sheets through paginated data-grid views with adjustable page sizes while selection, filtering, sorting, and export continue to work across the full result set.
-- Bulk-edit selected rows in one previewed action: set, clear, find/replace, add prefixes or suffixes, change case, or trim whitespace.
-- Paste tab/newline blocks directly from Excel or Sheets into any focused grid cell; additional rows are created automatically when needed.
-- Save named data views for repeatable filter and sort combinations; switch between saved views without changing the underlying rows.
-- Export the currently filtered included rows as a PDF in the same order as the active data view, while keeping the full-project export available.
-- Export the full data table to CSV or copy the currently filtered view as tab-separated text from the data tools or command palette.
-- Import `.xlsx`, `.xlsm`, and `.csv` files. Choose a worksheet, replace or append rows, and optionally enter spreadsheet row numbers/ranges such as `2, 5, 10-15` when only part of a sheet is needed. Source columns are opt-in: check the fields to bring across, overwrite the current column set or keep it and map into existing/new fields, and give new fields your own names. Mapping suggests exact and common credential-field matches, infers sensible types for newly created fields, shows a review summary, blocks accidental duplicate mappings, and can be saved for reuse without remembering the workbook, sheet, or row selection.
-- Create per-row rules with all/any condition groups and an optional “Not” inversion. Rules can show or hide fields, include rows, or exclude rows. Operators cover blank values, exact/partial text, numeric comparison, and regular expressions. Rules can be named, reordered, duplicated, disabled, and show a live matching-row count while editing.
-- Test the rule stack against any imported or manually entered row; each rule reports whether it matches that test row while you edit conditions.
-- Set field defaults such as **Only with a value**, then override visibility for an individual row when needed.
-- Open Row options to customize an individual slip without changing the sheet: choose its layout mode, field columns, field order, label position, alignment, typography, spacing, text/rule colours, accent, paper colour, row-specific logo, border, dividers, alternating fields, header treatment, header/subheading, or footer note.
-- Apply any saved layout preset as a per-row starting point, then refine that slip independently.
-- Select multiple rows and use **Customize slips** to open one row’s options, then copy its complete layout and field-visibility overrides to the selection; customized rows are marked in the grid.
-- Reset selected slip customizations in one confirmed action to return those rows to the sheet layout and automatic field visibility.
-- Choose horizontal, stacked, grid, compact, dense, cards, ledger, hero, or grouped sections layouts. Assign optional field groups so large slips can be organised into named panels. Configure fields per row, label position and case, value alignment, typeface, label width, padding, corner radius, paper and rule colours, alternating cells, dividers, paper, orientation, fill order, slips across, height, spacing, borders, cut marks, and footer.
-- Save named layout presets inside a studio file and reapply or remove them as the layout evolves.
-- Add optional neutral header text, subheading, footer note, logo, and line/band/outlined header treatments at sheet level; these are blank by default and can be overridden per slip.
-- Save/open portable `.password-slips.json` studio files. A working copy is also saved automatically in the browser.
-- Export the current included rows as a real PDF with the same rules and layout used by the preview.
-- PDF export performs a preflight for missing required values and duplicate unique values, with an explicit option to continue when those warnings are intentional.
-- Page through the sheet preview before export; page navigation follows the selected paper, slip size, spacing, and slips-across settings.
-- Drag the divider beside the sheet preview to give the preview more or less room; the panel width is remembered locally and can also be adjusted with the keyboard when focused.
-
-Press `⌘K` / `Ctrl+K` for the command palette. Other shortcuts are shown in the interface.
-
-New studios start with the editable column schema and no sample rows or example credentials; the repository ships without a demo workbook.
+- Start with an empty data set. Define fields, add rows manually, or import a workbook.
+- Edit rows inline, paste tab-separated blocks from Excel or Sheets, duplicate rows, reorder rows, hide slips, bulk edit selected rows, and export CSV.
+- Use the `New row` button at the bottom of the data table or `⌘↵`. A field can provide a default value for every manually added row.
+- Filter rows to work quickly. Filtering clears the selection; with no rows selected, PDF preview and export use every printable row.
+- Import `.xlsx`, `.xlsm`, and `.csv` files. The default is to replace existing rows. Select a worksheet, choose all or specific spreadsheet row numbers, mark imported rows hidden, and opt in to fields one at a time.
+- Replace the current field set or keep it and map spreadsheet fields into existing fields. New fields can have their own display names. Field mappings are remembered by sheet name and headers, not by the workbook file.
+- Fields default to text. Password-like headers are inferred as password fields; all other imported fields remain text unless changed manually.
+- Set field visibility to Always, Only with a value (an alphanumeric character is required), or Hidden by default. Rules can show/hide fields or hide an entire slip using all/any conditions and a Not switch. Hide wins when show and hide rules conflict.
+- Hidden imported rows remain available in the rule tester and data model but are not shown in the data list or printed.
+- Choose one of two layouts: Horizontal (the compact label band format) or Stacked (better for many fields, with an optional two-column arrangement). Configure paper, orientation, margin, gap, slip height, colours, font families, label/value sizes, label case, borders, field dividers, cut marks, footer, and filename date suffix.
+- The preview is generated from the same server-rendered PDF used for export. It updates after edits and selection changes, can be zoomed, and the divider beside it can be dragged or adjusted with the keyboard.
+- Name the document in the header; the title becomes the PDF filename. Save named colour palettes, workspaces, and templates. These are persisted locally and workspace/template files include document settings, palettes, preferences, and reusable import mappings.
+- Use `⌘K` for commands. Other shortcuts are listed in the Keyboard shortcuts dialog. `⌘Z` and `⇧⌘Z` keep native text-field undo available while editing.
 
 ## Development
 
