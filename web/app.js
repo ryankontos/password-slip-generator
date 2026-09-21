@@ -84,10 +84,10 @@ const defaultLayout = Object.freeze({
 
 function starterDocument() {
   const columns = [
-    { id: "name", label: "Name", sourceNames: [], group: "", type: "text", style: "strong", visibility: "always" },
-    { id: "username", label: "Username", sourceNames: [], group: "", type: "text", style: "standard", visibility: "always" },
-    { id: "password", label: "Password", sourceNames: [], group: "", type: "password", style: "mono", visibility: "always" },
-    { id: "recovery", label: "Recovery code", sourceNames: [], group: "", type: "password", style: "mono", visibility: "always" },
+    { id: "name", label: "Name", sourceNames: [], group: "", type: "text", style: "strong", defaultValue: "", visibility: "always" },
+    { id: "username", label: "Username", sourceNames: [], group: "", type: "text", style: "standard", defaultValue: "", visibility: "always" },
+    { id: "password", label: "Password", sourceNames: [], group: "", type: "password", style: "mono", defaultValue: "", visibility: "always" },
+    { id: "recovery", label: "Recovery code", sourceNames: [], group: "", type: "password", style: "mono", defaultValue: "", visibility: "always" },
   ];
   return {
     version: 1,
@@ -158,6 +158,7 @@ function normaliseDocument(input) {
     column.style ||= column.type === "password" ? "mono" : "standard";
     column.valueTransform = ["as_entered", "upper", "lower", "title", "mask_last4"].includes(column.valueTransform) ? column.valueTransform : "as_entered";
     column.valueAlign = ["default", "left", "center", "right"].includes(column.valueAlign) ? column.valueAlign : "default";
+    column.defaultValue = String(column.defaultValue ?? "");
     column.visibility ||= "always";
     column.sourceNames = [...new Set((Array.isArray(column.sourceNames) ? column.sourceNames : []).map((name) => String(name).trim()).filter(Boolean))];
     delete column.width;
@@ -462,7 +463,7 @@ function columnOptions(selected) {
 
 function renderColumns() {
   $("#columnList").innerHTML = documentState.columns.map((column) => `<article class="column-row" data-column-id="${column.id}" draggable="true">
-    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select></div></div>
+    <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><input class="column-default-input" type="text" value="${escapeHtml(column.defaultValue)}" placeholder="Default on new row" aria-label="${escapeHtml(column.label)} default value" autocomplete="off"></div></div>
     <div class="column-appearance"><select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select><details class="field-options"><summary>More options</summary><div><label>Text<select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select></label><label>Alignment<select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></label></div></details></div>
     <select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select>
     <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field">×</button></div>
@@ -648,7 +649,7 @@ function renderPreview() {
 }
 
 function addRow() {
-  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, ""])), hidden: false, overrides: {} };
+  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, column.defaultValue || ""])), hidden: false, overrides: {} };
   commit((state) => state.rows.push(row));
   showView("data");
   requestAnimationFrame(() => $(`[data-row-id="${row.id}"] .cell-input`)?.focus());
@@ -657,7 +658,7 @@ function addRow() {
 function addColumn(label = "New field") {
   const id = uniqueColumnId(label);
   commit((state) => {
-    state.columns.push({ id, label, sourceNames: [], group: "", type: "text", style: "standard", valueAlign: "default", visibility: "always" });
+    state.columns.push({ id, label, sourceNames: [], group: "", type: "text", style: "standard", valueAlign: "default", defaultValue: "", visibility: "always" });
     state.rows.forEach((row) => { row.values[id] = ""; });
   });
   showView("columns");
@@ -753,7 +754,7 @@ function pasteIntoDataGrid(event) {
   event.preventDefault();
   commit((state) => {
     for (let index = 0; index < additions; index += 1) {
-      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, ""])), hidden: false, overrides: {} };
+      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, column.defaultValue || ""])), hidden: false, overrides: {} };
       state.rows.push(row);
       rowIds.push(row.id);
     }
@@ -1252,7 +1253,7 @@ function confirmImport() {
         const label = mapping.newName || mapping.header;
         const id = uniqueColumnId(label, nextColumns);
         const type = inferImportedColumnType(mapping.header, sourceRows.map((row) => row[mapping.sourceIndex]));
-        nextColumns.push({ id, label, sourceNames: [mapping.header], group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", visibility: "always" });
+        nextColumns.push({ id, label, sourceNames: [mapping.header], group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", defaultValue: "", visibility: "always" });
         targetIds.set(mapping.sourceIndex, id);
       } else {
         const targetColumn = nextColumns.find((column) => column.id === mapping.target);
@@ -1595,6 +1596,14 @@ function installEvents() {
     if (event.target.classList.contains("column-transform-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueTransform = event.target.value; });
     if (event.target.classList.contains("column-align-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueAlign = event.target.value; });
     if (event.target.classList.contains("column-visibility-input")) commit((state) => { state.columns.find((column) => column.id === columnId).visibility = event.target.value; });
+  });
+  $("#columnList").addEventListener("input", (event) => {
+    if (!event.target.classList.contains("column-default-input")) return;
+    const columnId = event.target.closest(".column-row")?.dataset.columnId;
+    const column = documentState.columns.find((item) => item.id === columnId);
+    if (!column || column.defaultValue === event.target.value) return;
+    column.defaultValue = event.target.value;
+    changed();
   });
   $("#columnList").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
