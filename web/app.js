@@ -251,6 +251,7 @@ const ui = {
   selectedRows: new Set(),
   search: "",
   fieldSearch: "",
+  ruleSearch: "",
   history: [],
   future: [],
   zoom: initialPreferences.zoom,
@@ -691,6 +692,15 @@ function operatorOptions(selected) {
 
 function renderRules() {
   const active = documentState.rules.filter((rule) => rule.enabled !== false).length;
+  const query = ui.ruleSearch.trim().toLowerCase();
+  const visibleRules = documentState.rules.filter((rule) => {
+    if (!query) return true;
+    const target = documentState.columns.find((column) => column.id === rule.target)?.label || (rule.action === "hide_slip" ? "Entire slip" : "");
+    const conditionText = (rule.conditions || []).map((condition) => `${documentState.columns.find((column) => column.id === condition.field)?.label || ""} ${operatorLabels[condition.operator] || condition.operator} ${condition.value || ""}`).join(" ");
+    return `${rule.name || ""} ${rule.action || ""} ${actionLabels[rule.action] || ""} ${target} ${conditionText}`.toLowerCase().includes(query);
+  });
+  $("#ruleSearch").value = ui.ruleSearch;
+  $("#ruleHeaderSummary").textContent = query ? `${visibleRules.length} of ${documentState.rules.length} rules` : "Rules run per slip. If show and hide both match a field, hide wins.";
   const testSelect = $("#ruleTestRowSelect");
   const testRows = documentState.rows;
   const testRow = testRows.find((row) => row.id === ui.ruleTestRowId);
@@ -703,9 +713,9 @@ function renderRules() {
   const selectedTestRow = testRows.find((row) => row.id === ui.ruleTestRowId);
   const selectedHiddenReason = selectedTestRow ? rowHiddenReason(selectedTestRow) : "";
   $("#ruleTestStatus").textContent = selectedTestRow ? (selectedHiddenReason || "Printable · rule matches are shown on each card") : (testRows.length ? "Select a row to inspect its rule matches" : "Add or import rows to test rules");
-  $("#ruleSummary").textContent = `${active} active rule${active === 1 ? "" : "s"} · ${documentState.rules.length} total`;
+  $("#ruleSummary").textContent = query ? `${visibleRules.length} shown · ${active} active · ${documentState.rules.length} total` : `${active} active rule${active === 1 ? "" : "s"} · ${documentState.rules.length} total`;
   $("#disableRulesButton").textContent = active ? "Disable all" : "Enable all";
-  $("#ruleList").innerHTML = documentState.rules.map((rule, index) => { const matching = documentState.rows.filter((row) => ruleMatches(rule, row.values)).length; const testMatch = selectedTestRow && rule.enabled !== false ? ruleMatches(rule, selectedTestRow.values) : null; const testLabel = selectedTestRow ? (rule.enabled === false ? "Disabled" : testMatch ? "Matches test row" : "No match") : ""; return `<article class="rule-card ${rule.enabled === false ? "disabled" : ""}" data-rule-id="${rule.id}" draggable="true">
+  $("#ruleList").innerHTML = visibleRules.length ? visibleRules.map((rule, index) => { const matching = documentState.rows.filter((row) => ruleMatches(rule, row.values)).length; const testMatch = selectedTestRow && rule.enabled !== false ? ruleMatches(rule, selectedTestRow.values) : null; const testLabel = selectedTestRow ? (rule.enabled === false ? "Disabled" : testMatch ? "Matches test row" : "No match") : ""; return `<article class="rule-card ${rule.enabled === false ? "disabled" : ""}" data-rule-id="${rule.id}" draggable="true">
     <header class="rule-header"><span class="rule-number">${index + 1}</span><input class="rule-name-input" value="${escapeHtml(rule.name || actionLabels[rule.action] || "Rule")}" aria-label="Rule name"><span class="rule-match-count">${matching} matching</span>${testLabel ? `<span class="rule-test-chip ${testMatch ? "pass" : "fail"}">${escapeHtml(testLabel)}</span>` : ""}<label class="rule-enabled"><input class="rule-enabled-input" type="checkbox" ${rule.enabled !== false ? "checked" : ""}> Active</label><button class="icon-button small" data-action="duplicate-rule" title="Duplicate rule">⧉</button><button class="icon-button small" data-action="delete-rule" title="Delete rule">×</button></header>
     <div class="rule-body">
       <div class="rule-action-row"><span>Then</span><select class="rule-action-input">${actionOptions(rule.action)}</select>${rule.action === "hide_slip" ? `<span class="rule-target-label">Entire slip</span>` : `<select class="rule-target-input">${columnOptions(rule.target)}</select>`}</div>
@@ -714,7 +724,7 @@ function renderRules() {
         <div class="condition-footer"><button class="text-button" data-action="add-condition">＋ Add condition</button><label class="match-control">Match<select class="rule-match-input"><option value="all" ${rule.match !== "any" ? "selected" : ""}>all conditions</option><option value="any" ${rule.match === "any" ? "selected" : ""}>any condition</option></select></label><label class="negate-control"><input class="rule-negate-input" type="checkbox" ${rule.negate ? "checked" : ""}> Not</label></div>
       </div>
     </div>
-  </article>`; }).join("");
+  </article>`; }).join("") : query && documentState.rules.length ? `<div class="empty-state compact-empty"><div class="empty-icon">⌕</div><h2>No matching rules</h2><button class="button quiet compact" type="button" data-action="clear-rule-search">Clear filter</button></div>` : "";
   $("#rulesEmpty").hidden = Boolean(documentState.rules.length);
 }
 
@@ -1100,6 +1110,7 @@ function applyOpenedDocument(incoming, palettes, message, preferences = null, im
   ui.selectedRows.clear();
   ui.search = "";
   ui.fieldSearch = "";
+  ui.ruleSearch = "";
   ui.dataPage = 0;
   changed();
   renderAll();
@@ -1584,6 +1595,7 @@ function resetWorkspaceUi() {
   ui.selectedRows.clear();
   ui.search = "";
   ui.fieldSearch = "";
+  ui.ruleSearch = "";
   ui.dataPage = 0;
   ui.ruleTestRowId = "";
 }
@@ -1768,6 +1780,10 @@ function installEvents() {
   $("#fieldSearch").addEventListener("input", (event) => {
     ui.fieldSearch = event.target.value;
     renderColumns();
+  });
+  $("#ruleSearch").addEventListener("input", (event) => {
+    ui.ruleSearch = event.target.value;
+    renderRules();
   });
   $("#documentName").addEventListener("input", (event) => {
     documentState.name = event.target.value.trimStart() || "Untitled password slips";
@@ -1985,7 +2001,14 @@ function installEvents() {
   $("#ruleList").addEventListener("click", (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
+    if (button.dataset.action === "clear-rule-search") {
+      ui.ruleSearch = "";
+      renderRules();
+      requestAnimationFrame(() => $("#ruleSearch").focus());
+      return;
+    }
     const card = button.closest(".rule-card");
+    if (!card) return;
     const ruleId = card.dataset.ruleId;
     if (button.dataset.action === "add-condition") commit((state) => state.rules.find((rule) => rule.id === ruleId).conditions.push({ field: state.columns[0]?.id || "", operator: "equals", value: "" }));
     if (button.dataset.action === "delete-condition") {
