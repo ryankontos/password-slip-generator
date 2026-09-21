@@ -274,10 +274,11 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .form-grid input[type="range"] { width: 100%; accent-color: var(--accent); }
 .form-grid input[type="color"] { width: 100%; height: 33px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); }
 .form-grid output { float: right; color: var(--ink); }
-.recent-color-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 105px; align-items: center; gap: 8px; padding-top: 4px; color: var(--muted); font-size: 11px; }
-.recent-color-list { min-width: 0; display: flex; gap: 5px; overflow-x: auto; padding: 2px; }
-.recent-color-swatch { width: 25px; height: 25px; flex: 0 0 auto; border: 2px solid var(--surface); border-radius: 50%; box-shadow: 0 0 0 1px var(--line-strong); }
-.recent-color-row select { height: 30px !important; padding-inline: 6px !important; }
+.palette-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto auto; align-items: end; gap: 8px; padding-top: 4px; }
+.palette-row label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; }
+.palette-row select, .palette-row input[type="text"] { width: 100%; height: 33px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 12px; }
+.palette-row input[type="text"] { cursor: text; }
+.palette-row .button { white-space: nowrap; }
 .toggle-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .toggle-row { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; cursor: pointer; }
 .toggle-row > input { position: absolute; opacity: 0; pointer-events: none; }
@@ -457,6 +458,8 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
   .template-file-row { grid-template-columns: 1fr; align-items: start; }
   .template-file-row .button { justify-self: start; }
   .template-item { grid-template-columns: 1fr; }
+  .palette-row { grid-template-columns: 1fr 1fr; }
+  .palette-row .button { justify-self: start; }
   .view-header { padding-inline: 14px; }
   .import-options { grid-template-columns: 1fr; }
   .import-options .span-two { grid-column: auto; }

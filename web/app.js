@@ -12,29 +12,76 @@ function storedPreviewWidth() {
   try { return clampPreviewWidth(localStorage.getItem("pss-preview-width")); } catch (_) { return 520; }
 }
 
-function loadRecentColors() {
-  try { return JSON.parse(localStorage.getItem("pss-recent-colors") || "[]").filter((color) => /^#[0-9a-f]{6}$/i.test(color)).slice(0, 12); } catch (_) { return []; }
-}
-
-function saveRecentColors(colors) {
-  const clean = [...new Set(colors.filter((color) => /^#[0-9a-f]{6}$/i.test(color)).map((color) => color.toLowerCase()))].slice(0, 12);
-  try { localStorage.setItem("pss-recent-colors", JSON.stringify(clean)); } catch (_) {}
-  renderRecentColors();
-}
-
-function rememberColor(color) {
-  saveRecentColors([String(color).toLowerCase(), ...loadRecentColors().filter((item) => item.toLowerCase() !== String(color).toLowerCase())]);
-}
-
-function renderRecentColors() {
-  const list = $("#recentColorList");
-  if (!list) return;
-  const colors = loadRecentColors();
-  list.innerHTML = colors.length ? colors.map((color) => `<button class="recent-color-swatch" type="button" data-color="${color}" title="${color}" aria-label="Use ${color}" style="background:${color}"></button>`).join("") : `<span class="field-help">Colours you use will appear here.</span>`;
-}
-
+const COLOR_KEYS = ["accent", "ink", "paperColor", "borderColor"];
+const PALETTE_STORAGE_KEY = "pss-color-palettes";
+const MAX_COLOR_PALETTES = 20;
 const TEMPLATE_STORAGE_KEY = "pss-saved-templates";
 const MAX_SAVED_TEMPLATES = 12;
+
+function loadColorPalettes() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PALETTE_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((palette) => palette && palette.id && String(palette.name || "").trim() && palette.colors && COLOR_KEYS.every((key) => /^#[0-9a-f]{6}$/i.test(palette.colors[key]))).slice(0, MAX_COLOR_PALETTES) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveColorPalettes(palettes) {
+  try {
+    localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(palettes.slice(0, MAX_COLOR_PALETTES)));
+    renderColorPalettes();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function currentColorPalette() {
+  return Object.fromEntries(COLOR_KEYS.map((key) => [key, documentState.layout[key]]));
+}
+
+function renderColorPalettes() {
+  const select = $("#paletteSelect");
+  if (!select) return;
+  const selected = select.value;
+  const palettes = loadColorPalettes();
+  select.innerHTML = `<option value="">Choose a saved palette</option>${palettes.map((palette) => `<option value="${escapeHtml(palette.id)}">${escapeHtml(palette.name)}</option>`).join("")}`;
+  select.value = palettes.some((palette) => palette.id === selected) ? selected : "";
+  $("#deletePaletteButton").disabled = !select.value;
+}
+
+function saveCurrentColorPalette() {
+  const name = $("#paletteNameInput").value.trim();
+  if (!name) { toast("Give the palette a name first", "error"); $("#paletteNameInput").focus(); return; }
+  const existing = loadColorPalettes().find((palette) => palette.name.trim().toLowerCase() === name.toLowerCase());
+  const record = { id: existing?.id || uid("palette"), name, savedAt: new Date().toISOString(), colors: currentColorPalette() };
+  if (!saveColorPalettes([record, ...loadColorPalettes().filter((palette) => palette.id !== record.id && palette.name.trim().toLowerCase() !== name.toLowerCase())])) {
+    toast("The palette could not be saved in this browser", "error");
+    return;
+  }
+  $("#paletteSelect").value = record.id;
+  $("#paletteNameInput").value = record.name;
+  renderColorPalettes();
+  toast(`Palette “${name}” saved`);
+}
+
+function applySelectedColorPalette() {
+  const palette = loadColorPalettes().find((item) => item.id === $("#paletteSelect").value);
+  if (!palette) return;
+  commit((state) => COLOR_KEYS.forEach((key) => { state.layout[key] = palette.colors[key]; }));
+  $("#paletteNameInput").value = palette.name;
+}
+
+async function deleteSelectedColorPalette() {
+  const id = $("#paletteSelect").value;
+  const palette = loadColorPalettes().find((item) => item.id === id);
+  if (!palette) return;
+  if (!await confirmAction("Delete palette?", `Remove “${palette.name}” from saved palettes?`, "Delete palette")) return;
+  saveColorPalettes(loadColorPalettes().filter((item) => item.id !== id));
+  $("#paletteNameInput").value = "";
+  toast("Palette deleted");
+}
 
 function loadSavedTemplates() {
   try {
@@ -303,7 +350,6 @@ function renderAll() {
   renderColumns();
   renderRules();
   renderLayout();
-  renderRecentColors();
   schedulePdfPreview();
   $("#columnCount").textContent = documentState.columns.length;
   $("#ruleCount").textContent = documentState.rules.length;
@@ -531,6 +577,7 @@ function renderRules() {
 // pagination and crisp scaling; the studio only controls when it is regenerated.
 function renderLayout() {
   const layout = documentState.layout;
+  renderColorPalettes();
   $$(".layout-mode").forEach((button) => button.classList.toggle("active", button.dataset.mode === layout.mode));
   const bindings = {
     paperInput: layout.paper,
@@ -830,7 +877,7 @@ async function exportCurrentScope(triggerButton = null) {
 }
 
 function downloadWorkspace() {
-  const workspace = { format: "password-slip-studio-workspace", version: 1, document: documentState, recentColors: loadRecentColors() };
+  const workspace = { format: "password-slip-studio-workspace", version: 1, document: documentState, palettes: loadColorPalettes() };
   const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: "application/json" });
   downloadBlob(blob, `${safeFilename(documentState.name)}.password-slip-workspace`);
   toast("Workspace saved");
@@ -840,13 +887,13 @@ function studioFilePayload(parsed) {
   const format = parsed?.format || "legacy";
   const document = format === "password-slip-studio-workspace" || format === "password-slip-studio-template" ? parsed.document : parsed;
   if (!document || !Array.isArray(document.columns) || !Array.isArray(document.rows)) throw new Error("This file is not a valid Password Slip Studio document.");
-  return { document, recentColors: Array.isArray(parsed?.recentColors) ? parsed.recentColors : null, format };
+  return { document, palettes: Array.isArray(parsed?.palettes) ? parsed.palettes : null, format };
 }
 
-function applyOpenedDocument(incoming, recentColors, message) {
+function applyOpenedDocument(incoming, palettes, message) {
   pushHistory();
   documentState = normaliseDocument(incoming);
-  if (Array.isArray(recentColors)) saveRecentColors(recentColors);
+  if (Array.isArray(palettes)) saveColorPalettes(palettes);
   ui.selectedRows.clear();
   ui.search = "";
   ui.dataPage = 0;
@@ -861,7 +908,7 @@ async function loadWorkspaceFile(file) {
     const parsed = JSON.parse(await file.text());
     const payload = studioFilePayload(parsed);
     if (payload.format === "password-slip-studio-template") throw new Error("This is a template. Open it from Templates.");
-    applyOpenedDocument(payload.document, payload.recentColors, "Workspace opened");
+    applyOpenedDocument(payload.document, payload.palettes, "Workspace opened");
   } catch (error) {
     toast(error.message || "The workspace could not be opened.", "error");
   }
@@ -872,11 +919,11 @@ function templateRecordFromDocument(document, name, includeData) {
   templateDocument.name = name;
   if (!includeData) templateDocument.rows = [];
   const existing = loadSavedTemplates().find((item) => String(item.name || "").trim().toLowerCase() === name.trim().toLowerCase());
-  return { id: existing?.id || uid("template"), name, savedAt: new Date().toISOString(), includeData, document: normaliseDocument(templateDocument), recentColors: loadRecentColors() };
+  return { id: existing?.id || uid("template"), name, savedAt: new Date().toISOString(), includeData, document: normaliseDocument(templateDocument), palettes: loadColorPalettes() };
 }
 
 function templateFilePayload(record) {
-  return { format: "password-slip-studio-template", version: 1, name: record.name, includeData: record.includeData, document: record.document, recentColors: record.recentColors || [] };
+  return { format: "password-slip-studio-template", version: 1, name: record.name, includeData: record.includeData, document: record.document, palettes: record.palettes || [] };
 }
 
 function downloadTemplateRecord(record) {
@@ -924,7 +971,7 @@ function saveTemplateFromDialog() {
 
 function openTemplateRecord(record) {
   if (!record?.document) return;
-  applyOpenedDocument(record.document, record.recentColors, `Template “${record.name || record.document.name || "Untitled"}” opened`);
+  applyOpenedDocument(record.document, record.palettes, `Template “${record.name || record.document.name || "Untitled"}” opened`);
   $("#templatesDialog").close();
 }
 
@@ -934,7 +981,7 @@ async function loadTemplateFile(file) {
     const parsed = JSON.parse(await file.text());
     const payload = studioFilePayload(parsed);
     if (payload.format !== "password-slip-studio-template") throw new Error("Choose a .password-slip-template file.");
-    const record = { id: uid("template"), name: String(parsed.name || payload.document.name || file.name.replace(/\.[^.]+$/, "")), savedAt: new Date().toISOString(), includeData: parsed.includeData !== false, document: normaliseDocument(payload.document), recentColors: payload.recentColors || [] };
+    const record = { id: uid("template"), name: String(parsed.name || payload.document.name || file.name.replace(/\.[^.]+$/, "")), savedAt: new Date().toISOString(), includeData: parsed.includeData !== false, document: normaliseDocument(payload.document), palettes: payload.palettes || [] };
     storeTemplateRecord(record);
     openTemplateRecord(record);
   } catch (error) {
@@ -1708,13 +1755,9 @@ function installEvents() {
     });
   });
   $("#filenameDateInput").addEventListener("change", (event) => commit((state) => { state.layout.appendDateToFilename = event.target.checked; }));
-  ["accentInput", "inkInput", "paperColorInput", "borderColorInput"].forEach((id) => $("#" + id).addEventListener("change", (event) => rememberColor(event.target.value)));
-  $("#recentColorList").addEventListener("click", (event) => {
-    const swatch = event.target.closest("[data-color]");
-    if (!swatch) return;
-    const key = $("#recentColorTarget").value;
-    commit((state) => { state.layout[key] = swatch.dataset.color; });
-  });
+  $("#paletteSelect").addEventListener("change", applySelectedColorPalette);
+  $("#savePaletteButton").addEventListener("click", saveCurrentColorPalette);
+  $("#deletePaletteButton").addEventListener("click", deleteSelectedColorPalette);
   [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
   $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
   $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); applyPreviewZoom(); });
