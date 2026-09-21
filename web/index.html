@@ -217,10 +217,11 @@
           <label class="span-two">Hide selected spreadsheet rows <input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">These rows remain available to rules, but their slips are not printed.</small></label>
         </div>
         <p id="importModeNotice" class="import-mode-notice"></p>
-        <div class="mapping-toolbar"><strong>Spreadsheet fields</strong><span>Recognised fields are selected automatically.</span><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
+        <div class="mapping-toolbar"><strong>Spreadsheet fields</strong><span>Recognised fields are selected automatically.</span><label class="search-control import-mapping-search"><span>⌕</span><input id="mappingSearch" type="search" placeholder="Find a spreadsheet field" aria-label="Find a spreadsheet field"></label><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
         <div class="mapping-head"><span>Include</span><span>Spreadsheet field</span><span>Import into</span><span>Display name</span><span>Sample</span></div>
         <p id="mappingSummary" class="mapping-summary"></p>
         <div id="mappingList" class="mapping-list"></div>
+        <p id="mappingSearchEmpty" class="mapping-search-empty" hidden>No spreadsheet fields match this filter.</p>
         <p id="importWarning" class="inline-notice" hidden></p>
       </div>
       <footer class="modal-footer"><span id="importMeta"></span><button id="cancelImportButton" class="button secondary" value="cancel">Cancel</button><button id="confirmImportButton" class="button primary" type="button" hidden>Import rows</button></footer>

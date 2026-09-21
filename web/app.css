@@ -337,11 +337,13 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .mapping-toolbar { min-height: 28px; display: flex; align-items: center; gap: 8px; margin: -2px 0 7px; color: var(--muted); font-size: 10px; }
 .mapping-toolbar strong { color: var(--ink); font-size: 11px; }
 .mapping-toolbar > span { color: var(--subtle); }
+.mapping-toolbar .import-mapping-search { min-width: 205px; height: 30px; margin-left: auto; }
 .mapping-toolbar > div { display: flex; gap: 8px; margin-left: auto; }
 .mapping-head, .mapping-row { display: grid; grid-template-columns: 48px minmax(120px, 1fr) minmax(150px, 1.15fr) minmax(150px, 1fr) minmax(100px, .9fr); gap: 10px; align-items: center; }
 .mapping-head { padding: 0 9px 7px; color: var(--subtle); font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
 .mapping-summary { margin: -3px 0 8px; color: var(--muted); font-size: 10px; }
 .mapping-list { display: grid; gap: 5px; }
+.mapping-search-empty { margin: 12px 0 0; padding: 12px; border: 1px dashed var(--line-strong); border-radius: 5px; color: var(--muted); font-size: 11px; text-align: center; }
 .mapping-row { min-height: 44px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; }
 .mapping-row .mapping-include { width: 17px; height: 17px; justify-self: center; accent-color: var(--accent); }
 .mapping-source { font-size: 12px; font-weight: 650; }

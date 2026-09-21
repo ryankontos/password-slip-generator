@@ -258,6 +258,7 @@ const ui = {
   dataPage: 0,
   pageSize: initialPreferences.pageSize,
   importData: null,
+  importMappingSearch: "",
   rowOptionsId: null,
   ruleTestRowId: "",
   commandIndex: 0,
@@ -1264,6 +1265,7 @@ async function loadTemplateFile(file) {
 
 function resetImportDialog() {
   ui.importData = null;
+  ui.importMappingSearch = "";
   $("#importChoose").hidden = false;
   $("#importMap").hidden = true;
   $("#confirmImportButton").hidden = true;
@@ -1276,6 +1278,8 @@ function resetImportDialog() {
   $("#importRowNumbers").value = "";
   $("#importHiddenRowNumbers").value = "";
   $("#importColumnMode").value = "replace";
+  $("#mappingSearch").value = "";
+  $("#mappingSearchEmpty").hidden = true;
   updateImportModeNotice();
 }
 
@@ -1461,6 +1465,23 @@ function updateMappingSummary() {
   return { duplicateTargets, duplicateNames };
 }
 
+function filterImportMappingRows() {
+  const query = ui.importMappingSearch.trim().toLowerCase();
+  const rows = $("#mappingList") ? $$(".mapping-row", $("#mappingList")) : [];
+  let visible = 0;
+  rows.forEach((row) => {
+    const sample = row.querySelector(".mapping-sample")?.textContent || "";
+    const haystack = `${row.dataset.sourceHeader || ""} ${sample}`.toLowerCase();
+    const matches = !query || haystack.includes(query);
+    row.hidden = !matches;
+    if (matches) visible += 1;
+  });
+  const search = $("#mappingSearch");
+  if (search) search.value = ui.importMappingSearch;
+  const empty = $("#mappingSearchEmpty");
+  if (empty) empty.hidden = !query || visible > 0;
+}
+
 function updateImportWarning() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
   const duplicates = updateMappingSummary();
@@ -1503,6 +1524,7 @@ function renderImportMapping() {
   }).join("");
   $("#importMeta").textContent = `${ui.importData.filename} · ${sheet.rows.length} non-empty rows · ${selectedRows.length} selected`;
   updateImportMappingControls();
+  filterImportMappingRows();
   updateImportWarning();
   updateImportModeNotice();
 }
@@ -2112,6 +2134,10 @@ function installEvents() {
   $("#importRowSelectionMode").addEventListener("change", () => { updateImportRowSelectionControls(); updateImportModeNotice(); });
   $("#importRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
   $("#importHiddenRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
+  $("#mappingSearch").addEventListener("input", (event) => {
+    ui.importMappingSearch = event.target.value;
+    filterImportMappingRows();
+  });
   $("#includeAllColumnsButton").addEventListener("click", () => {
     $$(".mapping-include", $("#mappingList")).forEach((input) => { input.checked = true; });
     updateImportMappingControls();
