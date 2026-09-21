@@ -30,6 +30,8 @@
         <button id="downloadWorkspaceButton"><span>↓</span> Save workspace</button>
         <button id="loadWorkspaceButton"><span>↑</span> Open workspace</button>
         <input id="loadWorkspaceInput" type="file" accept=".json,.password-slips,.password-slip-workspace" hidden>
+        <button id="saveTemplateMenuButton"><span>◇</span> Save template</button>
+        <button id="openTemplatesButton"><span>◇</span> Templates</button>
         <button id="themeButton"><span>◐</span> Toggle theme</button>
         <hr>
         <button id="clearDataButton"><span>⌫</span> Clear all data</button>
@@ -59,6 +61,7 @@
             <label class="search-control"><span>⌕</span><input id="rowSearch" type="search" placeholder="Filter rows" aria-label="Filter rows"></label>
             <button id="addRowButton" class="button secondary">＋ Add row</button>
             <button id="dataImportButton" class="button primary">⇧ Import</button>
+            <button id="clearDataTabButton" class="button secondary danger">Clear all data</button>
           </div>
         </div>
         <div id="selectionToolbar" class="selection-toolbar" hidden>
@@ -83,7 +86,7 @@
           </div>
         </div>
         <div class="table-footer">
-          <button id="appendRowButton" class="text-button">＋ Add row</button>
+          <button id="appendRowButton" class="button secondary compact">＋ New row</button>
           <span id="visibleRowCount"></span>
           <div id="dataPagination" class="data-pagination" aria-label="Data pagination">
             <label>Rows<select id="pageSizeInput" aria-label="Rows per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="250">250</option></select></label>
@@ -146,6 +149,10 @@
               <label class="span-two">Slip height <output id="slipHeightOutput"></output><input id="slipHeightInput" type="range" min="20" max="120" step="1"></label>
               <div id="sheetCapacity" class="field-help span-two"></div>
             </div>
+          </section>
+          <section class="settings-section span-two">
+            <h2>Output</h2>
+            <label class="toggle-row bordered"><input id="filenameDateInput" type="checkbox"><span class="switch"></span><span><strong>Add date to PDF filename</strong><small>Append today’s date as YYYY-MM-DD when downloading</small></span></label>
           </section>
           <section class="settings-section">
             <h2>Type &amp; colour</h2>
@@ -240,6 +247,25 @@
         <p id="bulkEditPreview" class="bulk-edit-preview"></p>
       </div>
       <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="applyBulkEditButton" class="button primary" type="button">Apply edit</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="templatesDialog" class="modal">
+    <form method="dialog" class="modal-card templates-card">
+      <header class="modal-header"><div><h2>Templates</h2><p>Save fields, rules and layout for reuse. Data is optional.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body templates-body">
+        <div class="template-save-panel">
+          <div class="template-save-fields">
+            <label>Template name<input id="templateNameInput" type="text" maxlength="120" placeholder="Template name" autocomplete="off"></label>
+            <label class="toggle-row bordered"><input id="templateIncludeDataInput" type="checkbox"><span class="switch"></span><span><strong>Include current data</strong><small>Keep the rows with this template</small></span></label>
+          </div>
+          <button id="saveTemplateButton" class="button primary" type="button">Save template</button>
+        </div>
+        <div class="template-file-row"><strong>Open a template file</strong><span>Use a .password-slip-template file from anywhere.</span><button id="openTemplateFileButton" class="button secondary" type="button">Choose file</button><input id="loadTemplateInput" type="file" accept=".json,.password-slip-template" hidden></div>
+        <div class="template-list-header"><h3>Saved templates</h3><span>Stored in this browser</span></div>
+        <div id="templateList" class="template-list"></div>
+      </div>
+      <footer class="modal-footer"><span>Saving also downloads a template file.</span><button class="button secondary" value="cancel">Done</button></footer>
     </form>
   </dialog>
 

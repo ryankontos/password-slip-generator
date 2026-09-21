@@ -33,6 +33,27 @@ function renderRecentColors() {
   list.innerHTML = colors.length ? colors.map((color) => `<button class="recent-color-swatch" type="button" data-color="${color}" title="${color}" aria-label="Use ${color}" style="background:${color}"></button>`).join("") : `<span class="field-help">Colours you use will appear here.</span>`;
 }
 
+const TEMPLATE_STORAGE_KEY = "pss-saved-templates";
+const MAX_SAVED_TEMPLATES = 12;
+
+function loadSavedTemplates() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TEMPLATE_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item) => item && item.document && Array.isArray(item.document.columns) && Array.isArray(item.document.rows)).slice(0, MAX_SAVED_TEMPLATES) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveSavedTemplates(templates) {
+  try {
+    localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates.slice(0, MAX_SAVED_TEMPLATES)));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 const defaultLayout = Object.freeze({
   mode: "horizontal",
   paper: "a4",
@@ -58,6 +79,7 @@ const defaultLayout = Object.freeze({
   footer: true,
   fieldLines: true,
   showBlankFields: true,
+  appendDateToFilename: false,
 });
 
 function starterDocument() {
@@ -127,6 +149,7 @@ function normaliseDocument(input) {
   document.layout = { ...defaultLayout, ...(document.layout || {}) };
   document.layout.mode = document.layout.mode === "stacked" ? "stacked" : "horizontal";
   document.layout.stackedColumns = Number(document.layout.stackedColumns) === 2 ? 2 : 1;
+  document.layout.appendDateToFilename = Boolean(document.layout.appendDateToFilename);
   document.columns.forEach((column, index) => {
     column.id = String(column.id || uniqueColumnId(`column_${index + 1}`, document.columns));
     column.label = String(column.label || `Column ${index + 1}`);
@@ -528,6 +551,7 @@ function renderLayout() {
   $("#cutMarksInput").checked = layout.cutMarks;
   $("#footerInput").checked = layout.footer;
   $("#fieldLinesInput").checked = layout.fieldLines;
+  $("#filenameDateInput").checked = Boolean(layout.appendDateToFilename);
   $("#stackedColumnsInput").value = String(layout.stackedColumns || 1);
   $("#stackedColumnsControl").hidden = layout.mode !== "stacked";
   $("#slipHeightOutput").textContent = `${layout.slipHeight} mm`;
@@ -543,6 +567,7 @@ function applyPreviewZoom() {
 }
 
 function clearPdfPreview(message = "Add or import rows to preview the PDF.") {
+  ui.previewRevision += 1;
   if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
   ui.previewUrl = null;
   const frame = $("#pdfPreviewFrame");
@@ -571,34 +596,51 @@ function schedulePdfPreview(immediate = false) {
 
 async function renderPdfPreview() {
   const revision = ++ui.previewRevision;
-  try {
-    const response = await fetch("/api/pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document: printScopeSource() }),
-    });
-    if (!response.ok) {
-      let message = "The PDF preview could not be rendered.";
-      try { message = (await response.json()).error || message; } catch (_) {}
-      throw new Error(message);
+  const renderAttempt = async (attempt) => {
+    if (revision !== ui.previewRevision) return;
+    try {
+      const response = await fetch("/api/pdf", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document: printScopeSource() }),
+      });
+      if (!response.ok) {
+        let message = "The PDF preview could not be rendered.";
+        try { message = (await response.json()).error || message; } catch (_) {}
+        throw new Error(message);
+      }
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/pdf")) throw new Error("The preview server returned an invalid PDF response.");
+      const blob = await response.blob();
+      if (revision !== ui.previewRevision) return;
+      const nextUrl = URL.createObjectURL(blob);
+      const previousUrl = ui.previewUrl;
+      ui.previewUrl = nextUrl;
+      const frame = $("#pdfPreviewFrame");
+      frame.src = `${nextUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
+      frame.hidden = false;
+      $("#previewPlaceholder").hidden = true;
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      const printableCount = printScopeRows().length;
+      const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
+      $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${documentState.layout.mode}`;
+      $("#zoomLabel").textContent = `${ui.zoom}%`;
+    } catch (error) {
+      if (revision !== ui.previewRevision) return;
+      if (attempt < 2) {
+        setTimeout(() => renderAttempt(attempt + 1), 250 * (attempt + 1));
+        return;
+      }
+      if (ui.previewUrl) {
+        $("#previewStats").textContent = "Preview update failed · showing last render";
+        return;
+      }
+      clearPdfPreview(`PDF preview error: ${error.message}`);
+      $("#previewStats").textContent = "Preview unavailable";
     }
-    const blob = await response.blob();
-    if (revision !== ui.previewRevision) return;
-    if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
-    ui.previewUrl = URL.createObjectURL(blob);
-    const frame = $("#pdfPreviewFrame");
-    frame.src = `${ui.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
-    frame.hidden = false;
-    $("#previewPlaceholder").hidden = true;
-    const printableCount = printScopeRows().length;
-    const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
-    $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${documentState.layout.mode}`;
-    $("#zoomLabel").textContent = `${ui.zoom}%`;
-  } catch (error) {
-    if (revision !== ui.previewRevision) return;
-    clearPdfPreview(`PDF preview error: ${error.message}`);
-    $("#previewStats").textContent = "Preview unavailable";
-  }
+  };
+  renderAttempt(0);
 }
 
 function renderPreview() {
@@ -742,6 +784,16 @@ function safeFilename(value) {
   return String(value || "password-slips").replace(/[^a-z0-9._ -]+/gi, "").trim() || "password-slips";
 }
 
+function currentDateStamp() {
+  const now = new Date();
+  return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+}
+
+function pdfDownloadFilename(source, filenameSuffix = "") {
+  const dateSuffix = source?.layout?.appendDateToFilename ? `-${currentDateStamp()}` : "";
+  return `${safeFilename(source?.name)}${filenameSuffix}${dateSuffix}.pdf`;
+}
+
 async function exportPdf(source = documentState, filenameSuffix = "", triggerButton = null) {
   if (!Array.isArray(source.rows) || !source.rows.length) { toast("There are no data rows to export. Import a sheet or add a row first.", "error"); return; }
   if (!includedRowsFor(source).length) { toast("Every row is hidden by its row setting or a hide-slip rule.", "error"); return; }
@@ -756,7 +808,7 @@ async function exportPdf(source = documentState, filenameSuffix = "", triggerBut
       const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error || "PDF export failed.");
     }
-    downloadBlob(await response.blob(), `${safeFilename(source.name)}${filenameSuffix}.pdf`);
+    downloadBlob(await response.blob(), pdfDownloadFilename(source, filenameSuffix));
     toast("PDF exported");
   } catch (error) {
     toast(error.message, "error");
@@ -783,21 +835,111 @@ function downloadWorkspace() {
   toast("Workspace saved");
 }
 
+function studioFilePayload(parsed) {
+  const format = parsed?.format || "legacy";
+  const document = format === "password-slip-studio-workspace" || format === "password-slip-studio-template" ? parsed.document : parsed;
+  if (!document || !Array.isArray(document.columns) || !Array.isArray(document.rows)) throw new Error("This file is not a valid Password Slip Studio document.");
+  return { document, recentColors: Array.isArray(parsed?.recentColors) ? parsed.recentColors : null, format };
+}
+
+function applyOpenedDocument(incoming, recentColors, message) {
+  pushHistory();
+  documentState = normaliseDocument(incoming);
+  if (Array.isArray(recentColors)) saveRecentColors(recentColors);
+  ui.selectedRows.clear();
+  ui.search = "";
+  ui.dataPage = 0;
+  changed();
+  renderAll();
+  showView("data");
+  toast(message);
+}
+
 async function loadWorkspaceFile(file) {
   try {
     const parsed = JSON.parse(await file.text());
-    const incoming = parsed?.format === "password-slip-studio-workspace" ? parsed.document : parsed;
-    if (!incoming || !Array.isArray(incoming.columns) || !Array.isArray(incoming.rows)) throw new Error("This is not a Password Slip Studio workspace.");
-    pushHistory();
-    documentState = normaliseDocument(incoming);
-    if (Array.isArray(parsed.recentColors)) saveRecentColors(parsed.recentColors);
-    ui.selectedRows.clear();
-    ui.dataPage = 0;
-    changed();
-    renderAll();
-    toast("Workspace opened");
+    const payload = studioFilePayload(parsed);
+    if (payload.format === "password-slip-studio-template") throw new Error("This is a template. Open it from Templates.");
+    applyOpenedDocument(payload.document, payload.recentColors, "Workspace opened");
   } catch (error) {
     toast(error.message || "The workspace could not be opened.", "error");
+  }
+}
+
+function templateRecordFromDocument(document, name, includeData) {
+  const templateDocument = clone(document);
+  templateDocument.name = name;
+  if (!includeData) templateDocument.rows = [];
+  const existing = loadSavedTemplates().find((item) => String(item.name || "").trim().toLowerCase() === name.trim().toLowerCase());
+  return { id: existing?.id || uid("template"), name, savedAt: new Date().toISOString(), includeData, document: normaliseDocument(templateDocument), recentColors: loadRecentColors() };
+}
+
+function templateFilePayload(record) {
+  return { format: "password-slip-studio-template", version: 1, name: record.name, includeData: record.includeData, document: record.document, recentColors: record.recentColors || [] };
+}
+
+function downloadTemplateRecord(record) {
+  const blob = new Blob([JSON.stringify(templateFilePayload(record), null, 2)], { type: "application/json" });
+  downloadBlob(blob, `${safeFilename(record.name)}.password-slip-template`);
+}
+
+function storeTemplateRecord(record) {
+  const templates = loadSavedTemplates().filter((item) => item.id !== record.id && String(item.name || "").trim().toLowerCase() !== record.name.trim().toLowerCase());
+  return saveSavedTemplates([record, ...templates]);
+}
+
+function formatTemplateDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Saved template" : `Saved ${date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}`;
+}
+
+function renderTemplateList() {
+  const list = $("#templateList");
+  if (!list) return;
+  const templates = loadSavedTemplates();
+  list.innerHTML = templates.length ? templates.map((template) => {
+    const rowCount = template.document.rows.length;
+    const dataLabel = template.includeData ? `${rowCount} row${rowCount === 1 ? "" : "s"} included` : "No data included";
+    return `<article class="template-item" data-template-id="${escapeHtml(template.id)}"><div class="template-item-info"><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(formatTemplateDate(template.savedAt))} · ${escapeHtml(dataLabel)}</small></div><div class="template-item-actions"><button class="button quiet compact" type="button" data-template-action="open">Open</button><button class="button quiet compact" type="button" data-template-action="download">File</button><button class="button quiet compact danger" type="button" data-template-action="delete">Delete</button></div></article>`;
+  }).join("") : `<div class="template-empty">No saved templates yet. Save the current fields and layout above.</div>`;
+}
+
+function openTemplates() {
+  $("#templateNameInput").value = documentState.name;
+  $("#templateIncludeDataInput").checked = false;
+  renderTemplateList();
+  $("#templatesDialog").showModal();
+  requestAnimationFrame(() => $("#templateNameInput").focus());
+}
+
+function saveTemplateFromDialog() {
+  const name = $("#templateNameInput").value.trim() || documentState.name || "Password slip template";
+  const record = templateRecordFromDocument(documentState, name, $("#templateIncludeDataInput").checked);
+  const stored = storeTemplateRecord(record);
+  downloadTemplateRecord(record);
+  renderTemplateList();
+  toast(stored ? `Template “${name}” saved` : `Template file downloaded; browser storage is full`, stored ? "" : "error");
+}
+
+function openTemplateRecord(record) {
+  if (!record?.document) return;
+  applyOpenedDocument(record.document, record.recentColors, `Template “${record.name || record.document.name || "Untitled"}” opened`);
+  $("#templatesDialog").close();
+}
+
+async function loadTemplateFile(file) {
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    const payload = studioFilePayload(parsed);
+    if (payload.format !== "password-slip-studio-template") throw new Error("Choose a .password-slip-template file.");
+    const record = { id: uid("template"), name: String(parsed.name || payload.document.name || file.name.replace(/\.[^.]+$/, "")), savedAt: new Date().toISOString(), includeData: parsed.includeData !== false, document: normaliseDocument(payload.document), recentColors: payload.recentColors || [] };
+    storeTemplateRecord(record);
+    openTemplateRecord(record);
+  } catch (error) {
+    toast(error.message || "The template could not be opened.", "error");
+  } finally {
+    $("#loadTemplateInput").value = "";
   }
 }
 
@@ -1176,20 +1318,22 @@ async function resetEverything() {
 function commandActions() {
   return [
     { icon: "⇧", label: "Import spreadsheet", detail: "XLSX, XLSM or CSV", run: openImport },
-    { icon: "＋", label: "Add row", detail: "Manual entry", run: addRow },
+    { icon: "＋", label: "Add row", detail: "Manual entry · ⌘↵", run: addRow },
     { icon: "⫶", label: "Add field", detail: "Define a value shown on slips", run: () => addColumn() },
     { icon: "⌁", label: "Add rule", detail: "Conditional visibility or row filter", run: addRule },
     { icon: "▦", label: "Go to Data", detail: "D", run: () => showView("data") },
     { icon: "⫶", label: "Go to Fields", detail: "", run: () => showView("columns") },
     { icon: "⌁", label: "Go to Rules", detail: "", run: () => showView("rules") },
     { icon: "▤", label: "Go to Layout", detail: "L", run: () => showView("layout") },
-    { icon: "↓", label: "Export PDF", detail: "Selected rows or all", run: exportCurrentScope },
+    { icon: "↓", label: "Export PDF", detail: "Selected rows or all · ⇧⌘E", run: exportCurrentScope },
     { icon: "↓", label: "Export CSV", detail: "Data", run: exportCsv },
     { icon: "⧉", label: "Copy visible rows", detail: "Data", run: copyVisibleRows },
     { icon: "✎", label: "Bulk edit selected rows", detail: "Selection", run: openBulkEdit },
-    { icon: "◇", label: "Save workspace", detail: "File", run: downloadWorkspace },
-    { icon: "◇", label: "Open workspace", detail: "File", run: () => $("#loadWorkspaceInput").click() },
-    { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout", run: clearAllData },
+    { icon: "◇", label: "Save workspace", detail: "File · ⌘S", run: downloadWorkspace },
+    { icon: "◇", label: "Open workspace", detail: "File · ⌘O", run: () => $("#loadWorkspaceInput").click() },
+    { icon: "◇", label: "Save template", detail: "Fields, rules and layout · ⇧⌘T", run: openTemplates },
+    { icon: "◇", label: "Open templates", detail: "Saved or file", run: openTemplates },
+    { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout · ⇧⌘⌫", run: clearAllData },
     { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
     { icon: "◐", label: "Toggle theme", detail: "", run: toggleTheme },
   ];
@@ -1301,7 +1445,13 @@ function installEvents() {
   $("#downloadWorkspaceButton").addEventListener("click", downloadWorkspace);
   $("#loadWorkspaceButton").addEventListener("click", () => $("#loadWorkspaceInput").click());
   $("#loadWorkspaceInput").addEventListener("change", (event) => loadWorkspaceFile(event.target.files[0]));
+  $("#saveTemplateMenuButton").addEventListener("click", openTemplates);
+  $("#openTemplatesButton").addEventListener("click", openTemplates);
+  $("#saveTemplateButton").addEventListener("click", saveTemplateFromDialog);
+  $("#openTemplateFileButton").addEventListener("click", () => $("#loadTemplateInput").click());
+  $("#loadTemplateInput").addEventListener("change", (event) => loadTemplateFile(event.target.files[0]));
   $("#clearDataButton").addEventListener("click", clearAllData);
+  $("#clearDataTabButton").addEventListener("click", clearAllData);
   $("#themeButton").addEventListener("click", toggleTheme);
   installPreviewResize();
   $("#undoButton").addEventListener("click", undo);
@@ -1377,6 +1527,20 @@ function installEvents() {
   $("#bulkEditColumn").addEventListener("change", updateBulkEditPreview);
   $("#bulkEditOperation").addEventListener("change", renderBulkEditFields);
   $("#applyBulkEditButton").addEventListener("click", applyBulkEdit);
+  $("#templateList").addEventListener("click", async (event) => {
+    const action = event.target.closest("[data-template-action]")?.dataset.templateAction;
+    const item = event.target.closest("[data-template-id]");
+    if (!action || !item) return;
+    const record = loadSavedTemplates().find((template) => template.id === item.dataset.templateId);
+    if (!record) return;
+    if (action === "open") openTemplateRecord(record);
+    if (action === "download") downloadTemplateRecord(record);
+    if (action === "delete" && await confirmAction("Delete template?", `Remove “${record.name}” from saved templates?`, "Delete template")) {
+      saveSavedTemplates(loadSavedTemplates().filter((template) => template.id !== record.id));
+      renderTemplateList();
+      toast("Template deleted");
+    }
+  });
   $("#deleteRowsButton").addEventListener("click", async () => {
     const count = ui.selectedRows.size;
     if (!await confirmAction("Delete selected rows?", `${count} row${count === 1 ? "" : "s"} will be removed from this studio.`, "Delete")) return;
@@ -1534,6 +1698,7 @@ function installEvents() {
       } else commit((state) => { state.layout[key] = cast(event.target.value); });
     });
   });
+  $("#filenameDateInput").addEventListener("change", (event) => commit((state) => { state.layout.appendDateToFilename = event.target.checked; }));
   ["accentInput", "inkInput", "paperColorInput", "borderColorInput"].forEach((id) => $("#" + id).addEventListener("change", (event) => rememberColor(event.target.value)));
   $("#recentColorList").addEventListener("click", (event) => {
     const swatch = event.target.closest("[data-color]");
@@ -1610,7 +1775,12 @@ function installEvents() {
     const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
     if (modifier && event.key.toLowerCase() === "k") { event.preventDefault(); $("#commandDialog").open ? $("#commandDialog").close() : openCommands(); return; }
     if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
-    if (modifier && event.shiftKey && event.key.toLowerCase() === "e") { event.preventDefault(); exportPdf(); return; }
+    if (modifier && event.shiftKey && event.key.toLowerCase() === "e") { event.preventDefault(); exportCurrentScope(); return; }
+    if (modifier && !event.shiftKey && event.key.toLowerCase() === "s" && !typing && !$("dialog[open]")) { event.preventDefault(); downloadWorkspace(); return; }
+    if (modifier && !event.shiftKey && event.key.toLowerCase() === "o" && !typing && !$("dialog[open]")) { event.preventDefault(); $("#loadWorkspaceInput").click(); return; }
+    if (modifier && event.shiftKey && event.key.toLowerCase() === "t" && !$("dialog[open]")) { event.preventDefault(); openTemplates(); return; }
+    if (modifier && event.key === "Enter" && !$("dialog[open]")) { event.preventDefault(); addRow(); return; }
+    if (modifier && event.shiftKey && event.key === "Backspace" && !$("dialog[open]")) { event.preventDefault(); clearAllData(); return; }
     if (!modifier && !typing && !$("dialog[open]") && event.key.toLowerCase() === "n") { event.preventDefault(); addRow(); }
     if (!modifier && !typing && !$("dialog[open]") && event.key.toLowerCase() === "i") { event.preventDefault(); openImport(); }
     if (!modifier && !typing && !$("dialog[open]") && event.key.toLowerCase() === "d") { event.preventDefault(); showView("data"); }

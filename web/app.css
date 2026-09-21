@@ -352,6 +352,27 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .inline-notice { padding: 8px 10px; border: 1px solid #e6bd54; border-radius: 5px; background: #fff8df; color: #6b4d08; font-size: 11px; }
 :root[data-theme="dark"] .inline-notice { background: #352c16; color: #f1ce77; }
 .small-card { width: min(510px, calc(100vw - 40px)); }
+.templates-card { width: min(760px, calc(100vw - 40px)); }
+.templates-body { display: grid; gap: 16px; }
+.template-save-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-soft); }
+.template-save-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, .9fr); gap: 10px; align-items: end; }
+.template-save-fields > label:first-child, .template-file-row { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.template-save-fields input[type="text"] { width: 100%; height: 35px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 12px; cursor: text; }
+.template-save-fields .toggle-row { min-height: 35px; padding: 7px; }
+.template-file-row { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-bottom: 2px; }
+.template-file-row strong { color: var(--ink); font-size: 12px; }
+.template-file-row span { color: var(--subtle); }
+.template-list-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 7px; }
+.template-list-header h3 { margin: 0; color: var(--ink); font-size: 12px; }
+.template-list-header span { color: var(--subtle); font-size: 10px; }
+.template-list { display: grid; gap: 6px; }
+.template-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 11px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+.template-item:hover { border-color: var(--line-strong); background: var(--surface-soft); }
+.template-item-info { min-width: 0; display: grid; gap: 3px; }
+.template-item-info strong { overflow: hidden; color: var(--ink); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.template-item-info small { color: var(--muted); font-size: 10px; }
+.template-item-actions { display: flex; gap: 4px; }
+.template-empty { padding: 24px 10px; color: var(--muted); font-size: 12px; text-align: center; }
 .toggle-row.bordered { padding: 11px; border: 1px solid var(--line); border-radius: 5px; }
 .section-label { margin: 18px 0 8px; color: var(--subtle); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .override-list { display: grid; gap: 6px; }
@@ -431,6 +452,10 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
   .settings-grid { grid-template-columns: 1fr; padding: 12px; }
   .settings-section.span-two { grid-column: auto; }
   .bulk-edit-inline { grid-template-columns: 1fr; }
+  .template-save-panel, .template-save-fields { grid-template-columns: 1fr; }
+  .template-file-row { grid-template-columns: 1fr; align-items: start; }
+  .template-file-row .button { justify-self: start; }
+  .template-item { grid-template-columns: 1fr; }
   .view-header { padding-inline: 14px; }
   .import-options { grid-template-columns: 1fr; }
   .import-options .span-two { grid-column: auto; }
