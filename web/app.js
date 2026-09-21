@@ -308,7 +308,7 @@ function normaliseDocument(input) {
     column.valueTransform = ["as_entered", "upper", "lower", "title", "mask_last4"].includes(column.valueTransform) ? column.valueTransform : "as_entered";
     column.valueAlign = ["default", "left", "center", "right"].includes(column.valueAlign) ? column.valueAlign : "default";
     column.defaultValue = String(column.defaultValue ?? "");
-    column.visibility ||= "always";
+    column.visibility = ["always", "nonempty", "never"].includes(column.visibility) ? column.visibility : "always";
     column.sourceNames = [...new Set((Array.isArray(column.sourceNames) ? column.sourceNames : []).map((name) => String(name).trim()).filter(Boolean))];
     delete column.width;
     delete column.required;
@@ -486,7 +486,7 @@ function renderData() {
     return `<tr data-row-id="${row.id}" class="${ui.selectedRows.has(row.id) ? "selected" : ""} ${customized ? "customized" : ""} ${hiddenReason ? "excluded" : ""}" title="${escapeHtml(hiddenReason)}">
       <td class="select-cell"><input class="row-select" type="checkbox" ${ui.selectedRows.has(row.id) ? "checked" : ""} aria-label="Select row ${originalIndex}"></td>
       <td class="row-number" draggable="true">⠿ ${originalIndex}${hiddenReason ? " ⊘" : ""}${customized ? " ✦" : ""}</td>
-      ${documentState.columns.map((column) => `<td><input type="text" class="cell-input ${column.style === "mono" || column.type === "password" ? "password-cell" : ""}" data-column-id="${column.id}" value="${escapeHtml(row.values[column.id] || "")}" aria-label="${escapeHtml(column.label)}, row ${originalIndex}"></td>`).join("")}
+      ${documentState.columns.map((column) => `<td><input type="text" class="cell-input ${column.style === "mono" || column.type === "password" ? "password-cell" : ""}" data-column-id="${column.id}" value="${escapeHtml(row.values[column.id] ?? "")}" aria-label="${escapeHtml(column.label)}, row ${originalIndex}"></td>`).join("")}
       <td class="row-menu"><button class="row-menu-button" data-action="row-options" title="Row options" aria-label="Row ${originalIndex} options">•••</button></td>
     </tr>`;
   }).join("");
@@ -867,7 +867,7 @@ function renderPreview() {
 }
 
 function addRow() {
-  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, column.defaultValue || ""])), hidden: false, overrides: {} };
+  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, column.defaultValue ?? ""])), hidden: false, overrides: {} };
   commit((state) => state.rows.push(row));
   showView("data");
   requestAnimationFrame(() => $(`[data-row-id="${row.id}"] .cell-input`)?.focus());
@@ -941,7 +941,7 @@ function csvCell(value) {
 
 function exportCsv() {
   const lines = [documentState.columns.map((column) => csvCell(column.label)).join(",")];
-  documentState.rows.forEach((row) => lines.push(documentState.columns.map((column) => csvCell(row.values?.[column.id] || "")).join(",")));
+  documentState.rows.forEach((row) => lines.push(documentState.columns.map((column) => csvCell(row.values?.[column.id] ?? "")).join(",")));
   downloadBlob(new Blob([`\uFEFF${lines.join("\r\n")}\r\n`], { type: "text/csv;charset=utf-8" }), `${safeFilename(documentState.name)}.csv`);
   toast("CSV exported");
 }
@@ -972,7 +972,7 @@ function pasteIntoDataGrid(event) {
   event.preventDefault();
   commit((state) => {
     for (let index = 0; index < additions; index += 1) {
-      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, column.defaultValue || ""])), hidden: false, overrides: {} };
+      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, column.defaultValue ?? ""])), hidden: false, overrides: {} };
       state.rows.push(row);
       rowIds.push(row.id);
     }
@@ -1961,7 +1961,7 @@ function installEvents() {
         const source = state.columns.find((column) => column.id === columnId);
         const copy = { ...clone(source), id: uniqueColumnId(`${source.id}_copy`, state.columns), label: `${source.label} copy` };
         state.columns.splice(state.columns.indexOf(source) + 1, 0, copy);
-        state.rows.forEach((row) => { row.values[copy.id] = row.values[source.id] || ""; });
+        state.rows.forEach((row) => { row.values[copy.id] = row.values[source.id] ?? ""; });
       });
     }
     if (button.dataset.action === "delete-column") {
@@ -2133,18 +2133,19 @@ function installEvents() {
   document.addEventListener("keydown", (event) => {
     const modifier = event.metaKey || event.ctrlKey;
     const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
+    const editingText = typing || Boolean(document.activeElement?.isContentEditable);
     if (modifier && event.key.toLowerCase() === "k") { event.preventDefault(); $("#commandDialog").open ? $("#commandDialog").close() : openCommands(); return; }
-    if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
-    if (modifier && event.shiftKey && event.key.toLowerCase() === "e") { event.preventDefault(); exportCurrentScope(); return; }
-    if (modifier && !event.shiftKey && event.key.toLowerCase() === "s" && !typing && !$("dialog[open]")) { event.preventDefault(); downloadWorkspace(); return; }
-    if (modifier && !event.shiftKey && event.key.toLowerCase() === "o" && !typing && !$("dialog[open]")) { event.preventDefault(); $("#loadWorkspaceInput").click(); return; }
-    if (modifier && event.shiftKey && event.key.toLowerCase() === "t" && !$("dialog[open]")) { event.preventDefault(); openTemplates(); return; }
-    if (modifier && event.key === "Enter" && !$("dialog[open]")) { event.preventDefault(); addRow(); return; }
-    if (modifier && event.shiftKey && event.key === "Backspace" && !$("dialog[open]")) { event.preventDefault(); clearAllData(); return; }
-    if (!modifier && !typing && !$("dialog[open]") && event.key.toLowerCase() === "n") { event.preventDefault(); addRow(); }
-    if (!modifier && !typing && !$("dialog[open]") && event.key.toLowerCase() === "i") { event.preventDefault(); openImport(); }
-    if (!modifier && !typing && !$("dialog[open]") && event.key.toLowerCase() === "d") { event.preventDefault(); showView("data"); }
-    if (!modifier && !typing && !$("dialog[open]") && event.key.toLowerCase() === "l") { event.preventDefault(); showView("layout"); }
+    if (modifier && event.key.toLowerCase() === "z" && !editingText) { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
+    if (modifier && event.shiftKey && event.key.toLowerCase() === "e" && !editingText) { event.preventDefault(); exportCurrentScope(); return; }
+    if (modifier && !event.shiftKey && event.key.toLowerCase() === "s" && !editingText && !$("dialog[open]")) { event.preventDefault(); downloadWorkspace(); return; }
+    if (modifier && !event.shiftKey && event.key.toLowerCase() === "o" && !editingText && !$("dialog[open]")) { event.preventDefault(); $("#loadWorkspaceInput").click(); return; }
+    if (modifier && event.shiftKey && event.key.toLowerCase() === "t" && !editingText && !$("dialog[open]")) { event.preventDefault(); openTemplates(); return; }
+    if (modifier && event.key === "Enter" && !editingText && !$("dialog[open]")) { event.preventDefault(); addRow(); return; }
+    if (modifier && event.shiftKey && event.key === "Backspace" && !editingText && !$("dialog[open]")) { event.preventDefault(); clearAllData(); return; }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "n") { event.preventDefault(); addRow(); }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "i") { event.preventDefault(); openImport(); }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "d") { event.preventDefault(); showView("data"); }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "l") { event.preventDefault(); showView("layout"); }
   });
 }
 

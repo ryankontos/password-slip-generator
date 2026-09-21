@@ -438,6 +438,24 @@ def _centered_text(pdf: canvas.Canvas, text: Any, font: str, size: float, color:
         pdf.drawString(x, baseline, cleaned)
 
 
+def _field_divider_color(accent: Color) -> Color:
+    """Choose a readable divider colour for the filled label panel."""
+    # Blend toward white for darker accents and toward black for light accents.
+    # A fixed white line disappears on a white/yellow accent; a fixed dark line
+    # disappears on navy/black. Keeping the contrast calculation here also makes
+    # the stacked renderer independent of the user's chosen accent colour.
+    luminance = (0.2126 * accent.red) + (0.7152 * accent.green) + (0.0722 * accent.blue)
+    if luminance > 0.55:
+        factor = 0.48
+        return Color(accent.red * factor, accent.green * factor, accent.blue * factor)
+    factor = 0.62
+    return Color(
+        accent.red + (1 - accent.red) * factor,
+        accent.green + (1 - accent.green) * factor,
+        accent.blue + (1 - accent.blue) * factor,
+    )
+
+
 def _draw_slip(pdf: canvas.Canvas, row: dict[str, Any], columns: list[dict[str, Any]], layout: PdfLayout, x: float, y: float, width: float, height: float) -> None:
     pdf.saveState()
     pdf.setFillColor(layout.paper_color)
@@ -494,11 +512,7 @@ def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict
         # Draw dividers last so they remain continuous over the filled label
         # panel. The label-side segment is derived from the accent itself, so
         # it stays visible even when the configured rule colour matches it.
-        label_divider = Color(
-            layout.accent.red + (1 - layout.accent.red) * 0.58,
-            layout.accent.green + (1 - layout.accent.green) * 0.58,
-            layout.accent.blue + (1 - layout.accent.blue) * 0.58,
-        )
+        label_divider = _field_divider_color(layout.accent)
         pdf.setLineWidth(0.6)
         for block in range(blocks):
             left = x + block * block_width
