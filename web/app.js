@@ -250,6 +250,7 @@ const ui = {
   view: initialPreferences.view,
   selectedRows: new Set(),
   search: "",
+  fieldSearch: "",
   history: [],
   future: [],
   zoom: initialPreferences.zoom,
@@ -648,12 +649,16 @@ function columnOptions(selected) {
 }
 
 function renderColumns() {
-  $("#columnList").innerHTML = documentState.columns.map((column) => `<article class="column-row" data-column-id="${column.id}" draggable="true">
+  const query = ui.fieldSearch.trim().toLowerCase();
+  const columns = documentState.columns.filter((column) => !query || `${column.label} ${column.id} ${column.group || ""}`.toLowerCase().includes(query));
+  $("#fieldSearch").value = ui.fieldSearch;
+  $("#fieldSummary").textContent = query ? `${columns.length} of ${documentState.columns.length} fields` : `${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"} · drag to set order`;
+  $("#columnList").innerHTML = columns.length ? columns.map((column) => `<article class="column-row" data-column-id="${column.id}" draggable="true">
     <div class="column-field"><button class="drag-handle" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><input class="column-default-input" type="text" value="${escapeHtml(column.defaultValue)}" placeholder="Default on new row" aria-label="${escapeHtml(column.label)} default value" autocomplete="off"></div></div>
     <div class="column-appearance"><select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select><details class="field-options"><summary>More options</summary><div><label>Text<select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select></label><label>Alignment<select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></label></div></details></div>
     <select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select>
     <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field">×</button></div>
-  </article>`).join("");
+  </article>`).join("") : `<div class="empty-state compact-empty"><div class="empty-icon">⌕</div><h2>No matching fields</h2><button class="button quiet compact" type="button" data-action="clear-field-search">Clear filter</button></div>`;
 }
 
 const operatorLabels = {
@@ -1013,7 +1018,8 @@ async function exportPdf(source = documentState, filenameSuffix = "", triggerBut
       throw new Error(payload.error || "PDF export failed.");
     }
     downloadBlob(await response.blob(), pdfDownloadFilename(source, filenameSuffix));
-    toast("PDF exported");
+    const exportedCount = includedRowsFor(source).length;
+    toast(`PDF exported · ${exportedCount} slip${exportedCount === 1 ? "" : "s"}`);
   } catch (error) {
     toast(error.message, "error");
   } finally {
@@ -1093,6 +1099,7 @@ function applyOpenedDocument(incoming, palettes, message, preferences = null, im
   applyWorkspacePreferences(preferences, restoreView);
   ui.selectedRows.clear();
   ui.search = "";
+  ui.fieldSearch = "";
   ui.dataPage = 0;
   changed();
   renderAll();
@@ -1492,7 +1499,7 @@ function updateImportModeNotice() {
   updateImportWarning();
 }
 
-function confirmImport() {
+async function confirmImport() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
   if (!sheet) return;
   const selection = selectedImportRows(sheet);
@@ -1526,6 +1533,10 @@ function confirmImport() {
     toast("Overwrite mode creates a new column for each checked source column.", "error");
     return;
   }
+  const destructiveChanges = [];
+  if (replaceRows && documentState.rows.length) destructiveChanges.push(`${documentState.rows.length} existing row${documentState.rows.length === 1 ? "" : "s"}`);
+  if (overwriteColumns && documentState.columns.length) destructiveChanges.push(`${documentState.columns.length} existing field${documentState.columns.length === 1 ? "" : "s"} and any rules that use them`);
+  if (destructiveChanges.length && !await confirmAction("Replace existing studio data?", `This import will remove ${destructiveChanges.join(" and ")}. The selected spreadsheet rows will be imported instead.`, "Replace and import")) return;
   rememberCurrentImportMappings(sheet);
   commit((state) => {
     const targetIds = new Map();
@@ -1572,6 +1583,7 @@ function confirmImport() {
 function resetWorkspaceUi() {
   ui.selectedRows.clear();
   ui.search = "";
+  ui.fieldSearch = "";
   ui.dataPage = 0;
   ui.ruleTestRowId = "";
 }
@@ -1753,6 +1765,10 @@ function installEvents() {
     renderData();
     schedulePdfPreview();
   });
+  $("#fieldSearch").addEventListener("input", (event) => {
+    ui.fieldSearch = event.target.value;
+    renderColumns();
+  });
   $("#documentName").addEventListener("input", (event) => {
     documentState.name = event.target.value.trimStart() || "Untitled password slips";
     changed();
@@ -1915,7 +1931,15 @@ function installEvents() {
   $("#columnList").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
     if (!button) return;
-    const columnId = button.closest(".column-row").dataset.columnId;
+    if (button.dataset.action === "clear-field-search") {
+      ui.fieldSearch = "";
+      renderColumns();
+      requestAnimationFrame(() => $("#fieldSearch").focus());
+      return;
+    }
+    const row = button.closest(".column-row");
+    if (!row) return;
+    const columnId = row.dataset.columnId;
     if (button.dataset.action === "duplicate-column") {
       commit((state) => {
         const source = state.columns.find((column) => column.id === columnId);
