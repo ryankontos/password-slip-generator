@@ -1617,6 +1617,7 @@ function commandActions() {
     { icon: "◇", label: "Open workspace", detail: "File · ⌘O", run: () => $("#loadWorkspaceInput").click() },
     { icon: "◇", label: "Save template", detail: "Fields, rules and layout · ⇧⌘T", run: openTemplates },
     { icon: "◇", label: "Open templates", detail: "Saved or file", run: openTemplates },
+    { icon: "⌘", label: "Keyboard shortcuts", detail: "Mac", run: openShortcuts },
     { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout · ⇧⌘⌫", run: clearAllData },
     { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
     { icon: "◐", label: "Toggle theme", detail: "", run: toggleTheme },
@@ -1640,6 +1641,10 @@ function openCommands() {
   renderCommands();
   $("#commandDialog").showModal();
   requestAnimationFrame(() => $("#commandInput").focus());
+}
+
+function openShortcuts() {
+  $("#shortcutsDialog").showModal();
 }
 
 function runCommand(index) {
@@ -1731,6 +1736,7 @@ function installEvents() {
   $("#loadWorkspaceInput").addEventListener("change", (event) => loadWorkspaceFile(event.target.files[0]));
   $("#saveTemplateMenuButton").addEventListener("click", openTemplates);
   $("#openTemplatesButton").addEventListener("click", openTemplates);
+  $("#shortcutsButton").addEventListener("click", openShortcuts);
   $("#saveTemplateButton").addEventListener("click", saveTemplateFromDialog);
   $("#openTemplateFileButton").addEventListener("click", () => $("#loadTemplateInput").click());
   $("#loadTemplateInput").addEventListener("change", (event) => loadTemplateFile(event.target.files[0]));

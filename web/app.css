@@ -252,18 +252,6 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .mode-diagram i { display: block; background: color-mix(in srgb, var(--accent) 35%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .horizontal-mode { grid-template-columns: repeat(3, 1fr); }
 .stacked-mode { grid-template-rows: repeat(3, 1fr); }
-.grid-mode { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.compact-mode { grid-template-columns: repeat(3, 1fr); }
-.dense-mode { grid-template-columns: repeat(4, 1fr); grid-template-rows: 1fr 1fr; }
-.dense-mode i { border: 0; }
-.cards-mode { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; padding: 5px; gap: 3px; }
-.cards-mode i { border-radius: 2px; }
-.ledger-mode { grid-template-columns: 34% 66%; grid-template-rows: 1fr 1fr; }
-.ledger-mode i:nth-child(odd) { background: var(--accent); }
-.hero-mode { grid-template-columns: 1fr 1fr; grid-template-rows: 1.4fr 1fr; }
-.hero-mode i:first-child { grid-column: 1 / -1; background: var(--accent); }
-.sections-mode { grid-template-columns: 1fr; grid-template-rows: repeat(3, 1fr); padding: 5px; gap: 3px; }
-.sections-mode i:first-child { background: var(--accent); }
 .form-grid { display: grid; gap: 11px; }
 .form-grid.two { grid-template-columns: 1fr 1fr; }
 .form-grid label { position: relative; display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
@@ -400,6 +388,11 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .command-item small { color: var(--muted); }
 .command-footer { min-height: 35px; display: flex; gap: 14px; align-items: center; padding: 0 12px; border-top: 1px solid var(--line); background: var(--surface-soft); color: var(--muted); font-size: 9px; }
 .command-footer span { display: flex; align-items: center; gap: 3px; }
+.shortcuts-card { width: min(460px, calc(100vw - 40px)); }
+.shortcuts-list { display: grid; gap: 2px; }
+.shortcuts-list > div { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 4px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.shortcuts-list > div:last-child { border-bottom: 0; }
+.shortcuts-list kbd { min-width: 92px; color: var(--ink); text-align: center; }
 .confirm-card { width: min(430px, calc(100vw - 40px)); }
 .bulk-edit-card { width: min(520px, calc(100vw - 40px)); }
 .bulk-edit-body { display: grid; gap: 10px; }

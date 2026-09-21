@@ -32,6 +32,7 @@
         <input id="loadWorkspaceInput" type="file" accept=".json,.password-slips,.password-slip-workspace" hidden>
         <button id="saveTemplateMenuButton"><span>◇</span> Save template</button>
         <button id="openTemplatesButton"><span>◇</span> Templates</button>
+        <button id="shortcutsButton"><span>⌘</span> Keyboard shortcuts</button>
         <button id="themeButton"><span>◐</span> Toggle theme</button>
         <hr>
         <button id="clearDataButton"><span>⌫</span> Clear all data</button>
@@ -276,6 +277,24 @@
       <div id="commandList" class="command-list" role="listbox"></div>
       <footer class="command-footer"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> run</span><span><kbd>Esc</kbd> close</span></footer>
     </section>
+  </dialog>
+
+  <dialog id="shortcutsDialog" class="modal">
+    <form method="dialog" class="modal-card shortcuts-card">
+      <header class="modal-header"><div><h2>Keyboard shortcuts</h2><p>Mac shortcuts for the studio</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body shortcuts-list">
+        <div><span>Commands</span><kbd>⌘K</kbd></div>
+        <div><span>New row</span><kbd>⌘↵</kbd></div>
+        <div><span>Save workspace</span><kbd>⌘S</kbd></div>
+        <div><span>Open workspace</span><kbd>⌘O</kbd></div>
+        <div><span>Templates</span><kbd>⇧⌘T</kbd></div>
+        <div><span>Export PDF</span><kbd>⇧⌘E</kbd></div>
+        <div><span>Clear all data</span><kbd>⇧⌘⌫</kbd></div>
+        <div><span>Undo / redo</span><kbd>⌘Z / ⇧⌘Z</kbd></div>
+        <div><span>Move between row cells</span><kbd>Enter / ⇧Enter</kbd></div>
+      </div>
+      <footer class="modal-footer"><span>Esc closes dialogs</span><button class="button primary" value="default">Done</button></footer>
+    </form>
   </dialog>
 
   <dialog id="confirmDialog" class="modal">
