@@ -74,7 +74,7 @@
           <button id="deleteRowsButton" class="button danger quiet compact">Delete</button>
           <button id="clearSelectionButton" class="button quiet compact push-right">Clear</button>
         </div>
-        <div class="table-shell">
+        <div id="tableShell" class="table-shell">
           <table class="data-table">
             <thead id="dataHead"></thead>
             <tbody id="dataBody"></tbody>
@@ -191,6 +191,7 @@
       <div id="previewViewport" class="preview-viewport pdf-preview-viewport">
         <div id="previewPlaceholder" class="pdf-preview-placeholder">Add or import rows to preview the PDF.</div>
         <iframe id="pdfPreviewFrame" class="pdf-preview-frame" title="PDF preview" hidden></iframe>
+        <div id="previewError" class="preview-error" role="alert" hidden><strong>Preview unavailable</strong><span id="previewErrorMessage"></span><button id="retryPreviewButton" class="button secondary compact" type="button">Retry preview</button></div>
       </div>
     </aside>
   </main>

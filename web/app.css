@@ -146,12 +146,13 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .selection-toolbar { min-height: 42px; display: flex; align-items: center; gap: 4px; padding: 5px 13px; border-bottom: 1px solid var(--line); background: var(--accent-soft); }
 .selection-toolbar strong { margin-right: 8px; color: var(--accent); font-size: 12px; }
 .push-right { margin-left: auto; }
-.table-shell { min-height: 0; flex: 1; overflow: auto; position: relative; background: var(--surface); }
-.data-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.table-shell { min-height: 0; flex: 1; overflow: auto; position: relative; background: var(--surface); overscroll-behavior: contain; }
+.data-table { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; table-layout: auto; }
 .data-table th { height: 44px; position: sticky; top: 0; z-index: 2; padding: 0 10px; background: var(--surface-soft); border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .045em; text-align: left; text-transform: uppercase; }
 .data-table th:first-child { width: 38px; padding: 0; text-align: center; }
 .data-table th.row-number-head { width: 43px; text-align: center; }
 .data-table th.row-menu-head { width: 42px; border-right: 0; }
+.data-table th:not(:first-child):not(.row-number-head):not(.row-menu-head) { min-width: 120px; }
 .data-table td { height: 44px; padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--surface); }
 .data-table tr:hover td { background: var(--surface-soft); }
 .data-table tr.selected td { background: var(--accent-soft); }
@@ -165,7 +166,9 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .password-cell { font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important; }
 .row-menu-button { width: 27px; height: 27px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); }
 .row-menu-button:hover { color: var(--ink); background: var(--surface-hover); }
-.table-footer { min-height: 40px; display: flex; align-items: center; padding: 0 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.table-footer { min-height: 48px; display: flex; align-items: center; padding: 5px 14px; border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 11px; box-shadow: 0 -3px 10px rgb(20 26 34 / 5%); }
+.table-footer #appendRowButton { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.table-footer #appendRowButton:hover { color: #fff; background: var(--accent); }
 .table-footer > :last-child { margin-left: auto; }
 .data-pagination { display: flex; align-items: center; gap: 6px; }
 .data-pagination label { display: flex; align-items: center; gap: 5px; color: var(--muted); }
@@ -306,6 +309,12 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .preview-viewport { min-height: 0; flex: 1; overflow: hidden; position: relative; padding: 0; background: #73777d; }
 .pdf-preview-frame { width: 100%; height: 100%; border: 0; background: #73777d; }
 .pdf-preview-placeholder { height: 100%; display: grid; place-items: center; padding: 28px; color: var(--muted); text-align: center; }
+.preview-error { position: absolute; z-index: 3; top: 12px; left: 12px; right: 12px; display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 7px 9px; border: 1px solid #d89a3a; border-radius: 6px; background: color-mix(in srgb, var(--surface) 94%, #f2b34b); color: var(--ink); box-shadow: var(--shadow-soft); font-size: 11px; }
+.preview-error strong { color: #9a5a00; white-space: nowrap; }
+.preview-error span { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.preview-error .button { margin-left: auto; flex: 0 0 auto; }
+:root[data-theme="dark"] .preview-error { background: #352c16; }
+:root[data-theme="dark"] .preview-error strong { color: #f1ce77; }
 .legend { width: 7px; height: 7px; border-radius: 50%; }
 .legend.included { background: var(--success); }
 .legend.excluded { border: 1px solid var(--subtle); }

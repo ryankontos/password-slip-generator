@@ -501,6 +501,35 @@ function renderData() {
   renderSelectionToolbar();
 }
 
+function focusGridCell(rowId, columnId) {
+  requestAnimationFrame(() => {
+    const row = [...document.querySelectorAll("tr[data-row-id]")].find((item) => item.dataset.rowId === rowId);
+    const input = [...(row?.querySelectorAll(".cell-input") || [])].find((item) => item.dataset.columnId === columnId);
+    input?.focus();
+  });
+}
+
+function moveGridCell(input, direction) {
+  const rowId = input.closest("tr[data-row-id]")?.dataset.rowId;
+  const columnId = input.dataset.columnId;
+  if (!rowId || !columnId) return;
+  const row = documentState.rows.find((item) => item.id === rowId);
+  if (row && row.values[columnId] !== input.value) {
+    commit((state) => {
+      const next = state.rows.find((item) => item.id === rowId);
+      if (next) next.values[columnId] = input.value;
+    });
+  }
+  const visible = filteredRows();
+  const rowIndex = visible.findIndex((item) => item.id === rowId);
+  const nextRow = visible[rowIndex + direction];
+  if (nextRow) {
+    focusGridCell(nextRow.id, columnId);
+  } else if (direction > 0 && !ui.search) {
+    addRow();
+  }
+}
+
 function renderSelectionToolbar() {
   const count = [...ui.selectedRows].filter((id) => documentState.rows.some((row) => row.id === id)).length;
   $("#selectionToolbar").hidden = count === 0;
@@ -725,7 +754,19 @@ function applyPreviewZoom() {
   if (ui.previewUrl) $("#pdfPreviewFrame").src = `${ui.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
 }
 
-function clearPdfPreview(message = "Add or import rows to preview the PDF.") {
+function setPreviewError(message) {
+  const error = $("#previewError");
+  if (!error) return;
+  $("#previewErrorMessage").textContent = String(message || "The PDF preview could not be rendered.");
+  error.hidden = false;
+}
+
+function clearPreviewError() {
+  const error = $("#previewError");
+  if (error) error.hidden = true;
+}
+
+function clearPdfPreview(message = "Add or import rows to preview the PDF.", isError = false) {
   ui.previewRevision += 1;
   if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
   ui.previewUrl = null;
@@ -734,6 +775,8 @@ function clearPdfPreview(message = "Add or import rows to preview the PDF.") {
   frame.removeAttribute("src");
   $("#previewPlaceholder").hidden = false;
   $("#previewPlaceholder").textContent = message;
+  if (isError) setPreviewError(message);
+  else clearPreviewError();
 }
 
 function schedulePdfPreview(immediate = false) {
@@ -780,6 +823,7 @@ async function renderPdfPreview() {
       frame.src = `${nextUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
       frame.hidden = false;
       $("#previewPlaceholder").hidden = true;
+      clearPreviewError();
       if (previousUrl) URL.revokeObjectURL(previousUrl);
       const printableCount = printScopeRows().length;
       const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
@@ -793,9 +837,10 @@ async function renderPdfPreview() {
       }
       if (ui.previewUrl) {
         $("#previewStats").textContent = "Preview update failed · showing last render";
+        setPreviewError(`Could not refresh the preview: ${error.message}`);
         return;
       }
-      clearPdfPreview(`PDF preview error: ${error.message}`);
+      clearPdfPreview(`PDF preview error: ${error.message}`, true);
       $("#previewStats").textContent = "Preview unavailable";
     }
   };
@@ -1737,6 +1782,24 @@ function installEvents() {
       commit((state) => { state.rows.find((row) => row.id === rowId).values[columnId] = event.target.value; });
     }
   });
+  $("#dataBody").addEventListener("keydown", (event) => {
+    const input = event.target.closest(".cell-input");
+    if (!input) return;
+    if (event.key === "Escape") {
+      const rowId = input.closest("tr[data-row-id]")?.dataset.rowId;
+      const columnId = input.dataset.columnId;
+      const row = documentState.rows.find((item) => item.id === rowId);
+      if (row) {
+        event.preventDefault();
+        input.value = String(row.values[columnId] ?? "");
+        input.blur();
+      }
+      return;
+    }
+    if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey) return;
+    event.preventDefault();
+    moveGridCell(input, event.shiftKey ? -1 : 1);
+  });
   $("#dataBody").addEventListener("paste", pasteIntoDataGrid);
   $("#dataBody").addEventListener("click", (event) => {
     const button = event.target.closest('[data-action="row-options"]');
@@ -1954,6 +2017,7 @@ function installEvents() {
   $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); });
   $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); });
   $("#refreshPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
+  $("#retryPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
 
   $("#workbookInput").addEventListener("change", (event) => importWorkbook(event.target.files[0]));
   $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); event.currentTarget.classList.add("drag-over"); });
