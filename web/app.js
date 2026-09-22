@@ -1626,7 +1626,9 @@ function renderImportMapping() {
   const selectedRows = selectedImportRows(sheet).entries;
   const savedMappings = savedImportMappings(sheet) || [];
   $("#mappingList").innerHTML = sheet.headers.map((header, index) => {
-    const saved = savedMappings.find((mapping) => Number(mapping.sourceIndex) === index || normaliseImportName(mapping.header) === normaliseImportName(header));
+    const normalisedHeader = normaliseImportName(header);
+    const saved = savedMappings.find((mapping) => normaliseImportName(mapping.header) === normalisedHeader)
+      || (normalisedHeader ? null : savedMappings.find((mapping) => Number(mapping.sourceIndex) === index));
     const guessed = guessedMapping(header);
     const savedTarget = saved?.target && (saved.target === "__create__" || saved.target === "__skip__" || documentState.columns.some((column) => column.id === saved.target)) ? saved.target : null;
     const target = savedTarget && savedTarget !== "__skip__" ? savedTarget : guessed;
