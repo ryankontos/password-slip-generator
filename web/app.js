@@ -265,11 +265,24 @@ const ui = {
   saveTimer: null,
   dirty: false,
   previewWidth: initialPreferences.previewWidth,
-  previewUrl: null,
+  previewReady: false,
   previewTimer: null,
   previewRevision: 0,
   lastImportSheetName: initialPreferences.lastImportSheetName,
 };
+
+let pdfRendererPromise = null;
+
+function loadPdfRenderer() {
+  if (!pdfRendererPromise) {
+    pdfRendererPromise = import("/vendor/pdf.min.mjs").then((pdfjs) => {
+      pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
+      return pdfjs;
+    });
+    pdfRendererPromise.catch(() => { pdfRendererPromise = null; });
+  }
+  return pdfRendererPromise;
+}
 
 function loadDocument() {
   try {
@@ -804,7 +817,6 @@ function renderLayout() {
 
 function applyPreviewZoom() {
   $("#zoomLabel").textContent = `${ui.zoom}%`;
-  if (ui.previewUrl) $("#pdfPreviewFrame").src = `${ui.previewUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
 }
 
 function setPreviewError(message) {
@@ -821,11 +833,13 @@ function clearPreviewError() {
 
 function clearPdfPreview(message = "Add or import rows to preview the PDF.", isError = false) {
   ui.previewRevision += 1;
-  if (ui.previewUrl) URL.revokeObjectURL(ui.previewUrl);
-  ui.previewUrl = null;
+  ui.previewReady = false;
   const frame = $("#pdfPreviewFrame");
   frame.hidden = true;
   frame.removeAttribute("src");
+  const pages = $("#pdfPreviewPages");
+  pages.hidden = true;
+  pages.replaceChildren();
   $("#previewPlaceholder").hidden = false;
   $("#previewPlaceholder").textContent = message;
   if (isError) setPreviewError(message);
@@ -849,6 +863,40 @@ function schedulePdfPreview(immediate = false) {
   ui.previewTimer = setTimeout(renderPdfPreview, immediate ? 0 : 400);
 }
 
+async function renderPdfPages(bytes, revision) {
+  const pdfjs = await loadPdfRenderer();
+  const loadingTask = pdfjs.getDocument({ data: bytes });
+  const pdf = await loadingTask.promise;
+  try {
+    if (revision !== ui.previewRevision) return;
+    const viewport = $("#previewViewport");
+    const pages = $("#pdfPreviewPages");
+    const pageFragment = document.createDocumentFragment();
+    const fitWidth = Math.max(1, viewport.clientWidth - 32);
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      if (revision !== ui.previewRevision) return;
+      const page = await pdf.getPage(pageNumber);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const fitScale = Math.min(1, fitWidth / baseViewport.width);
+      const pageViewport = page.getViewport({ scale: fitScale * (ui.zoom / 100) });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.ceil(pageViewport.width));
+      canvas.height = Math.max(1, Math.ceil(pageViewport.height));
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", `PDF page ${pageNumber} of ${pdf.numPages}`);
+      pageFragment.append(canvas);
+      await page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: pageViewport }).promise;
+    }
+    if (revision !== ui.previewRevision) return;
+    pages.replaceChildren(pageFragment);
+    pages.hidden = false;
+    $("#pdfPreviewFrame").hidden = true;
+    $("#pdfPreviewFrame").removeAttribute("src");
+  } finally {
+    await pdf.destroy();
+  }
+}
+
 async function renderPdfPreview() {
   const revision = ++ui.previewRevision;
   const renderAttempt = async (attempt) => {
@@ -867,17 +915,16 @@ async function renderPdfPreview() {
       }
       const contentType = response.headers.get("content-type") || "";
       if (!contentType.includes("application/pdf")) throw new Error("The preview server returned an invalid PDF response.");
-      const blob = await response.blob();
+      const bytes = await response.arrayBuffer();
       if (revision !== ui.previewRevision) return;
-      const nextUrl = URL.createObjectURL(blob);
-      const previousUrl = ui.previewUrl;
-      ui.previewUrl = nextUrl;
+      await renderPdfPages(bytes, revision);
+      if (revision !== ui.previewRevision) return;
+      ui.previewReady = true;
       const frame = $("#pdfPreviewFrame");
-      frame.src = `${nextUrl}#toolbar=0&navpanes=0&scrollbar=0&zoom=${ui.zoom}`;
-      frame.hidden = false;
+      frame.hidden = true;
+      frame.removeAttribute("src");
       $("#previewPlaceholder").hidden = true;
       clearPreviewError();
-      if (previousUrl) URL.revokeObjectURL(previousUrl);
       const printableCount = printScopeRows().length;
       const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
       $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${documentState.layout.mode}`;
@@ -888,7 +935,7 @@ async function renderPdfPreview() {
         setTimeout(() => renderAttempt(attempt + 1), 250 * (attempt + 1));
         return;
       }
-      if (ui.previewUrl) {
+      if (ui.previewReady) {
         $("#previewStats").textContent = "Preview update failed · showing last render";
         setPreviewError(`Could not refresh the preview: ${error.message}`);
         return;
@@ -1832,6 +1879,7 @@ function installPreviewResize() {
     drag = null;
     handle.classList.remove("dragging");
     setPreviewWidth(ui.previewWidth);
+    schedulePdfPreview(true);
   };
   handle.addEventListener("pointerdown", (event) => {
     if (window.matchMedia("(max-width: 860px)").matches) return;
@@ -1848,10 +1896,10 @@ function installPreviewResize() {
   handle.addEventListener("pointercancel", finish);
   handle.addEventListener("keydown", (event) => {
     const step = event.shiftKey ? 64 : 24;
-    if (event.key === "ArrowLeft") { event.preventDefault(); setPreviewWidth(ui.previewWidth + step); }
-    if (event.key === "ArrowRight") { event.preventDefault(); setPreviewWidth(ui.previewWidth - step); }
-    if (event.key === "Home") { event.preventDefault(); setPreviewWidth(PREVIEW_MIN_WIDTH); }
-    if (event.key === "End") { event.preventDefault(); setPreviewWidth(PREVIEW_MAX_WIDTH); }
+    if (event.key === "ArrowLeft") { event.preventDefault(); setPreviewWidth(ui.previewWidth + step); schedulePdfPreview(true); }
+    if (event.key === "ArrowRight") { event.preventDefault(); setPreviewWidth(ui.previewWidth - step); schedulePdfPreview(true); }
+    if (event.key === "Home") { event.preventDefault(); setPreviewWidth(PREVIEW_MIN_WIDTH); schedulePdfPreview(true); }
+    if (event.key === "End") { event.preventDefault(); setPreviewWidth(PREVIEW_MAX_WIDTH); schedulePdfPreview(true); }
   });
 }
 
@@ -2195,8 +2243,8 @@ function installEvents() {
   $("#deletePaletteButton").addEventListener("click", deleteSelectedColorPalette);
   [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
   $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
-  $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); });
-  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); });
+  $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); schedulePdfPreview(true); });
+  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); schedulePdfPreview(true); });
   $("#refreshPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
   $("#retryPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
 
