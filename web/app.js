@@ -879,13 +879,17 @@ async function renderPdfPages(bytes, revision) {
       const baseViewport = page.getViewport({ scale: 1 });
       const fitScale = Math.min(1, fitWidth / baseViewport.width);
       const pageViewport = page.getViewport({ scale: fitScale * (ui.zoom / 100) });
+      const outputScale = Math.max(1, window.devicePixelRatio || 1);
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.ceil(pageViewport.width));
-      canvas.height = Math.max(1, Math.ceil(pageViewport.height));
+      canvas.width = Math.max(1, Math.ceil(pageViewport.width * outputScale));
+      canvas.height = Math.max(1, Math.ceil(pageViewport.height * outputScale));
+      canvas.style.width = `${Math.ceil(pageViewport.width)}px`;
+      canvas.style.height = `${Math.ceil(pageViewport.height)}px`;
       canvas.setAttribute("role", "img");
       canvas.setAttribute("aria-label", `PDF page ${pageNumber} of ${pdf.numPages}`);
       pageFragment.append(canvas);
-      await page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: pageViewport }).promise;
+      const renderViewport = page.getViewport({ scale: pageViewport.scale * outputScale });
+      await page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: renderViewport }).promise;
     }
     if (revision !== ui.previewRevision) return;
     pages.replaceChildren(pageFragment);
