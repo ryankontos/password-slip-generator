@@ -145,14 +145,20 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .table-shell { min-height: 0; flex: 1; overflow: auto; position: relative; background: var(--surface); overscroll-behavior: contain; }
 .data-table { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; table-layout: auto; }
 .data-table th { height: 44px; position: sticky; top: 0; z-index: 2; padding: 0 10px; background: var(--surface-soft); border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .045em; text-align: left; text-transform: uppercase; }
-.data-table th:first-child { width: 38px; padding: 0; text-align: center; }
-.data-table th.row-number-head { width: 43px; text-align: center; }
+.data-table th:first-child { width: 38px; padding: 0; position: sticky; left: 0; z-index: 4; text-align: center; }
+.data-table th.row-number-head { width: 43px; position: sticky; left: 38px; z-index: 4; text-align: center; }
 .data-table th.row-menu-head { width: 42px; border-right: 0; }
 .data-table th:not(:first-child):not(.row-number-head):not(.row-menu-head) { min-width: 120px; }
 .data-table td { height: 44px; padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--surface); }
 .data-table tr:hover td { background: var(--surface-soft); }
 .data-table tr.selected td { background: var(--accent-soft); }
 .data-table tr.excluded td { opacity: .55; background-image: repeating-linear-gradient(-45deg, transparent, transparent 5px, color-mix(in srgb, var(--line) 25%, transparent) 5px, color-mix(in srgb, var(--line) 25%, transparent) 6px); }
+.data-table td.select-cell, .data-table td.row-number { position: sticky; z-index: 1; background: var(--surface); }
+.data-table td.select-cell { left: 0; }
+.data-table td.row-number { left: 38px; }
+.data-table tr:hover td.select-cell, .data-table tr:hover td.row-number { background: var(--surface-soft); }
+.data-table tr.selected td.select-cell, .data-table tr.selected td.row-number { background: var(--accent-soft); }
+.data-table tr.excluded td.select-cell, .data-table tr.excluded td.row-number { background-color: var(--surface); }
 .warning-text { color: var(--danger); font-weight: 650; }
 .data-table td.select-cell, .data-table td.row-number, .data-table td.row-menu { text-align: center; }
 .data-table td.row-number { color: var(--subtle); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; cursor: grab; user-select: none; }
