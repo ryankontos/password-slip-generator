@@ -2350,13 +2350,14 @@ function installEvents() {
     const modifier = event.metaKey || event.ctrlKey;
     const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
     const editingText = typing || Boolean(document.activeElement?.isContentEditable);
+    const editingGridCell = Boolean(document.activeElement?.classList.contains("cell-input"));
     if (modifier && event.key.toLowerCase() === "k") { event.preventDefault(); $("#commandDialog").open ? $("#commandDialog").close() : openCommands(); return; }
     if (modifier && event.key.toLowerCase() === "z" && !editingText) { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
     if (modifier && event.shiftKey && event.key.toLowerCase() === "e" && !editingText) { event.preventDefault(); exportCurrentScope(); return; }
     if (modifier && !event.shiftKey && event.key.toLowerCase() === "s" && !editingText && !$("dialog[open]")) { event.preventDefault(); downloadWorkspace(); return; }
     if (modifier && !event.shiftKey && event.key.toLowerCase() === "o" && !editingText && !$("dialog[open]")) { event.preventDefault(); $("#loadWorkspaceInput").click(); return; }
     if (modifier && event.shiftKey && event.key.toLowerCase() === "t" && !editingText && !$("dialog[open]")) { event.preventDefault(); openTemplates(); return; }
-    if (modifier && event.key === "Enter" && !editingText && !$("dialog[open]")) { event.preventDefault(); addRow(); return; }
+    if (modifier && event.key === "Enter" && (editingGridCell || !editingText) && !$("dialog[open]")) { event.preventDefault(); addRow(); return; }
     if (modifier && event.shiftKey && event.key === "Backspace" && !editingText && !$("dialog[open]")) { event.preventDefault(); clearAllData(); return; }
     if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "n") { event.preventDefault(); addRow(); }
     if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "i") { event.preventDefault(); openImport(); }
