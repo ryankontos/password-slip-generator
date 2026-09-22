@@ -1721,6 +1721,10 @@ async function confirmImport() {
   if (overwriteColumns && documentState.columns.length) destructiveChanges.push(`${documentState.columns.length} existing field${documentState.columns.length === 1 ? "" : "s"} and any rules that use them`);
   if (destructiveChanges.length && !await confirmAction("Replace existing studio data?", `This import will remove ${destructiveChanges.join(" and ")}. The selected spreadsheet rows will be imported instead.`, "Replace and import")) return;
   rememberCurrentImportMappings(sheet);
+  // Importing changes the working set. Do not carry an old row selection or
+  // later-page position into the new dataset and accidentally narrow preview/export.
+  ui.selectedRows.clear();
+  ui.dataPage = 0;
   commit((state) => {
     const targetIds = new Map();
     const nextColumns = overwriteColumns ? [] : state.columns;
@@ -1756,7 +1760,6 @@ async function confirmImport() {
     if (replaceRows) state.rows = imported;
     else state.rows.push(...imported);
   });
-  ui.dataPage = 0;
   $("#importDialog").close();
   showView("data");
   const hiddenCount = importHidden ? selection.entries.length : hiddenSelection.numbers.size;
