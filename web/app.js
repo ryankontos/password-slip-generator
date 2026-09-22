@@ -271,6 +271,7 @@ const ui = {
   previewRevision: 0,
   lastImportSheetName: initialPreferences.lastImportSheetName,
   defaultValueEdits: new Set(),
+  selectionAnchor: "",
 };
 
 let pdfRendererPromise = null;
@@ -409,7 +410,7 @@ function flushPersistence() {
 
 function restore(serialised) {
   documentState = normaliseDocument(JSON.parse(serialised));
-  ui.selectedRows.clear();
+  clearRowSelection();
   ui.defaultValueEdits.clear();
   renderAll();
   changed();
@@ -533,6 +534,7 @@ function renderAll() {
 
 function renderData() {
   [...ui.selectedRows].forEach((id) => { if (!documentState.rows.some((row) => row.id === id && !row.hidden)) ui.selectedRows.delete(id); });
+  if (ui.selectionAnchor && !documentState.rows.some((row) => row.id === ui.selectionAnchor && !row.hidden)) ui.selectionAnchor = "";
   const allRows = filteredRows();
   const pageCount = Math.max(1, Math.ceil(allRows.length / ui.pageSize));
   ui.dataPage = Math.min(ui.dataPage, pageCount - 1);
@@ -635,6 +637,7 @@ function renderSelectionToolbar() {
   const printableCount = printScopeRows(previewDocumentSource()).length;
   $("#selectionToolbar").hidden = count === 0;
   $("#selectionCount").textContent = printableCount === count ? `${count} selected` : `${count} selected · ${printableCount} printable`;
+  $("#selectionCount").title = "Shift-click a row checkbox to select a range";
   $("#selectionCount").classList.toggle("warning-text", printableCount < count);
   const bulkEditButton = $("#bulkEditButton");
   if (bulkEditButton) bulkEditButton.disabled = count === 0;
@@ -652,6 +655,11 @@ function openSelectedRowOptions() {
 
 function selectedRows() {
   return documentState.rows.filter((row) => ui.selectedRows.has(row.id));
+}
+
+function clearRowSelection() {
+  ui.selectedRows.clear();
+  ui.selectionAnchor = "";
 }
 
 function bulkEditTransform(value, operation, fields = {}) {
@@ -1313,7 +1321,7 @@ function applyOpenedDocument(incoming, palettes, message, preferences = null, im
   if (Array.isArray(palettes)) saveColorPalettes(palettes);
   if (importPreferences) restoreImportPreferences(importPreferences);
   applyWorkspacePreferences(preferences, restoreView);
-  ui.selectedRows.clear();
+  clearRowSelection();
   ui.defaultValueEdits.clear();
   ui.search = "";
   ui.fieldSearch = "";
@@ -1786,7 +1794,7 @@ async function confirmImport() {
   rememberCurrentImportMappings(sheet);
   // Importing changes the working set. Do not carry an old row selection or
   // later-page position into the new dataset and accidentally narrow preview/export.
-  ui.selectedRows.clear();
+  clearRowSelection();
   ui.dataPage = 0;
   commit((state) => {
     const targetIds = new Map();
@@ -1830,7 +1838,7 @@ async function confirmImport() {
 }
 
 function resetWorkspaceUi() {
-  ui.selectedRows.clear();
+  clearRowSelection();
   ui.defaultValueEdits.clear();
   ui.search = "";
   ui.fieldSearch = "";
@@ -2035,7 +2043,7 @@ function installEvents() {
   $("#rowSearch").addEventListener("input", (event) => {
     ui.search = event.target.value;
     ui.dataPage = 0;
-    ui.selectedRows.clear();
+    clearRowSelection();
     renderData();
     schedulePdfPreview();
   });
@@ -2061,7 +2069,7 @@ function installEvents() {
     if (action === "clear-row-search") {
       ui.search = "";
       ui.dataPage = 0;
-      ui.selectedRows.clear();
+      clearRowSelection();
       renderData();
       requestAnimationFrame(() => $("#rowSearch").focus());
       schedulePdfPreview();
@@ -2071,6 +2079,33 @@ function installEvents() {
   $("#dataHead").addEventListener("change", (event) => {
     if (event.target.id !== "selectAllRows") return;
     filteredRows().forEach((row) => event.target.checked ? ui.selectedRows.add(row.id) : ui.selectedRows.delete(row.id));
+    ui.selectionAnchor = "";
+    renderData();
+    schedulePdfPreview();
+  });
+
+  $("#dataBody").addEventListener("click", (event) => {
+    const checkbox = event.target.closest(".row-select");
+    if (!checkbox) return;
+    const rowId = checkbox.closest("tr[data-row-id]")?.dataset.rowId;
+    if (!rowId) return;
+    if (!event.shiftKey || !ui.selectionAnchor) {
+      ui.selectionAnchor = rowId;
+      return;
+    }
+    const visible = filteredRows();
+    const anchorIndex = visible.findIndex((row) => row.id === ui.selectionAnchor);
+    const targetIndex = visible.findIndex((row) => row.id === rowId);
+    if (anchorIndex < 0 || targetIndex < 0) {
+      ui.selectionAnchor = rowId;
+      return;
+    }
+    event.preventDefault();
+    const checked = !checkbox.checked;
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    visible.slice(start, end + 1).forEach((row) => checked ? ui.selectedRows.add(row.id) : ui.selectedRows.delete(row.id));
+    ui.selectionAnchor = rowId;
     renderData();
     schedulePdfPreview();
   });
@@ -2080,6 +2115,7 @@ function installEvents() {
     if (!rowElement) return;
     const rowId = rowElement.dataset.rowId;
     if (event.target.classList.contains("row-select")) {
+      ui.selectionAnchor = rowId;
       event.target.checked ? ui.selectedRows.add(rowId) : ui.selectedRows.delete(rowId);
       renderData();
       schedulePdfPreview();
@@ -2145,7 +2181,7 @@ function installEvents() {
   });
   $("#dataBody").addEventListener("dragend", () => { draggedRowId = null; });
 
-  $("#clearSelectionButton").addEventListener("click", () => { ui.selectedRows.clear(); renderData(); schedulePdfPreview(); });
+  $("#clearSelectionButton").addEventListener("click", () => { clearRowSelection(); renderData(); schedulePdfPreview(); });
   $("#bulkEditButton").addEventListener("click", openBulkEdit);
   $("#customizeSelectedButton").addEventListener("click", openSelectedRowOptions);
   $("#resetSelectedLayoutsButton").addEventListener("click", resetSelectedVisibility);
@@ -2170,7 +2206,7 @@ function installEvents() {
     const count = ui.selectedRows.size;
     if (!await confirmAction("Delete selected rows?", `${count} row${count === 1 ? "" : "s"} will be removed from this studio.`, "Delete")) return;
     commit((state) => { state.rows = state.rows.filter((row) => !ui.selectedRows.has(row.id)); });
-    ui.selectedRows.clear();
+    clearRowSelection();
     renderAll();
   });
   $("#duplicateRowsButton").addEventListener("click", () => {

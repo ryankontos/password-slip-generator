@@ -25,7 +25,7 @@ python3 src/password_slips.py
 - Start with an empty data set. Define fields, add rows manually, or import a workbook.
 - Edit rows inline, paste tab-separated blocks from Excel or Sheets, duplicate rows, reorder rows, hide slips, bulk edit selected rows, and export CSV.
 - Use the `New row` button at the bottom of the data table or `⌘↵`. A field can provide a default value for every manually added row. In the grid, `Enter`/`⇧Enter` moves down/up and `Tab`/`⇧Tab` moves across fields; reaching the end with `Tab` adds a row.
-- Filter rows to work quickly. Filtering clears the selection; with no rows selected, PDF preview and export use every printable row.
+- Filter rows to work quickly. Filtering clears the selection; Shift-click row checkboxes to select a visible range. With no rows selected, PDF preview and export use every printable row.
 - Import `.xlsx`, `.xlsm`, and `.csv` files. The default is to replace existing rows. Select a worksheet, choose all or specific spreadsheet row numbers, mark imported rows hidden, and opt in to fields one at a time.
 - Replace the current field set or keep it and map spreadsheet fields into existing fields. New fields can have their own display names. Field mappings are remembered by sheet name and headers, not by the workbook file.
 - Fields default to text. Password-like headers are inferred as password fields; all other imported fields remain text unless changed manually.
