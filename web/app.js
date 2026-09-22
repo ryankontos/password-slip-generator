@@ -1775,12 +1775,23 @@ async function clearAllData() {
 }
 
 async function resetEverything() {
-  if (!await confirmAction("Reset everything?", "Remove all data, fields, rules and layout changes? This cannot be undone.", "Reset everything")) return;
+  if (!await confirmAction("Reset everything?", "Remove all rows, fields, rules, saved palettes, templates and remembered import settings? This cannot be undone.", "Reset everything")) return;
   documentState = starterDocument();
   ui.history = [];
   ui.future = [];
   resetWorkspaceUi();
-  try { localStorage.removeItem(DOCUMENT_STORAGE_KEY); } catch (_) {}
+  ui.view = PREFERENCE_DEFAULTS.view;
+  ui.pageSize = PREFERENCE_DEFAULTS.pageSize;
+  ui.zoom = PREFERENCE_DEFAULTS.zoom;
+  ui.previewWidth = PREFERENCE_DEFAULTS.previewWidth;
+  ui.lastImportSheetName = "";
+  ui.importData = null;
+  ui.importMappingSearch = "";
+  document.documentElement.dataset.theme = PREFERENCE_DEFAULTS.theme;
+  setPreviewWidth(ui.previewWidth, false);
+  try {
+    [DOCUMENT_STORAGE_KEY, PREFERENCES_STORAGE_KEY, IMPORT_PREFERENCES_STORAGE_KEY, PALETTE_STORAGE_KEY, TEMPLATE_STORAGE_KEY, "pss-theme", "pss-last-import-sheet", "pss-preview-width"].forEach((key) => localStorage.removeItem(key));
+  } catch (_) {}
   changed();
   renderAll();
   showView("data");
