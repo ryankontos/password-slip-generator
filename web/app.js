@@ -603,8 +603,10 @@ function moveGridCell(input, direction) {
 
 function renderSelectionToolbar() {
   const count = [...ui.selectedRows].filter((id) => documentState.rows.some((row) => row.id === id)).length;
+  const printableCount = printScopeRows().length;
   $("#selectionToolbar").hidden = count === 0;
-  $("#selectionCount").textContent = `${count} selected`;
+  $("#selectionCount").textContent = printableCount === count ? `${count} selected` : `${count} selected · ${printableCount} printable`;
+  $("#selectionCount").classList.toggle("warning-text", printableCount < count);
   const bulkEditButton = $("#bulkEditButton");
   if (bulkEditButton) bulkEditButton.disabled = count === 0;
   const customizeButton = $("#customizeSelectedButton");
