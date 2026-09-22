@@ -1584,7 +1584,8 @@ function updateMappingSummary() {
   const skipped = mappings.length - mapped.length;
   const duplicateTargets = [...new Set(mapped.filter((item) => item.target !== "__create__").map((item) => item.target).filter((target, index, list) => list.indexOf(target) !== index))];
   const names = mapped.filter((item) => item.target === "__create__").map((item) => (item.newName || item.header).trim()).filter(Boolean);
-  const duplicateNames = [...new Set(names.filter((name, index, list) => list.indexOf(name) !== index))];
+  const nameKeys = names.map(normaliseImportName).filter(Boolean);
+  const duplicateNames = [...new Set(nameKeys.filter((name, index, list) => list.indexOf(name) !== index))];
   const existingNames = new Set(documentState.columns.flatMap((column) => [column.label, column.id]).map(normaliseImportName).filter(Boolean));
   const duplicateExistingNames = [...new Set(names.filter((name) => existingNames.has(normaliseImportName(name))))];
   const duplicateCount = duplicateTargets.length + duplicateNames.length + duplicateExistingNames.length;
