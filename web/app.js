@@ -946,7 +946,30 @@ function openRowOptions(rowId) {
   $("#rowOptionsName").textContent = documentState.columns.map((column) => row.values[column.id]).find(Boolean) || `Row ${documentState.rows.indexOf(row) + 1}`;
   $("#rowPrintableInput").checked = !row.hidden;
   $("#rowOverrideList").innerHTML = documentState.columns.map((column) => `<label class="override-row"><strong>${escapeHtml(column.label)}</strong><select data-column-id="${column.id}"><option value="auto" ${row.overrides[column.id] == null ? "selected" : ""}>Automatic</option><option value="show" ${row.overrides[column.id] === true ? "selected" : ""}>Always show</option><option value="hide" ${row.overrides[column.id] === false ? "selected" : ""}>Always hide</option></select></label>`).join("");
+  const copyButton = $("#copyRowVisibilityButton");
+  if (copyButton) copyButton.hidden = !(ui.selectedRows.size > 1 && ui.selectedRows.has(rowId));
   if (!$("#rowOptionsDialog").open) $("#rowOptionsDialog").showModal();
+}
+
+function resetSelectedVisibility() {
+  const ids = new Set(ui.selectedRows);
+  if (!ids.size) { toast("Select at least one row first", "error"); return; }
+  const customized = selectedRows().filter((row) => Object.keys(row.overrides || {}).length);
+  if (!customized.length) { toast("Selected rows already use automatic visibility"); return; }
+  commit((state) => state.rows.forEach((row) => { if (ids.has(row.id)) row.overrides = {}; }));
+  toast(`Reset visibility on ${customized.length} selected row${customized.length === 1 ? "" : "s"}`);
+}
+
+function copyRowVisibilityToSelection() {
+  const source = documentState.rows.find((row) => row.id === ui.rowOptionsId);
+  const ids = new Set(ui.selectedRows);
+  if (!source || ids.size < 2 || !ids.has(source.id)) {
+    toast("Select the source row and at least one other row first", "error");
+    return;
+  }
+  const overrides = clone(source.overrides || {});
+  commit((state) => state.rows.forEach((row) => { if (ids.has(row.id)) row.overrides = clone(overrides); }));
+  toast(`Applied field visibility to ${ids.size} selected rows`);
 }
 
 function toast(message, type = "") {
@@ -1933,6 +1956,8 @@ function installEvents() {
 
   $("#clearSelectionButton").addEventListener("click", () => { ui.selectedRows.clear(); renderData(); schedulePdfPreview(); });
   $("#bulkEditButton").addEventListener("click", openBulkEdit);
+  $("#customizeSelectedButton").addEventListener("click", openSelectedRowOptions);
+  $("#resetSelectedLayoutsButton").addEventListener("click", resetSelectedVisibility);
   $("#bulkEditColumn").addEventListener("change", updateBulkEditPreview);
   $("#bulkEditOperation").addEventListener("change", renderBulkEditFields);
   $("#applyBulkEditButton").addEventListener("click", applyBulkEdit);
@@ -2183,6 +2208,8 @@ function installEvents() {
       if (row) row.hidden = !event.target.checked;
     });
   });
+
+  $("#copyRowVisibilityButton").addEventListener("click", copyRowVisibilityToSelection);
 
   $("#rowOverrideList").addEventListener("change", (event) => {
     const columnId = event.target.dataset.columnId;

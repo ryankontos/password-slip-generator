@@ -69,6 +69,8 @@
           <strong id="selectionCount">0 selected</strong>
           <button id="exportSelectedButton" class="button quiet compact">Export selected</button>
           <button id="bulkEditButton" class="button quiet compact">Bulk edit</button>
+          <button id="customizeSelectedButton" class="button quiet compact">Customize visibility</button>
+          <button id="resetSelectedLayoutsButton" class="button quiet compact">Reset visibility</button>
           <button id="duplicateRowsButton" class="button quiet compact">Duplicate</button>
           <button id="hideRowsButton" class="button quiet compact">Hide slips</button>
           <button id="showRowsButton" class="button quiet compact">Show slips</button>
@@ -236,7 +238,7 @@
         <h3 class="section-label">Field visibility</h3>
         <div id="rowOverrideList" class="override-list"></div>
       </div>
-      <footer class="modal-footer"><span>Automatic uses the column and rule settings.</span><button class="button primary" value="default">Done</button></footer>
+      <footer class="modal-footer"><span>Automatic uses the column and rule settings.</span><button id="copyRowVisibilityButton" class="button secondary compact" type="button" hidden>Apply to selected rows</button><button class="button primary" value="default">Done</button></footer>
     </form>
   </dialog>
 
