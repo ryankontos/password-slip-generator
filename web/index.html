@@ -16,7 +16,7 @@
       <span class="brand-mark">PS</span>
       <span>Password Slip Studio</span>
     </div>
-    <label class="title-control"><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status">Saved</span></label>
+    <label class="title-control"><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status" role="status" aria-live="polite">Saved</span></label>
     <div class="header-actions">
       <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
       <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
@@ -66,7 +66,7 @@
           </div>
         </div>
         <div id="selectionToolbar" class="selection-toolbar" hidden>
-          <strong id="selectionCount">0 selected</strong>
+          <strong id="selectionCount" role="status" aria-live="polite">0 selected</strong>
           <button id="exportSelectedButton" class="button quiet compact">Export selected</button>
           <button id="bulkEditButton" class="button quiet compact">Bulk edit</button>
           <button id="customizeSelectedButton" class="button quiet compact">Customize visibility</button>
@@ -90,7 +90,7 @@
         </div>
         <div class="table-footer">
           <button id="appendRowButton" class="button secondary compact">＋ New row</button>
-          <span id="visibleRowCount"></span>
+          <span id="visibleRowCount" role="status" aria-live="polite"></span>
           <button id="manageHiddenButton" class="text-button hidden-manager-button" type="button" hidden>Manage hidden</button>
           <div id="dataPagination" class="data-pagination" aria-label="Data pagination">
             <label>Rows<select id="pageSizeInput" aria-label="Rows per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="250">250</option></select></label>
@@ -189,7 +189,7 @@
     <div id="previewResizeHandle" class="preview-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize PDF preview" aria-valuemin="360" aria-valuemax="920" aria-valuenow="520" tabindex="0" title="Drag to resize preview"></div>
     <aside class="preview-panel">
       <div class="preview-header">
-        <div><h2>PDF preview</h2><span id="previewStats">No rows</span></div>
+        <div><h2>PDF preview</h2><span id="previewStats" role="status" aria-live="polite">No rows</span></div>
         <div class="preview-actions"><button id="refreshPreviewButton" class="icon-button small" aria-label="Refresh preview" title="Render PDF now">↻</button><span class="preview-divider"></span><button id="zoomOutButton" class="icon-button small" aria-label="Zoom out">−</button><span id="zoomLabel">110%</span><button id="zoomInButton" class="icon-button small" aria-label="Zoom in">＋</button></div>
       </div>
       <div id="previewViewport" class="preview-viewport pdf-preview-viewport">

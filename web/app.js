@@ -934,14 +934,20 @@ async function renderPdfPages(bytes, revision) {
   const loadingTask = pdfjs.getDocument({ data: bytes });
   const pdf = await loadingTask.promise;
   if (revision !== ui.previewRevision) {
-    await pdf.destroy();
+    await Promise.resolve(pdf.destroy()).catch(() => {});
     return null;
   }
   const viewport = $("#previewViewport");
   const pages = $("#pdfPreviewPages");
   const pageFragment = document.createDocumentFragment();
   const fitWidth = Math.max(1, viewport.clientWidth - 32);
-  const firstPage = await pdf.getPage(1);
+  let firstPage;
+  try {
+    firstPage = await pdf.getPage(1);
+  } catch (error) {
+    await Promise.resolve(pdf.destroy()).catch(() => {});
+    throw error;
+  }
   const baseViewport = firstPage.getViewport({ scale: 1 });
   const fitScale = Math.min(1, fitWidth / baseViewport.width);
   const displayScale = fitScale * (ui.zoom / 100);
@@ -1007,7 +1013,10 @@ async function renderPdfPages(bytes, revision) {
     });
   };
   if (window.IntersectionObserver) {
-    observer = new IntersectionObserver((entries) => entries.filter((entry) => entry.isIntersecting).forEach((entry) => renderDeferredPage(entry.target)), { root: viewport, rootMargin: "600px 0px" });
+    // The pages element is the actual scrolling surface. Observing against it
+    // avoids treating every page as visible when the outer panel itself does
+    // not scroll.
+    observer = new IntersectionObserver((entries) => entries.filter((entry) => entry.isIntersecting).forEach((entry) => renderDeferredPage(entry.target)), { root: pages, rootMargin: "600px 0px" });
     wrappers.forEach((wrapper) => observer.observe(wrapper));
   } else {
     wrappers.forEach(renderDeferredPage);
@@ -1017,13 +1026,13 @@ async function renderPdfPages(bytes, revision) {
   } catch (error) {
     disposed = true;
     observer?.disconnect();
-    await pdf.destroy();
+    await Promise.resolve(pdf.destroy()).catch(() => {});
     throw error;
   }
   const cleanup = async () => {
     disposed = true;
     observer?.disconnect();
-    await pdf.destroy();
+    await Promise.resolve(pdf.destroy()).catch(() => {});
   };
   ui.previewCleanup = cleanup;
   return pdf.numPages;
@@ -1224,9 +1233,10 @@ function csvCell(value) {
 }
 
 function exportCsv() {
-  const lines = [documentState.columns.map((column) => csvCell(column.label)).join(",")];
-  documentState.rows.forEach((row) => lines.push(documentState.columns.map((column) => csvCell(row.values?.[column.id] ?? "")).join(",")));
-  downloadBlob(new Blob([`\uFEFF${lines.join("\r\n")}\r\n`], { type: "text/csv;charset=utf-8" }), `${safeFilename(documentState.name)}.csv`);
+  const source = previewDocumentSource();
+  const lines = [source.columns.map((column) => csvCell(column.label)).join(",")];
+  source.rows.forEach((row) => lines.push(source.columns.map((column) => csvCell(row.values?.[column.id] ?? "")).join(",")));
+  downloadBlob(new Blob([`\uFEFF${lines.join("\r\n")}\r\n`], { type: "text/csv;charset=utf-8" }), `${safeFilename(source.name)}.csv`);
   toast("CSV exported");
 }
 
@@ -1273,8 +1283,10 @@ function pasteIntoDataGrid(event) {
 }
 
 async function copyVisibleRows() {
-  const rows = filteredRows();
-  const text = [documentState.columns.map((column) => column.label).join("\t"), ...rows.map((row) => documentState.columns.map((column) => String(row.values?.[column.id] ?? "")).join("\t"))].join("\n");
+  const source = previewDocumentSource();
+  const query = ui.search.trim().toLowerCase();
+  const rows = source.rows.filter((row) => !row.hidden && (!query || rowValuesText(row).includes(query)));
+  const text = [source.columns.map((column) => column.label).join("\t"), ...rows.map((row) => source.columns.map((column) => String(row.values?.[column.id] ?? "")).join("\t"))].join("\n");
   try {
     await navigator.clipboard.writeText(text);
     toast(`${rows.length} row${rows.length === 1 ? "" : "s"} copied`);
@@ -1327,9 +1339,12 @@ async function exportSelectedRows() {
 }
 
 async function exportCurrentScope(triggerButton = null) {
-  const rows = printScopeRows();
+  // Build the source before checking the scope so the active grid edit is
+  // included even when that edit changes a hide-slip rule match.
+  const source = printScopeSource();
+  const rows = source.rows;
   if (!rows.length) { toast(ui.selectedRows.size ? "No selected rows can be printed." : "There are no printable rows to export.", "error"); return; }
-  await exportPdf(printScopeSource(), ui.selectedRows.size ? "-selected" : "", triggerButton);
+  await exportPdf(source, ui.selectedRows.size ? "-selected" : "", triggerButton);
 }
 
 function currentWorkspacePreferences() {
@@ -1489,7 +1504,11 @@ function saveTemplateFromDialog() {
 
 function openTemplateRecord(record) {
   if (!record?.document) return;
-  applyOpenedDocument(record.document, record.palettes, `Template “${record.name || record.document.name || "Untitled"}” opened`, record.preferences, record.importPreferences, false);
+  const templateDocument = clone(record.document);
+  // The include-data choice is part of the template contract. Honour it even
+  // for older or hand-edited template files that still contain a rows array.
+  if (record.includeData === false) templateDocument.rows = [];
+  applyOpenedDocument(templateDocument, record.palettes, `Template “${record.name || templateDocument.name || "Untitled"}” opened`, record.preferences, record.importPreferences, false);
   $("#templatesDialog").close();
 }
 
@@ -1504,7 +1523,7 @@ async function loadTemplateFile(file) {
       name: String(parsed.name || payload.document.name || file.name.replace(/\.[^.]+$/, "")),
       savedAt: new Date().toISOString(),
       includeData: parsed.includeData !== false,
-      document: normaliseDocument(payload.document),
+      document: normaliseDocument(parsed.includeData === false ? { ...payload.document, rows: [] } : payload.document),
       palettes: payload.palettes || [],
       preferences: payload.preferences || null,
       importPreferences: payload.importPreferences || {},
