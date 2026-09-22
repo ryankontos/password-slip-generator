@@ -1578,10 +1578,13 @@ function updateMappingSummary() {
   const existing = mapped.length - created;
   const skipped = mappings.length - mapped.length;
   const duplicateTargets = [...new Set(mapped.filter((item) => item.target !== "__create__").map((item) => item.target).filter((target, index, list) => list.indexOf(target) !== index))];
-  const names = mapped.filter((item) => item.target === "__create__").map((item) => (item.newName || item.header).trim().toLowerCase()).filter(Boolean);
+  const names = mapped.filter((item) => item.target === "__create__").map((item) => (item.newName || item.header).trim()).filter(Boolean);
   const duplicateNames = [...new Set(names.filter((name, index, list) => list.indexOf(name) !== index))];
-  $("#mappingSummary").textContent = `${mapped.length} included · ${existing} existing field${existing === 1 ? "" : "s"} · ${created} new field${created === 1 ? "" : "s"} · ${skipped} skipped${duplicateTargets.length || duplicateNames.length ? ` · ${duplicateTargets.length + duplicateNames.length} duplicate name${duplicateTargets.length + duplicateNames.length === 1 ? "" : "s"}` : ""}`;
-  return { duplicateTargets, duplicateNames };
+  const existingNames = new Set(documentState.columns.flatMap((column) => [column.label, column.id]).map(normaliseImportName).filter(Boolean));
+  const duplicateExistingNames = [...new Set(names.filter((name) => existingNames.has(normaliseImportName(name))))];
+  const duplicateCount = duplicateTargets.length + duplicateNames.length + duplicateExistingNames.length;
+  $("#mappingSummary").textContent = `${mapped.length} included · ${existing} existing field${existing === 1 ? "" : "s"} · ${created} new field${created === 1 ? "" : "s"} · ${skipped} skipped${duplicateCount ? ` · ${duplicateCount} duplicate name${duplicateCount === 1 ? "" : "s"}` : ""}`;
+  return { duplicateTargets, duplicateNames, duplicateExistingNames };
 }
 
 function filterImportMappingRows() {
@@ -1620,6 +1623,7 @@ function updateImportWarning() {
   if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) warnings.push("Select at least one source column to import.");
   if (duplicates.duplicateTargets.length) warnings.push("Two or more sheet columns map to the same studio field. Remap one of them before importing.");
   if (duplicates.duplicateNames.length) warnings.push("Two or more new columns use the same name. Give each new column a unique name.");
+  if ($("#importColumnMode").value !== "replace" && duplicates.duplicateExistingNames.length) warnings.push("A new field name matches an existing field. Map it to that field or choose a different display name.");
   if ($("#importColumnMode").value === "replace") warnings.push("Overwrite mode will remove the current columns and rules when you import.");
   $("#importWarning").hidden = !warnings.length;
   $("#importWarning").textContent = warnings.join(" ");
@@ -1708,7 +1712,7 @@ async function confirmImport() {
     return;
   }
   const duplicateIssues = updateMappingSummary();
-  if (duplicateIssues.duplicateTargets.length || duplicateIssues.duplicateNames.length) {
+  if (duplicateIssues.duplicateTargets.length || duplicateIssues.duplicateNames.length || (!overwriteColumns && duplicateIssues.duplicateExistingNames.length)) {
     toast("Resolve duplicate field mappings or new names before importing.", "error");
     return;
   }
