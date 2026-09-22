@@ -798,6 +798,7 @@ function renderLayout() {
     labelSizeInput: layout.labelSize,
     valueSizeInput: layout.valueSize,
     fontInput: layout.font,
+    labelFontInput: layout.labelFont,
     labelCaseInput: layout.labelCase,
   };
   Object.entries(bindings).forEach(([id, value]) => { const control = $("#" + id); if (control) control.value = value; });
