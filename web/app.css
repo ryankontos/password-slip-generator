@@ -145,8 +145,10 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .table-shell { min-height: 0; flex: 1; overflow: auto; position: relative; background: var(--surface); overscroll-behavior: contain; }
 .data-table { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; table-layout: auto; }
 .data-table th { height: 44px; position: sticky; top: 0; z-index: 2; padding: 0 10px; background: var(--surface-soft); border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .045em; text-align: left; text-transform: uppercase; }
-.data-table th:first-child { width: 38px; padding: 0; position: sticky; left: 0; z-index: 4; text-align: center; }
-.data-table th.row-number-head { width: 43px; position: sticky; left: 38px; z-index: 4; text-align: center; }
+.data-table th:first-child, .data-table td.select-cell { width: 38px; min-width: 38px; max-width: 38px; padding: 0; }
+.data-table th:first-child { position: sticky; left: 0; z-index: 4; text-align: center; }
+.data-table th.row-number-head, .data-table td.row-number { width: 43px; min-width: 43px; max-width: 43px; }
+.data-table th.row-number-head { position: sticky; left: 38px; z-index: 4; text-align: center; }
 .data-table th.row-menu-head { width: 42px; border-right: 0; }
 .data-table th:not(:first-child):not(.row-number-head):not(.row-menu-head) { min-width: 120px; }
 .data-table td { height: 44px; padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--surface); }
