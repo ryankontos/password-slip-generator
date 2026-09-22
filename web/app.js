@@ -896,6 +896,7 @@ async function renderPdfPages(bytes, revision) {
     pages.hidden = false;
     $("#pdfPreviewFrame").hidden = true;
     $("#pdfPreviewFrame").removeAttribute("src");
+    return pdf.numPages;
   } finally {
     await pdf.destroy();
   }
@@ -921,7 +922,7 @@ async function renderPdfPreview() {
       if (!contentType.includes("application/pdf")) throw new Error("The preview server returned an invalid PDF response.");
       const bytes = await response.arrayBuffer();
       if (revision !== ui.previewRevision) return;
-      await renderPdfPages(bytes, revision);
+      const pageCount = await renderPdfPages(bytes, revision);
       if (revision !== ui.previewRevision) return;
       ui.previewReady = true;
       const frame = $("#pdfPreviewFrame");
@@ -931,7 +932,8 @@ async function renderPdfPreview() {
       clearPreviewError();
       const printableCount = printScopeRows().length;
       const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
-      $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${documentState.layout.mode}`;
+      const pageLabel = `${pageCount} page${pageCount === 1 ? "" : "s"}`;
+      $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${pageLabel} · ${documentState.layout.mode}`;
       $("#zoomLabel").textContent = `${ui.zoom}%`;
     } catch (error) {
       if (revision !== ui.previewRevision) return;
