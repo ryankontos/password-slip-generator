@@ -506,6 +506,8 @@ function renderData() {
   const pageCount = Math.max(1, Math.ceil(allRows.length / ui.pageSize));
   ui.dataPage = Math.min(ui.dataPage, pageCount - 1);
   const rows = allRows.slice(ui.dataPage * ui.pageSize, (ui.dataPage + 1) * ui.pageSize);
+  const hidden = documentState.rows.filter((row) => row.hidden).length;
+  const visibleTotal = documentState.rows.length - hidden;
   $("#rowSearch").value = ui.search;
   $("#dataSummary").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
   $("#dataHead").innerHTML = `<tr><th><input id="selectAllRows" type="checkbox" aria-label="Select all filtered rows" ${allRows.length && allRows.every((row) => ui.selectedRows.has(row.id)) ? "checked" : ""}></th><th class="row-number-head">#</th>${documentState.columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}<th class="row-menu-head"></th></tr>`;
@@ -520,9 +522,17 @@ function renderData() {
       <td class="row-menu"><button class="row-menu-button" data-action="row-options" title="Row options" aria-label="Row ${originalIndex} options">•••</button></td>
     </tr>`;
   }).join("");
-  $("#dataEmpty").hidden = Boolean(allRows.length);
-  const hidden = documentState.rows.filter((row) => row.hidden).length;
-  const visibleTotal = documentState.rows.length - hidden;
+  const empty = $("#dataEmpty");
+  empty.hidden = Boolean(allRows.length);
+  if (!allRows.length) {
+    if (ui.search) {
+      empty.innerHTML = `<div class="empty-icon">⌕</div><h2>No matching rows</h2><p>Nothing in the visible rows matches “${escapeHtml(ui.search)}”.</p><button class="button quiet compact" data-action="clear-row-search" type="button">Clear filter</button>`;
+    } else if (documentState.rows.length && hidden === documentState.rows.length) {
+      empty.innerHTML = `<div class="empty-icon">▦</div><h2>No visible rows</h2><p>All ${hidden} stored row${hidden === 1 ? " is" : "s are"} hidden from the data list and PDF.</p>`;
+    } else {
+      empty.innerHTML = `<div class="empty-icon">▦</div><h2>No rows</h2><div><button class="button primary" data-action="add-row" type="button">Add row</button> <button class="button secondary" data-action="import" type="button">Import sheet</button></div>`;
+    }
+  }
   const rowText = ui.search ? `${allRows.length} of ${visibleTotal} rows` : `${allRows.length} rows`;
   $("#visibleRowCount").textContent = hidden ? `${rowText} · ${hidden} hidden` : rowText;
   $("#visibleRowCount").classList.toggle("warning-text", hidden > 0);
@@ -1847,6 +1857,14 @@ function installEvents() {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (action === "add-row") addRow();
     if (action === "import") openImport();
+    if (action === "clear-row-search") {
+      ui.search = "";
+      ui.dataPage = 0;
+      ui.selectedRows.clear();
+      renderData();
+      requestAnimationFrame(() => $("#rowSearch").focus());
+      schedulePdfPreview();
+    }
   });
 
   $("#dataHead").addEventListener("change", (event) => {
