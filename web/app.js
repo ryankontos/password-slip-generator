@@ -2003,6 +2003,8 @@ function commandActions() {
     { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout · ⇧⌘⌫", run: clearAllData },
     { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
     { icon: "◐", label: "Toggle theme", detail: "", run: toggleTheme },
+    { icon: "⚙", label: "App settings", detail: "Updates and login", run: openAppSettings },
+    { icon: "↻", label: "Check for updates", detail: "App", run: () => { openAppSettings(); checkStudioUpdates(); } },
   ];
 }
 
@@ -2040,6 +2042,113 @@ function toggleTheme() {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   saveStudioPreferences({ theme: next });
+}
+
+let serviceCommitAtLoad = "";
+let serviceRestartPending = false;
+
+async function serviceRequest(path, payload) {
+  const response = await fetch(`/api/service${path}`, {
+    method: payload === undefined ? "GET" : "POST",
+    headers: payload === undefined ? {} : { "Content-Type": "application/json" },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+    cache: "no-store",
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Studio could not complete the request.");
+  return result;
+}
+
+function renderServiceStatus(status) {
+  if (!serviceCommitAtLoad) serviceCommitAtLoad = status.running_commit || "";
+  if (serviceRestartPending && serviceCommitAtLoad && status.running_commit !== serviceCommitAtLoad) {
+    window.location.reload();
+    return;
+  }
+  if (serviceRestartPending && status.update_error && !status.updating) serviceRestartPending = false;
+  const branch = $("#updateBranchSelect");
+  const branches = [...new Set([...(status.branches || []), status.branch].filter(Boolean))];
+  const options = branches.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  if (branch.innerHTML !== options) branch.innerHTML = options;
+  branch.value = status.branch || "";
+  branch.disabled = Boolean(status.updating || status.checking);
+  $("#serviceVersion").textContent = status.running_commit ? status.running_commit.slice(0, 8) : "";
+  $("#backgroundStatus").textContent = status.background ? "Running" : "Foreground";
+  $("#backgroundStatus").classList.toggle("active", Boolean(status.background));
+  $("#startAtLoginInput").checked = Boolean(status.start_at_login);
+  $("#startAtLoginInput").disabled = !status.start_at_login_supported;
+  $("#checkUpdatesButton").disabled = Boolean(status.checking || status.updating);
+  const canUpdate = Boolean(status.update_available && status.working_tree_clean && status.can_fast_forward && !status.updating && !status.checking);
+  $("#installUpdateButton").hidden = !status.update_available;
+  $("#installUpdateButton").disabled = !canUpdate;
+  $("#updateAvailableButton").hidden = !canUpdate;
+  let message = status.update_error || status.update_message || "Ready to check for updates.";
+  if (status.update_available && !status.can_fast_forward) {
+    message = "This checkout has diverged from the selected branch. Update it manually.";
+  } else if (status.update_available && !status.working_tree_clean) {
+    message = "Update available, but this checkout has local changes. Commit or move them first.";
+  }
+  $("#updateStatusText").textContent = message;
+  $("#updateStatusText").classList.toggle("error", Boolean(status.update_error || (status.update_available && (!status.working_tree_clean || !status.can_fast_forward))));
+}
+
+async function refreshServiceStatus() {
+  try {
+    renderServiceStatus(await serviceRequest(""));
+  } catch (_) {
+    if (!serviceRestartPending) {
+      $("#updateStatusText").textContent = "Studio is unavailable. Check that the launcher is running.";
+      $("#updateStatusText").classList.add("error");
+    }
+  }
+}
+
+function openAppSettings() {
+  $("#appSettingsDialog").showModal();
+  refreshServiceStatus();
+}
+
+async function checkStudioUpdates() {
+  try {
+    renderServiceStatus(await serviceRequest("/check", {}));
+    toast("Checking for updates…");
+  } catch (error) { toast(error.message, "error"); }
+}
+
+async function changeUpdateBranch() {
+  try {
+    renderServiceStatus(await serviceRequest("/branch", { branch: $("#updateBranchSelect").value }));
+  } catch (error) { toast(error.message, "error"); refreshServiceStatus(); }
+}
+
+async function changeStartAtLogin() {
+  try {
+    renderServiceStatus(await serviceRequest("/login", { enabled: $("#startAtLoginInput").checked }));
+    toast($("#startAtLoginInput").checked ? "Studio will start at login" : "Start at login turned off");
+  } catch (error) { toast(error.message, "error"); refreshServiceStatus(); }
+}
+
+async function installStudioUpdate() {
+  if (!await confirmAction("Update Studio", "Studio will download the update and restart. Your browser workspace stays saved locally.", "Update & restart")) return;
+  flushPersistence();
+  try {
+    serviceRestartPending = true;
+    renderServiceStatus(await serviceRequest("/update", {}));
+    $("#updateStatusText").textContent = "Updating Studio…";
+  } catch (error) {
+    serviceRestartPending = false;
+    toast(error.message, "error");
+  }
+}
+
+async function quitStudio() {
+  if (!await confirmAction("Quit Studio", "The local web service will stop. Your saved workspace remains in this browser.", "Quit Studio")) return;
+  flushPersistence();
+  try {
+    await serviceRequest("/quit", {});
+    $("#appSettingsDialog").close();
+    toast("Studio stopped. Use the launcher to reopen it.");
+  } catch (error) { toast(error.message, "error"); }
 }
 
 function closeMoreMenu() {
@@ -2137,6 +2246,17 @@ function installEvents() {
   $("#clearDataButton").addEventListener("click", clearAllData);
   $("#clearDataTabButton").addEventListener("click", clearAllData);
   $("#themeButton").addEventListener("click", toggleTheme);
+  $("#settingsMenuButton").addEventListener("click", openAppSettings);
+  $("#appSettingsButton").addEventListener("click", openAppSettings);
+  $("#updateAvailableButton").addEventListener("click", openAppSettings);
+  $("#closeAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
+  $("#doneAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
+  $("#checkUpdatesButton").addEventListener("click", checkStudioUpdates);
+  $("#installUpdateButton").addEventListener("click", installStudioUpdate);
+  $("#updateBranchSelect").addEventListener("change", changeUpdateBranch);
+  $("#startAtLoginInput").addEventListener("change", changeStartAtLogin);
+  $("#quitStudioButton").addEventListener("click", quitStudio);
+  $("#resetMenuButton").addEventListener("click", resetEverything);
   installPreviewResize();
   $("#undoButton").addEventListener("click", undo);
   $("#redoButton").addEventListener("click", redo);
@@ -2637,3 +2757,8 @@ installEvents();
 setPreviewWidth(ui.previewWidth, false);
 renderAll();
 showView(ui.view);
+refreshServiceStatus();
+window.setInterval(() => {
+  if (serviceRestartPending || $("#appSettingsDialog").open) refreshServiceStatus();
+}, 2500);
+window.setInterval(refreshServiceStatus, 30000);

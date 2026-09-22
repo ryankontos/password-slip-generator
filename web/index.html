@@ -16,11 +16,15 @@
       <span class="brand-mark">PS</span>
       <span>Password Slip Studio</span>
     </div>
-    <label class="title-control"><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status" role="status" aria-live="polite">Saved</span></label>
+    <label class="title-control"><span class="title-file-icon" aria-hidden="true">PDF</span><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status" role="status" aria-live="polite">Saved</span></label>
     <div class="header-actions">
-      <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
-      <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
+      <span class="header-history">
+        <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
+        <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
+      </span>
       <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
+      <button id="updateAvailableButton" class="button update-ready compact" hidden>Update available</button>
+      <button id="appSettingsButton" class="icon-button settings-trigger" title="App settings" aria-label="App settings">⚙</button>
       <button id="exportPdfButton" class="button primary compact">Export PDF</button>
       <button id="quickResetButton" class="button secondary compact" title="Reset everything">Reset</button>
       <button id="moreButton" class="icon-button" title="More actions" aria-label="More actions" aria-expanded="false">•••</button>
@@ -34,8 +38,10 @@
         <button id="openTemplatesButton"><span>◇</span> Templates</button>
         <button id="shortcutsButton"><span>⌘</span> Keyboard shortcuts</button>
         <button id="themeButton"><span>◐</span> Toggle theme</button>
+        <button id="settingsMenuButton"><span>⚙</span> App settings</button>
         <hr>
         <button id="clearDataButton"><span>⌫</span> Clear all data</button>
+        <button id="resetMenuButton"><span>↺</span> Reset everything</button>
       </div>
     </div>
   </header>
@@ -312,6 +318,22 @@
       </div>
       <footer class="modal-footer"><span>Esc closes dialogs</span><button class="button primary" value="default">Done</button></footer>
     </form>
+  </dialog>
+
+  <dialog id="appSettingsDialog" class="modal">
+    <section class="modal-card app-settings-card">
+      <header class="modal-header"><div><h2>App settings</h2></div><button id="closeAppSettingsButton" class="icon-button" aria-label="Close">×</button></header>
+      <div class="modal-body app-settings-body">
+        <div class="service-setting"><div><strong>Run in background</strong><p>Studio stays available after the launcher closes.</p></div><span id="backgroundStatus" class="service-badge">Checking…</span></div>
+        <div class="service-setting"><div><strong>Start at login</strong><p>Open Studio automatically when you sign in to this Mac.</p></div><label class="service-switch"><input id="startAtLoginInput" type="checkbox" aria-label="Start at login"><span></span></label></div>
+        <div class="service-update-section">
+          <div class="service-update-heading"><strong>Updates</strong><span id="serviceVersion" class="service-version"></span></div>
+          <div class="service-update-controls"><label>Branch <select id="updateBranchSelect" aria-label="Update branch"></select></label><button id="checkUpdatesButton" class="button secondary compact">Check now</button><button id="installUpdateButton" class="button primary compact" hidden>Update &amp; restart</button></div>
+          <p id="updateStatusText" class="service-message" role="status" aria-live="polite">Checking for updates…</p>
+        </div>
+      </div>
+      <footer class="modal-footer"><button id="quitStudioButton" class="button secondary danger">Quit Studio</button><button id="doneAppSettingsButton" class="button primary">Done</button></footer>
+    </section>
   </dialog>
 
   <dialog id="confirmDialog" class="modal">

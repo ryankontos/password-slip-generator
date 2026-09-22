@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 tmp/
+runtime/
 .DS_Store
 settings/settings.json
 settings/layout_settings.json
