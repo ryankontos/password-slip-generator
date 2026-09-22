@@ -7,6 +7,7 @@ const uid = (prefix = "id") => `${prefix}_${Date.now().toString(36)}_${Math.rand
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 const PREVIEW_MIN_WIDTH = 360;
 const PREVIEW_MAX_WIDTH = 920;
+const PREVIEW_MAX_ZOOM = 600;
 const clampPreviewWidth = (value) => Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, Number(value) || 520));
 const DOCUMENT_STORAGE_KEY = "password-slip-studio-document";
 const PREFERENCES_STORAGE_KEY = "password-slip-studio-preferences";
@@ -27,7 +28,7 @@ function loadStudioPreferences() {
   return {
     view: allowedViews.has(saved.view) ? saved.view : PREFERENCE_DEFAULTS.view,
     pageSize: allowedPageSizes.has(pageSize) ? pageSize : PREFERENCE_DEFAULTS.pageSize,
-    zoom: Number.isFinite(zoom) ? Math.min(300, Math.max(50, zoom)) : PREFERENCE_DEFAULTS.zoom,
+    zoom: Number.isFinite(zoom) ? Math.min(PREVIEW_MAX_ZOOM, Math.max(50, zoom)) : PREFERENCE_DEFAULTS.zoom,
     previewWidth: clampPreviewWidth(saved.previewWidth ?? legacyPreviewWidth ?? PREFERENCE_DEFAULTS.previewWidth),
     lastImportSheetName: String(saved.lastImportSheetName ?? legacySheet ?? ""),
     theme,
@@ -38,7 +39,7 @@ function saveStudioPreferences(patch = {}) {
   const current = loadStudioPreferences();
   const next = { ...current, ...patch };
   next.previewWidth = clampPreviewWidth(next.previewWidth);
-  next.zoom = Math.min(300, Math.max(50, Number(next.zoom) || PREFERENCE_DEFAULTS.zoom));
+  next.zoom = Math.min(PREVIEW_MAX_ZOOM, Math.max(50, Number(next.zoom) || PREFERENCE_DEFAULTS.zoom));
   next.pageSize = [25, 50, 100, 250].includes(Number(next.pageSize)) ? Number(next.pageSize) : PREFERENCE_DEFAULTS.pageSize;
   next.lastImportSheetName = String(next.lastImportSheetName || "");
   next.view = ["data", "columns", "rules", "layout"].includes(next.view) ? next.view : PREFERENCE_DEFAULTS.view;
@@ -2357,7 +2358,7 @@ function installEvents() {
   [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
   $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
   $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); schedulePdfPreview(true); });
-  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(300, ui.zoom + 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); schedulePdfPreview(true); });
+  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(PREVIEW_MAX_ZOOM, ui.zoom + 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); schedulePdfPreview(true); });
   $("#refreshPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
   $("#retryPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
 
