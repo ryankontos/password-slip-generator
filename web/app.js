@@ -2095,8 +2095,9 @@ function installEvents() {
     toast("Selected rows duplicated");
   });
   $("#hideRowsButton").addEventListener("click", () => {
+    const count = ui.selectedRows.size;
     commit((state) => state.rows.forEach((row) => { if (ui.selectedRows.has(row.id)) row.hidden = true; }));
-    toast(`${ui.selectedRows.size} slip${ui.selectedRows.size === 1 ? "" : "s"} hidden`);
+    toast(`${count} slip${count === 1 ? "" : "s"} hidden`);
   });
   $("#showRowsButton").addEventListener("click", () => {
     commit((state) => state.rows.forEach((row) => { if (ui.selectedRows.has(row.id)) row.hidden = false; }));
