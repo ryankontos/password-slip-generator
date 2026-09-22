@@ -2159,15 +2159,24 @@ function installEvents() {
     if (button) openRowOptions(button.closest("tr").dataset.rowId);
   });
   let draggedRowId = null;
+  const clearRowDragOver = () => $$("#dataBody tr.drag-over").forEach((row) => row.classList.remove("drag-over"));
   $("#dataBody").addEventListener("dragstart", (event) => {
     if (!event.target.classList.contains("row-number")) return event.preventDefault();
     draggedRowId = event.target.closest("tr").dataset.rowId;
+    clearRowDragOver();
     event.dataTransfer.effectAllowed = "move";
   });
-  $("#dataBody").addEventListener("dragover", (event) => { if (draggedRowId) event.preventDefault(); });
+  $("#dataBody").addEventListener("dragover", (event) => {
+    if (!draggedRowId) return;
+    event.preventDefault();
+    const target = event.target.closest("tr[data-row-id]");
+    clearRowDragOver();
+    if (target && target.dataset.rowId !== draggedRowId) target.classList.add("drag-over");
+  });
   $("#dataBody").addEventListener("drop", (event) => {
     event.preventDefault();
     const targetId = event.target.closest("tr")?.dataset.rowId;
+    clearRowDragOver();
     if (!draggedRowId || !targetId || draggedRowId === targetId) {
       draggedRowId = null;
       return;
@@ -2175,11 +2184,14 @@ function installEvents() {
     commit((state) => {
       const from = state.rows.findIndex((row) => row.id === draggedRowId);
       const to = state.rows.findIndex((row) => row.id === targetId);
-      if (from >= 0 && to >= 0) state.rows.splice(to, 0, state.rows.splice(from, 1)[0]);
+      if (from >= 0 && to >= 0) {
+        const [moved] = state.rows.splice(from, 1);
+        state.rows.splice(from < to ? to - 1 : to, 0, moved);
+      }
     });
     draggedRowId = null;
   });
-  $("#dataBody").addEventListener("dragend", () => { draggedRowId = null; });
+  $("#dataBody").addEventListener("dragend", () => { draggedRowId = null; clearRowDragOver(); });
 
   $("#clearSelectionButton").addEventListener("click", () => { clearRowSelection(); renderData(); schedulePdfPreview(); });
   $("#bulkEditButton").addEventListener("click", openBulkEdit);
@@ -2242,7 +2254,8 @@ function installEvents() {
     commit((state) => {
       const from = state.columns.findIndex((column) => column.id === draggedColumnId);
       const to = state.columns.findIndex((column) => column.id === target);
-      state.columns.splice(to, 0, state.columns.splice(from, 1)[0]);
+      const [moved] = state.columns.splice(from, 1);
+      state.columns.splice(from < to ? to - 1 : to, 0, moved);
     });
   });
   $("#columnList").addEventListener("dragend", () => { draggedColumnId = null; $$(".column-row").forEach((row) => row.classList.remove("dragging", "drag-over")); });
@@ -2378,7 +2391,8 @@ function installEvents() {
     commit((state) => {
       const from = state.rules.findIndex((rule) => rule.id === draggedRuleId);
       const to = state.rules.findIndex((rule) => rule.id === targetId);
-      state.rules.splice(to, 0, state.rules.splice(from, 1)[0]);
+      const [moved] = state.rules.splice(from, 1);
+      state.rules.splice(from < to ? to - 1 : to, 0, moved);
     });
     draggedRuleId = null;
   });

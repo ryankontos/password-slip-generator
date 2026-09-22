@@ -154,6 +154,7 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .data-table td { height: 44px; padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--surface); }
 .data-table tr:hover td { background: var(--surface-soft); }
 .data-table tr.selected td { background: var(--accent-soft); }
+.data-table tr.drag-over td { box-shadow: inset 0 2px 0 var(--accent); }
 .data-table tr.excluded td { opacity: .55; background-image: repeating-linear-gradient(-45deg, transparent, transparent 5px, color-mix(in srgb, var(--line) 25%, transparent) 5px, color-mix(in srgb, var(--line) 25%, transparent) 6px); }
 .data-table td.select-cell, .data-table td.row-number { position: sticky; z-index: 1; background: var(--surface); }
 .data-table td.select-cell { left: 0; }
