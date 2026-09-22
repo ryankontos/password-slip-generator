@@ -24,7 +24,7 @@ python3 src/password_slips.py
 
 - Start with an empty data set. Define fields, add rows manually, or import a workbook.
 - Edit rows inline, paste tab-separated blocks from Excel or Sheets, duplicate rows, reorder rows, hide slips, bulk edit selected rows, and export CSV.
-- Use the `New row` button at the bottom of the data table or `⌘↵`. A field can provide a default value for every manually added row.
+- Use the `New row` button at the bottom of the data table or `⌘↵`. A field can provide a default value for every manually added row. In the grid, `Enter`/`⇧Enter` moves down/up and `Tab`/`⇧Tab` moves across fields; reaching the end with `Tab` adds a row.
 - Filter rows to work quickly. Filtering clears the selection; with no rows selected, PDF preview and export use every printable row.
 - Import `.xlsx`, `.xlsm`, and `.csv` files. The default is to replace existing rows. Select a worksheet, choose all or specific spreadsheet row numbers, mark imported rows hidden, and opt in to fields one at a time.
 - Replace the current field set or keep it and map spreadsheet fields into existing fields. New fields can have their own display names. Field mappings are remembered by sheet name and headers, not by the workbook file.
@@ -34,7 +34,7 @@ python3 src/password_slips.py
 - Hidden imported rows remain available in the rule tester and data model but are not shown in the data list or printed.
 - Use Manage hidden below the data table to selectively make hidden rows printable again without putting them back into the main list.
 - Choose one of two layouts: Horizontal (the compact label band format) or Stacked (better for many fields, with an optional two-column arrangement). Configure paper, orientation, margin, gap, slip height, colours, font families, label/value sizes, label case, borders, field dividers, cut marks, footer, and filename date suffix.
-- The preview is generated from the same server-rendered PDF used for export. It updates after edits and selection changes, can be zoomed, and the divider beside it can be dragged or adjusted with the keyboard.
+- The preview is generated from the same server-rendered PDF used for export. It updates while editing and after selection changes, can be zoomed from 50% to 600%, and the divider beside it can be dragged or adjusted with the keyboard.
 - Name the document in the header; the title becomes the PDF filename. Save named colour palettes, workspaces, and templates. These are persisted locally and workspace/template files include document settings, palettes, preferences, and reusable import mappings.
 - Use `⌘K` for commands. Other shortcuts are listed in the Keyboard shortcuts dialog. `⌘Z` and `⇧⌘Z` keep native text-field undo available while editing.
 
