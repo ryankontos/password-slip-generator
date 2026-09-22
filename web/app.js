@@ -489,14 +489,25 @@ function includedRows() {
   return includedRowsFor(documentState);
 }
 
-function printScopeRows() {
-  const printable = includedRows();
+function previewDocumentSource() {
+  const source = clone(documentState);
+  const input = document.activeElement;
+  if (!input?.classList?.contains("cell-input")) return source;
+  const rowId = input.closest("tr[data-row-id]")?.dataset.rowId;
+  const columnId = input.dataset.columnId;
+  const row = source.rows.find((item) => item.id === rowId);
+  if (row && columnId) row.values[columnId] = input.value;
+  return source;
+}
+
+function printScopeRows(source = documentState) {
+  const printable = includedRowsFor(source);
   return ui.selectedRows.size ? printable.filter((row) => ui.selectedRows.has(row.id)) : printable;
 }
 
 function printScopeSource() {
-  const source = clone(documentState);
-  source.rows = printScopeRows().map((row) => clone(row));
+  const source = previewDocumentSource();
+  source.rows = printScopeRows(source).map((row) => clone(row));
   return source;
 }
 
@@ -621,7 +632,7 @@ function moveGridCell(input, rowDirection = 0, columnDirection = 0) {
 
 function renderSelectionToolbar() {
   const count = [...ui.selectedRows].filter((id) => documentState.rows.some((row) => row.id === id)).length;
-  const printableCount = printScopeRows().length;
+  const printableCount = printScopeRows(previewDocumentSource()).length;
   $("#selectionToolbar").hidden = count === 0;
   $("#selectionCount").textContent = printableCount === count ? `${count} selected` : `${count} selected · ${printableCount} printable`;
   $("#selectionCount").classList.toggle("warning-text", printableCount < count);
@@ -892,7 +903,7 @@ function schedulePdfPreview(immediate = false) {
     $("#previewStats").textContent = documentState.rows.length ? "No columns" : "No rows";
     return;
   }
-  const printableCount = printScopeRows().length;
+  const printableCount = printScopeRows(previewDocumentSource()).length;
   if (!printableCount) {
     clearPdfPreview("No printable slips. Show a hidden row or change the hide-slip rules to render a PDF.");
     $("#previewStats").textContent = `0 printable · ${documentState.rows.length} stored`;
@@ -946,11 +957,12 @@ async function renderPdfPreview() {
   const renderAttempt = async (attempt) => {
     if (revision !== ui.previewRevision) return;
     try {
+      const source = printScopeSource();
       const response = await fetch("/api/pdf", {
         method: "POST",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document: printScopeSource() }),
+        body: JSON.stringify({ document: source }),
       });
       if (!response.ok) {
         let message = "The PDF preview could not be rendered.";
@@ -969,7 +981,7 @@ async function renderPdfPreview() {
       frame.removeAttribute("src");
       $("#previewPlaceholder").hidden = true;
       clearPreviewError();
-      const printableCount = printScopeRows().length;
+      const printableCount = source.rows.length;
       const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
       const pageLabel = `${pageCount} page${pageCount === 1 ? "" : "s"}`;
       $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${pageLabel} · ${documentState.layout.mode}`;
@@ -2077,6 +2089,9 @@ function installEvents() {
       const columnId = event.target.dataset.columnId;
       commit((state) => { state.rows.find((row) => row.id === rowId).values[columnId] = event.target.value; });
     }
+  });
+  $("#dataBody").addEventListener("input", (event) => {
+    if (event.target.classList.contains("cell-input")) schedulePdfPreview();
   });
   $("#dataBody").addEventListener("keydown", (event) => {
     const input = event.target.closest(".cell-input");
