@@ -976,6 +976,10 @@ function renderPreview() {
 }
 
 function addRow() {
+  // A newly created row has no guarantee of matching the active filter. Clear
+  // it so the row is immediately visible and the first cell can receive focus.
+  ui.search = "";
+  ui.dataPage = 0;
   const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, column.defaultValue ?? ""])), hidden: false, overrides: {} };
   commit((state) => state.rows.push(row));
   showView("data");
@@ -983,6 +987,7 @@ function addRow() {
 }
 
 function addColumn(label = "New field") {
+  ui.fieldSearch = "";
   const id = uniqueColumnId(label);
   commit((state) => {
     state.columns.push({ id, label, sourceNames: [], group: "", type: "text", style: "standard", valueAlign: "default", defaultValue: "", visibility: "always" });
@@ -1002,6 +1007,7 @@ function uniqueColumnId(label, existing = documentState.columns) {
 }
 
 function addRule() {
+  ui.ruleSearch = "";
   const first = documentState.columns[0]?.id || "";
   const rule = { id: uid("rule"), name: "New rule", enabled: true, action: "hide_field", target: first, match: "all", conditions: [{ field: first, operator: "empty", value: "" }] };
   commit((state) => state.rules.push(rule));
