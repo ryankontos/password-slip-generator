@@ -586,17 +586,34 @@ function commitGridCellValue(input) {
   return true;
 }
 
-function moveGridCell(input, direction) {
+function moveGridCell(input, rowDirection = 0, columnDirection = 0) {
   const rowId = input.closest("tr[data-row-id]")?.dataset.rowId;
   const columnId = input.dataset.columnId;
   if (!rowId || !columnId) return;
   commitGridCellValue(input);
   const visible = filteredRows();
+  const columns = documentState.columns;
   const rowIndex = visible.findIndex((item) => item.id === rowId);
-  const nextRow = visible[rowIndex + direction];
+  const columnIndex = columns.findIndex((column) => column.id === columnId);
+  if (rowIndex < 0 || columnIndex < 0) return;
+  if (columnDirection) {
+    const nextColumnIndex = columnIndex + columnDirection;
+    if (nextColumnIndex >= 0 && nextColumnIndex < columns.length) {
+      focusGridCell(rowId, columns[nextColumnIndex].id);
+      return;
+    }
+    const nextRow = visible[rowIndex + (columnDirection > 0 ? 1 : -1)];
+    if (nextRow) {
+      focusGridCell(nextRow.id, columns[columnDirection > 0 ? 0 : columns.length - 1].id);
+    } else if (columnDirection > 0 && !ui.search) {
+      addRow();
+    }
+    return;
+  }
+  const nextRow = visible[rowIndex + rowDirection];
   if (nextRow) {
     focusGridCell(nextRow.id, columnId);
-  } else if (direction > 0 && !ui.search) {
+  } else if (rowDirection > 0 && !ui.search) {
     addRow();
   }
 }
@@ -2074,9 +2091,15 @@ function installEvents() {
       }
       return;
     }
-    if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === "Tab") {
+      event.preventDefault();
+      moveGridCell(input, 0, event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key !== "Enter") return;
     event.preventDefault();
-    moveGridCell(input, event.shiftKey ? -1 : 1);
+    moveGridCell(input, event.shiftKey ? -1 : 1, 0);
   });
   $("#dataBody").addEventListener("paste", pasteIntoDataGrid);
   $("#dataBody").addEventListener("click", (event) => {
