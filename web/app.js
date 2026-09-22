@@ -2201,7 +2201,9 @@ function installEvents() {
       return;
     }
     event.preventDefault();
-    const checked = !checkbox.checked;
+    // The browser has already applied the checkbox toggle by the time the
+    // click handler runs. Use that resulting state for the whole range.
+    const checked = checkbox.checked;
     const start = Math.min(anchorIndex, targetIndex);
     const end = Math.max(anchorIndex, targetIndex);
     visible.slice(start, end + 1).forEach((row) => checked ? ui.selectedRows.add(row.id) : ui.selectedRows.delete(row.id));
