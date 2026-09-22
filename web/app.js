@@ -409,6 +409,7 @@ function flushPersistence() {
 function restore(serialised) {
   documentState = normaliseDocument(JSON.parse(serialised));
   ui.selectedRows.clear();
+  ui.defaultValueEdits.clear();
   renderAll();
   changed();
 }
@@ -1281,6 +1282,7 @@ function applyOpenedDocument(incoming, palettes, message, preferences = null, im
   if (importPreferences) restoreImportPreferences(importPreferences);
   applyWorkspacePreferences(preferences, restoreView);
   ui.selectedRows.clear();
+  ui.defaultValueEdits.clear();
   ui.search = "";
   ui.fieldSearch = "";
   ui.ruleSearch = "";
@@ -1797,6 +1799,7 @@ async function confirmImport() {
 
 function resetWorkspaceUi() {
   ui.selectedRows.clear();
+  ui.defaultValueEdits.clear();
   ui.search = "";
   ui.fieldSearch = "";
   ui.ruleSearch = "";
