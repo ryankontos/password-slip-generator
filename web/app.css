@@ -139,10 +139,6 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .search-control { height: 34px; min-width: 175px; display: flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--subtle); }
 .search-control:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .search-control input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; cursor: text; }
-.sort-control { height: 34px; display: flex; align-items: center; gap: 5px; padding-left: 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--muted); font-size: 11px; }
-.sort-control select { height: 28px; max-width: 112px; padding: 0 4px; border: 0; background: transparent; color: var(--ink); font-size: 11px; }
-.sort-control select:last-child { max-width: 53px; border-left: 1px solid var(--line); }
-
 .selection-toolbar { min-height: 42px; display: flex; align-items: center; gap: 4px; padding: 5px 13px; border-bottom: 1px solid var(--line); background: var(--accent-soft); }
 .selection-toolbar strong { margin-right: 8px; color: var(--accent); font-size: 12px; }
 .push-right { margin-left: auto; }
