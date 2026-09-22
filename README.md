@@ -34,7 +34,7 @@ python3 src/password_slips.py
 - Hidden imported rows remain available in the rule tester and data model but are not shown in the data list or printed.
 - Use Manage hidden below the data table to selectively make hidden rows printable again without putting them back into the main list.
 - Choose one of two layouts: Horizontal (the compact label band format) or Stacked (better for many fields, with an optional two-column arrangement). Configure paper, orientation, margin, gap, slip height, colours, font families, label/value sizes, label case, borders, field dividers, cut marks, footer, and filename date suffix.
-- The preview is generated from the same server-rendered PDF used for export. It updates while editing and after selection changes, can be zoomed from 50% to 600%, and the divider beside it can be dragged or adjusted with the keyboard.
+- The preview is generated from the same server-rendered PDF used for export. It updates while editing and after selection changes, renders large documents page-by-page as you scroll, can be zoomed from 50% to 600%, and the divider beside it can be dragged or adjusted with the keyboard.
 - Name the document in the header; the title becomes the PDF filename. Save named colour palettes, workspaces, and templates. These are persisted locally and workspace/template files include document settings, palettes, preferences, and reusable import mappings.
 - Use `⌘K` for commands. Other shortcuts are listed in the Keyboard shortcuts dialog. `⌘Z` and `⇧⌘Z` keep native text-field undo available while editing.
 

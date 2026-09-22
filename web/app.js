@@ -269,6 +269,7 @@ const ui = {
   previewReady: false,
   previewTimer: null,
   previewRevision: 0,
+  previewCleanup: null,
   lastImportSheetName: initialPreferences.lastImportSheetName,
   defaultValueEdits: new Set(),
   selectionAnchor: "",
@@ -889,8 +890,15 @@ function clearPreviewError() {
   if (error) error.hidden = true;
 }
 
+function disposePdfPreview() {
+  const cleanup = ui.previewCleanup;
+  ui.previewCleanup = null;
+  if (cleanup) Promise.resolve(cleanup()).catch(() => {});
+}
+
 function clearPdfPreview(message = "Add or import rows to preview the PDF.", isError = false) {
   ui.previewRevision += 1;
+  disposePdfPreview();
   ui.previewReady = false;
   const frame = $("#pdfPreviewFrame");
   frame.hidden = true;
@@ -925,18 +933,53 @@ async function renderPdfPages(bytes, revision) {
   const pdfjs = await loadPdfRenderer();
   const loadingTask = pdfjs.getDocument({ data: bytes });
   const pdf = await loadingTask.promise;
-  try {
-    if (revision !== ui.previewRevision) return;
-    const viewport = $("#previewViewport");
-    const pages = $("#pdfPreviewPages");
-    const pageFragment = document.createDocumentFragment();
-    const fitWidth = Math.max(1, viewport.clientWidth - 32);
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      if (revision !== ui.previewRevision) return;
-      const page = await pdf.getPage(pageNumber);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const fitScale = Math.min(1, fitWidth / baseViewport.width);
-      const pageViewport = page.getViewport({ scale: fitScale * (ui.zoom / 100) });
+  if (revision !== ui.previewRevision) {
+    await pdf.destroy();
+    return null;
+  }
+  const viewport = $("#previewViewport");
+  const pages = $("#pdfPreviewPages");
+  const pageFragment = document.createDocumentFragment();
+  const fitWidth = Math.max(1, viewport.clientWidth - 32);
+  const firstPage = await pdf.getPage(1);
+  const baseViewport = firstPage.getViewport({ scale: 1 });
+  const fitScale = Math.min(1, fitWidth / baseViewport.width);
+  const displayScale = fitScale * (ui.zoom / 100);
+  const displayViewport = firstPage.getViewport({ scale: displayScale });
+  const pageWidth = Math.ceil(displayViewport.width);
+  const pageHeight = Math.ceil(displayViewport.height);
+  const wrappers = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "pdf-preview-page";
+    wrapper.dataset.pageNumber = String(pageNumber);
+    wrapper.dataset.rendered = "false";
+    wrapper.style.width = `${pageWidth}px`;
+    wrapper.style.height = `${pageHeight}px`;
+    wrapper.setAttribute("role", "img");
+    wrapper.setAttribute("aria-label", `PDF page ${pageNumber} of ${pdf.numPages}`);
+    wrapper.textContent = `Page ${pageNumber}`;
+    wrappers.push(wrapper);
+    pageFragment.append(wrapper);
+  }
+  pages.replaceChildren(pageFragment);
+  pages.hidden = false;
+  $("#pdfPreviewFrame").hidden = true;
+  $("#pdfPreviewFrame").removeAttribute("src");
+
+  let disposed = false;
+  let observer = null;
+  const rendered = new WeakSet();
+  const rendering = new WeakSet();
+  const renderPage = async (wrapper) => {
+    if (disposed || revision !== ui.previewRevision || rendered.has(wrapper) || rendering.has(wrapper)) return;
+    rendering.add(wrapper);
+    const pageNumber = Number(wrapper.dataset.pageNumber);
+    let page = null;
+    try {
+      page = pageNumber === 1 ? firstPage : await pdf.getPage(pageNumber);
+      if (disposed || revision !== ui.previewRevision) return;
+      const pageViewport = page.getViewport({ scale: displayScale });
       const outputScale = Math.max(1, window.devicePixelRatio || 1);
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.ceil(pageViewport.width * outputScale));
@@ -945,23 +988,50 @@ async function renderPdfPages(bytes, revision) {
       canvas.style.height = `${Math.ceil(pageViewport.height)}px`;
       canvas.setAttribute("role", "img");
       canvas.setAttribute("aria-label", `PDF page ${pageNumber} of ${pdf.numPages}`);
-      pageFragment.append(canvas);
       const renderViewport = page.getViewport({ scale: pageViewport.scale * outputScale });
       await page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: renderViewport }).promise;
+      if (disposed || revision !== ui.previewRevision) return;
+      wrapper.replaceChildren(canvas);
+      wrapper.dataset.rendered = "true";
+      rendered.add(wrapper);
+    } finally {
+      rendering.delete(wrapper);
+      page?.cleanup?.();
     }
-    if (revision !== ui.previewRevision) return;
-    pages.replaceChildren(pageFragment);
-    pages.hidden = false;
-    $("#pdfPreviewFrame").hidden = true;
-    $("#pdfPreviewFrame").removeAttribute("src");
-    return pdf.numPages;
-  } finally {
-    await pdf.destroy();
+  };
+  const renderDeferredPage = (wrapper) => {
+    renderPage(wrapper).catch(() => {
+      if (disposed || revision !== ui.previewRevision) return;
+      wrapper.dataset.rendered = "error";
+      wrapper.textContent = "Page unavailable";
+    });
+  };
+  if (window.IntersectionObserver) {
+    observer = new IntersectionObserver((entries) => entries.filter((entry) => entry.isIntersecting).forEach((entry) => renderDeferredPage(entry.target)), { root: viewport, rootMargin: "600px 0px" });
+    wrappers.forEach((wrapper) => observer.observe(wrapper));
+  } else {
+    wrappers.forEach(renderDeferredPage);
   }
+  try {
+    await renderPage(wrappers[0]);
+  } catch (error) {
+    disposed = true;
+    observer?.disconnect();
+    await pdf.destroy();
+    throw error;
+  }
+  const cleanup = async () => {
+    disposed = true;
+    observer?.disconnect();
+    await pdf.destroy();
+  };
+  ui.previewCleanup = cleanup;
+  return pdf.numPages;
 }
 
 async function renderPdfPreview() {
   const revision = ++ui.previewRevision;
+  disposePdfPreview();
   const renderAttempt = async (attempt) => {
     if (revision !== ui.previewRevision) return;
     try {
