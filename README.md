@@ -32,6 +32,7 @@ python3 src/password_slips.py
 - Set field visibility to Always, Only with a value (an alphanumeric character is required), or Hidden by default. Rules can show/hide fields or hide an entire slip using all/any conditions and a Not switch. Hide wins when show and hide rules conflict.
 - Select rows to customize field visibility together, apply one selected row's visibility to the selection, or reset selected rows to automatic visibility.
 - Hidden imported rows remain available in the rule tester and data model but are not shown in the data list or printed.
+- Use Manage hidden below the data table to selectively make hidden rows printable again without putting them back into the main list.
 - Choose one of two layouts: Horizontal (the compact label band format) or Stacked (better for many fields, with an optional two-column arrangement). Configure paper, orientation, margin, gap, slip height, colours, font families, label/value sizes, label case, borders, field dividers, cut marks, footer, and filename date suffix.
 - The preview is generated from the same server-rendered PDF used for export. It updates after edits and selection changes, can be zoomed, and the divider beside it can be dragged or adjusted with the keyboard.
 - Name the document in the header; the title becomes the PDF filename. Save named colour palettes, workspaces, and templates. These are persisted locally and workspace/template files include document settings, palettes, preferences, and reusable import mappings.
