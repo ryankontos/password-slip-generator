@@ -1335,7 +1335,7 @@ async function exportPdf(source = documentState, filenameSuffix = "", triggerBut
 }
 
 async function exportSelectedRows() {
-  await exportCurrentScope();
+  await exportCurrentScope($("#exportSelectedButton"));
 }
 
 async function exportCurrentScope(triggerButton = null) {
@@ -1419,6 +1419,7 @@ function applyOpenedDocument(incoming, palettes, message, preferences = null, im
 }
 
 async function loadWorkspaceFile(file) {
+  if (!file) return;
   try {
     const parsed = JSON.parse(await file.text());
     const payload = studioFilePayload(parsed);
@@ -1426,6 +1427,9 @@ async function loadWorkspaceFile(file) {
     applyOpenedDocument(payload.document, payload.palettes, "Workspace opened", payload.preferences, payload.importPreferences, true);
   } catch (error) {
     toast(error.message || "The workspace could not be opened.", "error");
+  } finally {
+    // Let the user choose the same file again after a failed or repeated open.
+    $("#loadWorkspaceInput").value = "";
   }
 }
 
@@ -1591,6 +1595,9 @@ async function importWorkbook(file) {
   } catch (error) {
     $("#importMeta").textContent = error.message || "The workbook could not be imported.";
     toast(error.message || "The workbook could not be imported.", "error");
+  } finally {
+    // Selecting the same workbook again should still fire the file input.
+    $("#workbookInput").value = "";
   }
 }
 
@@ -2520,7 +2527,14 @@ function installEvents() {
   $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); event.currentTarget.classList.add("drag-over"); });
   $("#dropZone").addEventListener("dragleave", (event) => event.currentTarget.classList.remove("drag-over"));
   $("#dropZone").addEventListener("drop", (event) => { event.preventDefault(); event.currentTarget.classList.remove("drag-over"); importWorkbook(event.dataTransfer.files[0]); });
-  $("#importSheetSelect").addEventListener("change", () => { rememberImportSheet(); renderImportMapping(); });
+  $("#importSheetSelect").addEventListener("change", () => {
+    // Row numbers belong to the selected sheet. Keeping them while switching
+    // sheets is an easy way to silently import the wrong rows.
+    $("#importRowNumbers").value = "";
+    $("#importHiddenRowNumbers").value = "";
+    rememberImportSheet();
+    renderImportMapping();
+  });
   $("#importMode").addEventListener("change", updateImportModeNotice);
   $("#importColumnMode").addEventListener("change", updateImportModeNotice);
   $("#importRowVisibility").addEventListener("change", updateImportModeNotice);
