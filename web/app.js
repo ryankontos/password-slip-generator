@@ -582,11 +582,6 @@ function renderSelectionToolbar() {
   if (customizeButton) customizeButton.disabled = count === 0;
   const resetButton = $("#resetSelectedLayoutsButton");
   if (resetButton) resetButton.disabled = count === 0;
-  const copyButton = $("#applyRowLayoutToSelectionButton");
-  if (copyButton) {
-    copyButton.disabled = count === 0;
-    copyButton.textContent = count ? `Copy this customization to ${count} selected` : "Select rows to copy this customization";
-  }
 }
 
 function openSelectedRowOptions() {

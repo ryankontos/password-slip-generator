@@ -30,6 +30,7 @@ python3 src/password_slips.py
 - Replace the current field set or keep it and map spreadsheet fields into existing fields. New fields can have their own display names. Field mappings are remembered by sheet name and headers, not by the workbook file.
 - Fields default to text. Password-like headers are inferred as password fields; all other imported fields remain text unless changed manually.
 - Set field visibility to Always, Only with a value (an alphanumeric character is required), or Hidden by default. Rules can show/hide fields or hide an entire slip using all/any conditions and a Not switch. Hide wins when show and hide rules conflict.
+- Select rows to customize field visibility together, apply one selected row's visibility to the selection, or reset selected rows to automatic visibility.
 - Hidden imported rows remain available in the rule tester and data model but are not shown in the data list or printed.
 - Choose one of two layouts: Horizontal (the compact label band format) or Stacked (better for many fields, with an optional two-column arrangement). Configure paper, orientation, margin, gap, slip height, colours, font families, label/value sizes, label case, borders, field dividers, cut marks, footer, and filename date suffix.
 - The preview is generated from the same server-rendered PDF used for export. It updates after edits and selection changes, can be zoomed, and the divider beside it can be dragged or adjusted with the keyboard.
