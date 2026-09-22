@@ -91,6 +91,7 @@
         <div class="table-footer">
           <button id="appendRowButton" class="button secondary compact">＋ New row</button>
           <span id="visibleRowCount"></span>
+          <button id="manageHiddenButton" class="text-button hidden-manager-button" type="button" hidden>Manage hidden</button>
           <div id="dataPagination" class="data-pagination" aria-label="Data pagination">
             <label>Rows<select id="pageSizeInput" aria-label="Rows per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="250">250</option></select></label>
             <button id="dataPrevButton" class="icon-button small" type="button" aria-label="Previous data page" title="Previous data page">‹</button>
@@ -239,6 +240,17 @@
         <div id="rowOverrideList" class="override-list"></div>
       </div>
       <footer class="modal-footer"><span>Automatic uses the column and rule settings.</span><button id="copyRowVisibilityButton" class="button secondary compact" type="button" hidden>Apply to selected rows</button><button class="button primary" value="default">Done</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="hiddenRowsDialog" class="modal">
+    <form method="dialog" class="modal-card small-card">
+      <header class="modal-header"><div><h2>Hidden rows</h2><p id="hiddenRowsSummary">Hidden rows stay available to rules but are not printed.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body hidden-rows-body">
+        <label class="hidden-row-select-all"><input id="selectAllHiddenRows" type="checkbox" aria-label="Select all hidden rows"><span>Select all hidden rows</span></label>
+        <div id="hiddenRowsList" class="hidden-rows-list"></div>
+      </div>
+      <footer class="modal-footer"><span>Showing a row makes it printable again.</span><button id="showHiddenSelectedButton" class="button primary" type="button" disabled>Show selected</button><button class="button secondary" value="default">Done</button></footer>
     </form>
   </dialog>
 

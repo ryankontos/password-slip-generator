@@ -305,7 +305,7 @@ function normaliseDocument(input) {
     column.label = String(column.label || `Column ${index + 1}`);
     column.group = String(column.group || "").trim();
     column.type = ["text", "password", "number", "date", "url"].includes(column.type) ? column.type : "text";
-    column.style ||= column.type === "password" ? "mono" : "standard";
+    column.style = ["standard", "strong", "mono"].includes(column.style) ? column.style : (column.type === "password" ? "mono" : "standard");
     column.valueTransform = ["as_entered", "upper", "lower", "title", "mask_last4"].includes(column.valueTransform) ? column.valueTransform : "as_entered";
     column.valueAlign = ["default", "left", "center", "right"].includes(column.valueAlign) ? column.valueAlign : "default";
     column.defaultValue = String(column.defaultValue ?? "");
@@ -536,6 +536,9 @@ function renderData() {
   const rowText = ui.search ? `${allRows.length} of ${visibleTotal} rows` : `${allRows.length} rows`;
   $("#visibleRowCount").textContent = hidden ? `${rowText} · ${hidden} hidden` : rowText;
   $("#visibleRowCount").classList.toggle("warning-text", hidden > 0);
+  const hiddenButton = $("#manageHiddenButton");
+  hiddenButton.hidden = hidden === 0;
+  hiddenButton.textContent = `Manage hidden (${hidden})`;
   $("#pageSizeInput").value = String(ui.pageSize);
   $("#dataPageLabel").textContent = allRows.length ? `Page ${ui.dataPage + 1} / ${pageCount}` : "No pages";
   $("#dataPrevButton").disabled = !allRows.length || ui.dataPage <= 0;
@@ -944,6 +947,41 @@ function openRowOptions(rowId) {
   const copyButton = $("#copyRowVisibilityButton");
   if (copyButton) copyButton.hidden = !(ui.selectedRows.size > 1 && ui.selectedRows.has(rowId));
   if (!$("#rowOptionsDialog").open) $("#rowOptionsDialog").showModal();
+}
+
+function hiddenRowLabel(row, index) {
+  const value = documentState.columns.map((column) => String(row.values?.[column.id] ?? "").trim()).find(Boolean);
+  return value || `Row ${documentState.rows.indexOf(row) + 1 || index + 1}`;
+}
+
+function renderHiddenRows() {
+  const rows = documentState.rows.filter((row) => row.hidden);
+  $("#hiddenRowsSummary").textContent = rows.length ? `${rows.length} hidden row${rows.length === 1 ? "" : "s"} · available to rules, not printed` : "No hidden rows";
+  $("#hiddenRowsList").innerHTML = rows.map((row, index) => `<label class="hidden-row-item"><input class="hidden-row-checkbox" type="checkbox" data-row-id="${escapeHtml(row.id)}" aria-label="Select hidden row ${index + 1}"><strong>${escapeHtml(hiddenRowLabel(row, index))}</strong><small>Row ${documentState.rows.indexOf(row) + 1}</small></label>`).join("") || `<div class="template-empty">Hidden rows will appear here.</div>`;
+  $("#selectAllHiddenRows").checked = false;
+  $("#selectAllHiddenRows").disabled = !rows.length;
+  $("#showHiddenSelectedButton").disabled = true;
+}
+
+function openHiddenRows() {
+  if (!documentState.rows.some((row) => row.hidden)) { toast("There are no hidden rows"); return; }
+  renderHiddenRows();
+  $("#hiddenRowsDialog").showModal();
+}
+
+function updateHiddenRowSelection() {
+  const checks = $$(".hidden-row-checkbox", $("#hiddenRowsList"));
+  const selected = checks.filter((input) => input.checked).length;
+  $("#selectAllHiddenRows").checked = Boolean(checks.length && selected === checks.length);
+  $("#showHiddenSelectedButton").disabled = selected === 0;
+}
+
+function showSelectedHiddenRows() {
+  const ids = new Set($$(".hidden-row-checkbox:checked", $("#hiddenRowsList")).map((input) => input.dataset.rowId));
+  if (!ids.size) return;
+  commit((state) => state.rows.forEach((row) => { if (ids.has(row.id)) row.hidden = false; }));
+  $("#hiddenRowsDialog").close();
+  toast(`${ids.size} hidden row${ids.size === 1 ? "" : "s"} made printable`);
 }
 
 function resetSelectedVisibility() {
@@ -1821,6 +1859,7 @@ function installEvents() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
   ["#addRowButton", "#appendRowButton"].forEach((selector) => $(selector).addEventListener("click", addRow));
   $("#dataImportButton").addEventListener("click", openImport);
+  $("#manageHiddenButton").addEventListener("click", openHiddenRows);
   $("#addColumnButton").addEventListener("click", () => addColumn());
   $("#addRuleButton").addEventListener("click", addRule);
   $("#commandButton").addEventListener("click", openCommands);
@@ -2205,6 +2244,12 @@ function installEvents() {
   });
 
   $("#copyRowVisibilityButton").addEventListener("click", copyRowVisibilityToSelection);
+  $("#hiddenRowsList").addEventListener("change", updateHiddenRowSelection);
+  $("#selectAllHiddenRows").addEventListener("change", (event) => {
+    $$(".hidden-row-checkbox", $("#hiddenRowsList")).forEach((input) => { input.checked = event.target.checked; });
+    updateHiddenRowSelection();
+  });
+  $("#showHiddenSelectedButton").addEventListener("click", showSelectedHiddenRows);
 
   $("#rowOverrideList").addEventListener("change", (event) => {
     const columnId = event.target.dataset.columnId;
