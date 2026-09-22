@@ -2116,14 +2116,18 @@ function installEvents() {
   $("#dataBody").addEventListener("drop", (event) => {
     event.preventDefault();
     const targetId = event.target.closest("tr")?.dataset.rowId;
-    if (!draggedRowId || !targetId || draggedRowId === targetId) return;
+    if (!draggedRowId || !targetId || draggedRowId === targetId) {
+      draggedRowId = null;
+      return;
+    }
     commit((state) => {
       const from = state.rows.findIndex((row) => row.id === draggedRowId);
       const to = state.rows.findIndex((row) => row.id === targetId);
-      state.rows.splice(to, 0, state.rows.splice(from, 1)[0]);
+      if (from >= 0 && to >= 0) state.rows.splice(to, 0, state.rows.splice(from, 1)[0]);
     });
     draggedRowId = null;
   });
+  $("#dataBody").addEventListener("dragend", () => { draggedRowId = null; });
 
   $("#clearSelectionButton").addEventListener("click", () => { ui.selectedRows.clear(); renderData(); schedulePdfPreview(); });
   $("#bulkEditButton").addEventListener("click", openBulkEdit);
