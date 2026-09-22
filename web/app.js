@@ -312,6 +312,10 @@ function normaliseDocument(input) {
   document.layout = { ...defaultLayout, ...(document.layout || {}) };
   document.layout.mode = document.layout.mode === "stacked" ? "stacked" : "horizontal";
   document.layout.stackedColumns = Number(document.layout.stackedColumns) === 2 ? 2 : 1;
+  document.layout.font = ["Helvetica", "Times-Roman", "Courier"].includes(document.layout.font) ? document.layout.font : defaultLayout.font;
+  document.layout.labelFont = ["Helvetica", "Times-Roman", "Courier"].includes(document.layout.labelFont) ? document.layout.labelFont : defaultLayout.labelFont;
+  document.layout.labelCase = ["original", "upper", "title"].includes(document.layout.labelCase) ? document.layout.labelCase : defaultLayout.labelCase;
+  document.layout.valueAlign = ["left", "center", "right"].includes(document.layout.valueAlign) ? document.layout.valueAlign : defaultLayout.valueAlign;
   document.layout.appendDateToFilename = Boolean(document.layout.appendDateToFilename);
   document.columns.forEach((column, index) => {
     column.id = String(column.id || uniqueColumnId(`column_${index + 1}`, document.columns));
