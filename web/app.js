@@ -779,8 +779,8 @@ function renderRules() {
   $("#rulesEmpty").hidden = Boolean(documentState.rules.length);
 }
 
-// The preview is the real server-rendered PDF. The browser's PDF viewer handles
-// pagination and crisp scaling; the studio only controls when it is regenerated.
+// The preview is rendered from the same server-generated PDF bytes used for export.
+// Keeping pagination in the studio avoids the browser PDF plug-in and its chrome.
 function renderLayout() {
   const layout = documentState.layout;
   renderColorPalettes();
@@ -1873,6 +1873,7 @@ function installPreviewResize() {
   const handle = $("#previewResizeHandle");
   if (!handle) return;
   let drag = null;
+  let observedWidth = 0;
   const finish = (event) => {
     if (!drag) return;
     if (event?.pointerId != null && handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
@@ -1901,6 +1902,15 @@ function installPreviewResize() {
     if (event.key === "Home") { event.preventDefault(); setPreviewWidth(PREVIEW_MIN_WIDTH); schedulePdfPreview(true); }
     if (event.key === "End") { event.preventDefault(); setPreviewWidth(PREVIEW_MAX_WIDTH); schedulePdfPreview(true); }
   });
+  if (window.ResizeObserver) {
+    const viewport = $("#previewViewport");
+    new ResizeObserver((entries) => {
+      const width = Math.round(entries[0]?.contentRect?.width || 0);
+      if (!width || width === observedWidth) return;
+      observedWidth = width;
+      if (!drag && ui.previewReady) schedulePdfPreview(true);
+    }).observe(viewport);
+  }
 }
 
 function installEvents() {
