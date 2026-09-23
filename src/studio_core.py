@@ -249,6 +249,10 @@ class PdfLayout:
     footer: bool
     field_lines: bool
     stacked_columns: int
+    stacked_split: float
+    note_text: str
+    note_font: str
+    note_size: float
 
 
 def _number(value: Any, default: float, low: float, high: float) -> float:
@@ -294,6 +298,10 @@ def pdf_layout(state: dict[str, Any]) -> PdfLayout:
         footer=bool(source.get("footer", True)),
         field_lines=bool(source.get("fieldLines", True)),
         stacked_columns=2 if source.get("stackedColumns") == 2 else 1,
+        stacked_split=_number(source.get("stackedSplit", 50), 50, 30, 70) / 100,
+        note_text=str(source.get("noteText") or "")[:1200],
+        note_font=str(source.get("noteFont")) if source.get("noteFont") in {"Helvetica", "Times-Roman", "Courier"} else "Helvetica",
+        note_size=_number(source.get("noteSize", 7), 7, 5, 12),
     )
 
 
@@ -305,6 +313,55 @@ def row_pdf_layout(state: dict[str, Any], row: dict[str, Any], base: PdfLayout) 
 def _footer_baseline(layout: PdfLayout) -> float:
     """Place footer text inside, and relative to, the bottom page margin."""
     return max(2.5 * MM, layout.margin * 0.55)
+
+
+def note_for_row(state: dict[str, Any], row: dict[str, Any], layout: PdfLayout) -> str:
+    """The last matching note rule wins, allowing an empty note to clear a default."""
+    values = row.get("values", {}) if isinstance(row.get("values", {}), dict) else {}
+    result = layout.note_text
+    for rule in state.get("rules", []):
+        if not isinstance(rule, dict) or rule.get("enabled", True) is False:
+            continue
+        if rule.get("action") not in {"set_note", "clear_note"} or not rule_matches(rule, values):
+            continue
+        result = str(rule.get("noteText") or "")[:1200] if rule.get("action") == "set_note" else ""
+    return result.strip()
+
+
+def wrap_note(text: str, font: str, size: float, width: float) -> list[str]:
+    """Wrap note text without dropping explicit line breaks or long words."""
+    if not text:
+        return []
+    lines: list[str] = []
+    for paragraph in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if not paragraph.strip():
+            lines.append("")
+            continue
+        line = ""
+        for word in paragraph.split():
+            candidate = f"{line} {word}" if line else word
+            if stringWidth(candidate, font, size) <= width:
+                line = candidate
+                continue
+            if line:
+                lines.append(line)
+                line = ""
+            while word and stringWidth(word, font, size) > width:
+                piece = ""
+                for char in word:
+                    if piece and stringWidth(piece + char, font, size) > width:
+                        break
+                    piece += char
+                lines.append(piece)
+                word = word[len(piece):]
+            line = word
+        lines.append(line)
+    return lines
+
+
+def note_reserve_height(lines: list[list[str]], layout: PdfLayout) -> float:
+    longest = max((len(item) for item in lines), default=0)
+    return 2.5 * MM + longest * layout.note_size * 1.35 + 2 * MM if longest else 0
 
 
 def render_pdf(state: dict[str, Any]) -> bytes:
@@ -321,10 +378,14 @@ def render_pdf(state: dict[str, Any]) -> bytes:
     footer_height = 7 * MM if layout.footer else 0
     usable_width = width - 2 * layout.margin
     slip_width = usable_width
+    note_lines = [wrap_note(note_for_row(state, row, layout), layout.note_font, layout.note_size,
+                            max(1, usable_width - 2 * layout.padding)) for row in rows]
+    note_height = note_reserve_height(note_lines, layout)
+    pitch = layout.slip_height + note_height + layout.gap
     usable_height = height - 2 * layout.margin - footer_height
-    down = int((usable_height + layout.gap) // (layout.slip_height + layout.gap))
+    down = int((usable_height + layout.gap) // pitch)
     if down < 1:
-        raise StudioError("The slip height and page margins do not fit on the selected paper.")
+        raise StudioError("The slip height, note text and page margins do not fit on the selected paper.")
     per_page = down
     pages = math.ceil(len(rows) / per_page)
     stream = io.BytesIO()
@@ -334,10 +395,19 @@ def render_pdf(state: dict[str, Any]) -> bytes:
     for page_index in range(pages):
         page_rows = rows[page_index * per_page : (page_index + 1) * per_page]
         for index, row in enumerate(page_rows):
-            top = height - layout.margin - index * (layout.slip_height + layout.gap)
-            _draw_slip(pdf, row, visible_columns(state, row), layout, layout.margin, top - layout.slip_height, slip_width, layout.slip_height)
+            top = height - layout.margin - index * pitch
+            slip_bottom = top - layout.slip_height
+            _draw_slip(pdf, row, visible_columns(state, row), layout, layout.margin, slip_bottom, slip_width, layout.slip_height)
+            lines = note_lines[page_index * per_page + index]
+            if lines:
+                pdf.setFillColor(layout.muted)
+                pdf.setFont(layout.note_font, layout.note_size)
+                baseline = slip_bottom - 2.5 * MM - layout.note_size
+                for line in lines:
+                    pdf.drawString(layout.margin + layout.padding, baseline, line)
+                    baseline -= layout.note_size * 1.35
         if layout.cut_marks:
-            _draw_cut_marks(pdf, layout, width, height, slip_width, down)
+            _draw_cut_marks(pdf, layout, width, height, slip_width, down, pitch)
         if layout.footer:
             pdf.setFillColor(layout.muted)
             pdf.setFont("Helvetica", 7)
@@ -349,13 +419,13 @@ def render_pdf(state: dict[str, Any]) -> bytes:
     return stream.getvalue()
 
 
-def _draw_cut_marks(pdf: canvas.Canvas, layout: PdfLayout, width: float, height: float, slip_width: float, down: int) -> None:
+def _draw_cut_marks(pdf: canvas.Canvas, layout: PdfLayout, width: float, height: float, slip_width: float, down: int, pitch: float) -> None:
     pdf.saveState()
     pdf.setStrokeColor(layout.border)
     pdf.setLineWidth(0.35)
     tick = 3 * MM
     for row_index in range(down + 1):
-        y = height - layout.margin - row_index * (layout.slip_height + layout.gap)
+        y = height - layout.margin - row_index * pitch
         pdf.line(0, y, tick, y)
         pdf.line(width - tick, y, width, y)
     pdf.restoreState()
@@ -499,13 +569,14 @@ def _draw_horizontal(pdf: canvas.Canvas, values: dict[str, Any], columns: list[d
 def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict[str, Any]], layout: PdfLayout, x: float, y: float, width: float, height: float) -> None:
     blocks = layout.stacked_columns
     rows_per_block = math.ceil(len(columns) / blocks)
-    block_width = width / blocks
+    widths = [width] if blocks == 1 else [width * layout.stacked_split, width * (1 - layout.stacked_split)]
     row_height = height / rows_per_block
-    label_width = min(block_width * layout.label_width, 55 * MM)
     for index, column in enumerate(columns):
         block = index // rows_per_block
         row_index = index % rows_per_block
-        left = x + block * block_width
+        block_width = widths[block]
+        label_width = block_width * layout.label_width
+        left = x + sum(widths[:block])
         bottom = y + height - (row_index + 1) * row_height
         pdf.setFillColor(layout.accent)
         pdf.rect(left, bottom, label_width, row_height, fill=1, stroke=0)
@@ -519,7 +590,9 @@ def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict
         label_divider = _field_divider_color(layout.accent)
         pdf.setLineWidth(0.6)
         for block in range(blocks):
-            left = x + block * block_width
+            block_width = widths[block]
+            label_width = block_width * layout.label_width
+            left = x + sum(widths[:block])
             count = min(rows_per_block, len(columns) - block * rows_per_block)
             for row_index in range(1, count):
                 divider_y = y + height - row_index * row_height
@@ -527,6 +600,6 @@ def _draw_stacked(pdf: canvas.Canvas, values: dict[str, Any], columns: list[dict
                 pdf.line(left, divider_y, left + label_width, divider_y)
                 pdf.setStrokeColor(layout.border)
                 pdf.line(left + label_width, divider_y, left + block_width, divider_y)
-            if block:
+            if block and count:
                 pdf.setStrokeColor(layout.border)
                 pdf.line(left, y, left, y + height)

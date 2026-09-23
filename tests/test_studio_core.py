@@ -11,7 +11,7 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from studio_core import MM, _display_value, _footer_baseline, _value_align, condition_matches, included_rows, parse_workbook, pdf_layout, render_pdf, visible_columns  # noqa: E402
+from studio_core import MM, _display_value, _footer_baseline, _value_align, condition_matches, included_rows, note_for_row, note_reserve_height, parse_workbook, pdf_layout, render_pdf, visible_columns, wrap_note  # noqa: E402
 
 
 def sample_state() -> dict:
@@ -120,6 +120,37 @@ class RuleTests(unittest.TestCase):
 
 
 class PdfTests(unittest.TestCase):
+    def test_note_rules_resolve_in_order_and_can_clear_default(self) -> None:
+        state = sample_state()
+        state["layout"]["noteText"] = "Default instructions"
+        state["rules"] = [
+            {"enabled": True, "action": "set_note", "noteText": "Bring ID", "conditions": [{"field": "name", "operator": "equals", "value": "Ava"}]},
+            {"enabled": True, "action": "clear_note", "conditions": [{"field": "name", "operator": "equals", "value": "Noah"}]},
+        ]
+        layout = pdf_layout(state)
+        self.assertEqual(note_for_row(state, state["rows"][0], layout), "Bring ID")
+        self.assertEqual(note_for_row(state, state["rows"][1], layout), "")
+        self.assertEqual(note_for_row(state, state["rows"][2], layout), "Default instructions")
+
+    def test_note_height_uses_longest_printed_note(self) -> None:
+        layout = pdf_layout(sample_state())
+        lines = [wrap_note("Short", layout.note_font, layout.note_size, 200),
+                 wrap_note("A longer note\nwith two lines", layout.note_font, layout.note_size, 200), []]
+        self.assertEqual([len(item) for item in lines], [1, 2, 0])
+        self.assertAlmostEqual(note_reserve_height(lines, layout), 4.5 * MM + 2 * layout.note_size * 1.35)
+        self.assertEqual(note_reserve_height([[]], layout), 0)
+        self.assertGreater(len(wrap_note("averylongunbrokentoken", layout.note_font, layout.note_size, 25)), 1)
+
+    def test_stacked_split_and_note_render(self) -> None:
+        state = sample_state()
+        state["layout"].update({"mode": "stacked", "stackedColumns": 2, "stackedSplit": 65,
+                                "labelWidth": 47, "noteText": "Questions? Contact the service desk.",
+                                "noteFont": "Times-Roman", "noteSize": 8})
+        layout = pdf_layout(state)
+        self.assertAlmostEqual(layout.stacked_split, 0.65)
+        self.assertAlmostEqual(layout.label_width, 0.47)
+        self.assertTrue(render_pdf(state).startswith(b"%PDF"))
+
     def test_footer_position_follows_the_page_margin(self) -> None:
         state = sample_state()
         state["layout"]["margin"] = 10

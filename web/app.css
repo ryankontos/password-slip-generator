@@ -151,14 +151,35 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .selection-toolbar strong { margin-right: 8px; color: var(--accent); font-size: 12px; }
 .push-right { margin-left: auto; }
 .table-shell { min-height: 0; flex: 1; overflow: auto; position: relative; background: var(--surface); overscroll-behavior: contain; }
-.data-table { width: 100%; min-width: 760px; border-collapse: separate; border-spacing: 0; table-layout: auto; }
+.data-table { min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .data-table th { height: 44px; position: sticky; top: 0; z-index: 2; padding: 0 10px; background: var(--surface-soft); border-bottom: 1px solid var(--line-strong); border-right: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .045em; text-align: left; text-transform: uppercase; }
+.data-table th.field-head { padding: 0 18px 0 6px; }
+.field-head-content { min-width: 0; height: 44px; display: flex; align-items: center; gap: 2px; }
+.data-field-title { min-width: 0; flex: 1; overflow: hidden; padding: 6px 4px; border: 0; border-radius: 4px; background: transparent; color: inherit; font-size: inherit; font-weight: inherit; letter-spacing: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; text-transform: inherit; }
+.data-field-title:hover, .data-field-menu-trigger:hover { background: var(--surface-hover); color: var(--accent); }
+.data-field-menu-trigger { flex: 0 0 24px; height: 26px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.column-resizer { width: 12px; position: absolute; z-index: 6; top: 0; right: -6px; bottom: 0; cursor: col-resize; touch-action: none; }
+.column-resizer::after { content: ""; width: 2px; position: absolute; top: 11px; bottom: 11px; left: 5px; border-radius: 2px; background: var(--line-strong); opacity: .45; }
+.field-head:hover .column-resizer::after, .column-resizer.resizing::after { background: var(--accent); opacity: 1; }
 .data-table th:first-child, .data-table td.select-cell { width: 38px; min-width: 38px; max-width: 38px; padding: 0; }
 .data-table th:first-child { position: sticky; left: 0; z-index: 4; text-align: center; }
 .data-table th.row-number-head, .data-table td.row-number { width: 43px; min-width: 43px; max-width: 43px; }
 .data-table th.row-number-head { position: sticky; left: 38px; z-index: 4; text-align: center; }
 .data-table th.row-menu-head { width: 42px; border-right: 0; }
 .data-table th:not(:first-child):not(.row-number-head):not(.row-menu-head) { min-width: 120px; }
+.data-field-menu { width: 228px; position: fixed; z-index: 40; padding: 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.data-field-menu label { display: grid; gap: 5px; padding: 3px 4px 9px; color: var(--muted); font-size: 11px; }
+.data-field-menu input { width: 100%; height: 32px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 13px; }
+.data-field-menu button { width: 100%; min-height: 33px; padding: 5px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); text-align: left; font-size: 12px; }
+.data-field-menu button:hover { background: var(--surface-hover); }
+.data-field-menu-row { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.data-field-menu .danger-menu-item { color: var(--danger); }
+.field-sheet-dialog { padding: 0; }
+.field-sheet-dialog .field-sheet-card { width: min(420px, 100vw); height: 100vh; max-height: none; position: absolute; top: 0; right: 0; border-radius: 0; }
+.field-sheet-body { display: grid; align-content: start; gap: 16px; padding: 20px; }
+.field-sheet-body > label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.field-sheet-body input, .field-sheet-body select { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--ink); font-size: 14px; }
+.field-sheet-order { display: flex; gap: 8px; padding-top: 5px; }
 .data-table td { height: 44px; padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--surface); }
 .data-table tr:hover td { background: var(--surface-soft); }
 .data-table tr.selected td { background: var(--accent-soft); }
@@ -222,7 +243,7 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .rule-test-status { color: var(--subtle); font-size: 10px; }
 .rule-list { display: grid; gap: 10px; padding: 16px 20px 30px; }
 .rule-card { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft); overflow: hidden; }
-.rule-card[draggable="true"] .rule-header { cursor: grab; }
+.rule-drag-handle { flex: 0 0 20px; }
 .rule-card.disabled { opacity: .58; }
 .rule-header { min-height: 48px; display: flex; align-items: center; gap: 9px; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
 .rule-number { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 800; }
@@ -261,6 +282,15 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .layout-mode strong { align-self: end; font-size: 13px; }
 .layout-mode small { align-self: start; color: var(--muted); font-size: 11px; }
 .inline-setting { width: min(280px, 100%); display: grid; grid-template-columns: 1fr 130px; align-items: center; gap: 12px; margin-top: 14px; color: var(--muted); font-size: 12px; }
+.inline-setting > span { display: flex; align-items: center; gap: 5px; }
+.inline-setting input[type="number"] { width: 84px; height: 33px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); }
+.note-label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.note-label textarea, .rule-note-input { width: 100%; min-height: 74px; padding: 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); color: var(--ink); font: 13px/1.4 inherit; resize: vertical; }
+.note-label + .form-grid { margin-top: 13px; }
+.note-rule-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.rule-note-control { display: grid; gap: 5px; margin: 0 0 12px 82px; color: var(--muted); font-size: 11px; }
+.output-name-control { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(220px, 1fr); align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+.output-name-control select { height: 35px; }
 .inline-setting select { height: 36px; }
 .mode-diagram { grid-row: 1 / 3; width: 55px; height: 39px; display: grid; gap: 2px; padding: 4px; border: 1px solid var(--line-strong); background: var(--surface-alt); }
 .mode-diagram i { display: block; background: color-mix(in srgb, var(--accent) 35%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); }

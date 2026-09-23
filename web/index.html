@@ -85,6 +85,7 @@
         </div>
         <div id="tableShell" class="table-shell">
           <table class="data-table">
+            <colgroup id="dataColgroup"></colgroup>
             <thead id="dataHead"></thead>
             <tbody id="dataBody"></tbody>
           </table>
@@ -148,6 +149,8 @@
               <button class="layout-mode" data-mode="stacked"><span class="mode-diagram stacked-mode"><i></i><i></i><i></i></span><strong>Stacked</strong><small>Handles many fields</small></button>
             </div>
             <label id="stackedColumnsControl" class="inline-setting" hidden>Stacked columns<select id="stackedColumnsInput"><option value="1">1 column</option><option value="2">2 columns</option></select></label>
+            <label id="stackedLabelWidthControl" class="inline-setting" hidden>Label column width <span><input id="stackedLabelWidthInput" type="number" min="18" max="60" step="1" aria-label="Stacked label column width"> %</span></label>
+            <label id="stackedSplitControl" class="inline-setting" hidden>First column width <span><input id="stackedSplitInput" type="number" min="30" max="70" step="1" aria-label="First stacked column width"> %</span></label>
           </section>
           <section class="settings-section">
             <h2>Sheet</h2>
@@ -162,7 +165,16 @@
           </section>
           <section class="settings-section span-two">
             <h2>Output</h2>
-            <label class="toggle-row bordered"><input id="filenameDateInput" type="checkbox"><span class="switch"></span><span><strong>Add date to PDF filename</strong><small>Append today’s date as YYYY-MM-DD when downloading</small></span></label>
+            <label class="output-name-control">PDF filename suffix<select id="filenameTimestampInput"><option value="none">None</option><option value="date">Date · YYYY-MM-DD</option><option value="datetime">Date and time · YYYY-MM-DD_HH-mm</option></select></label>
+          </section>
+          <section class="settings-section span-two">
+            <h2>Text below slips</h2>
+            <label class="note-label">Default text<textarea id="noteTextInput" rows="3" maxlength="1200" placeholder="Optional note, instructions or disclaimer"></textarea></label>
+            <div class="form-grid two">
+              <label>Typeface<select id="noteFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Size <span class="unit">pt</span><input id="noteSizeInput" type="number" min="5" max="12" step="0.5"></label>
+            </div>
+            <div class="note-rule-row"><span class="field-help">Rules can replace or clear this text per slip. The last matching note rule wins.</span><button id="addNoteRuleButton" class="button secondary compact" type="button">＋ Add note rule</button></div>
           </section>
           <section class="settings-section">
             <h2>Type &amp; colour</h2>
@@ -206,6 +218,32 @@
       </div>
     </aside>
   </main>
+
+  <div id="dataFieldMenu" class="data-field-menu" hidden>
+    <label>Field name<input id="dataFieldRenameInput" type="text" maxlength="120" aria-label="Rename field"></label>
+    <div class="data-field-menu-row"><button id="dataFieldMoveLeft" type="button">← Move left</button><button id="dataFieldMoveRight" type="button">Move right →</button></div>
+    <button id="dataFieldOptionsButton" type="button">More options…</button>
+    <button id="dataFieldDuplicateButton" type="button">Duplicate field</button>
+    <button id="dataFieldDeleteButton" class="danger-menu-item" type="button">Delete field</button>
+  </div>
+
+  <dialog id="fieldSheetDialog" class="modal field-sheet-dialog">
+    <section class="modal-card field-sheet-card">
+      <header class="modal-header"><h2>Field settings</h2><button id="closeFieldSheetButton" class="icon-button" aria-label="Close">×</button></header>
+      <div class="modal-body field-sheet-body">
+        <label>Name<input id="fieldSheetName" type="text" maxlength="120"></label>
+        <label>Type<select id="fieldSheetType"><option value="text">Text</option><option value="password">Password</option><option value="number">Number</option><option value="date">Date / time</option><option value="url">Link / URL</option></select></label>
+        <label>Default for new rows<input id="fieldSheetDefault" type="text"></label>
+        <label>Appearance<select id="fieldSheetStyle"><option value="standard">Standard</option><option value="strong">Bold</option><option value="mono">Monospace</option></select></label>
+        <label>Visibility<select id="fieldSheetVisibility"><option value="always">Always</option><option value="nonempty">Only with a value</option><option value="never">Hidden by default</option></select></label>
+        <label>Text transform<select id="fieldSheetTransform"><option value="as_entered">As entered</option><option value="upper">UPPERCASE</option><option value="lower">lowercase</option><option value="title">Title Case</option><option value="mask_last4">Mask · last 4</option></select></label>
+        <label>Value alignment<select id="fieldSheetAlign"><option value="default">Default</option><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
+        <label>Data column width <span class="unit">px</span><input id="fieldSheetGridWidth" type="number" min="120" max="600" step="10"></label>
+        <div class="field-sheet-order"><button id="fieldSheetMoveLeft" class="button secondary compact" type="button">← Move left</button><button id="fieldSheetMoveRight" class="button secondary compact" type="button">Move right →</button></div>
+      </div>
+      <footer class="modal-footer"><button id="fieldSheetDelete" class="button secondary danger" type="button">Delete field</button><button id="fieldSheetDone" class="button primary" type="button">Done</button></footer>
+    </section>
+  </dialog>
 
   <dialog id="importDialog" class="modal">
     <form method="dialog" class="modal-card import-card">
