@@ -1583,24 +1583,6 @@ function templateRecordFromDocument(document, name, includeData) {
   };
 }
 
-function templateFilePayload(record) {
-  return {
-    format: "password-slip-studio-template",
-    version: 2,
-    name: record.name,
-    includeData: record.includeData,
-    document: record.document,
-    palettes: record.palettes || [],
-    preferences: record.preferences || null,
-    importPreferences: record.importPreferences || {},
-  };
-}
-
-function downloadTemplateRecord(record) {
-  const blob = new Blob([JSON.stringify(templateFilePayload(record), null, 2)], { type: "application/json" });
-  downloadBlob(blob, `${safeFilename(record.name)}.password-slip-template`);
-}
-
 function storeTemplateRecord(record) {
   const templates = loadSavedTemplates().filter((item) => item.id !== record.id && String(item.name || "").trim().toLowerCase() !== record.name.trim().toLowerCase());
   return saveSavedTemplates([record, ...templates]);
@@ -1618,7 +1600,7 @@ function renderTemplateList() {
   list.innerHTML = templates.length ? templates.map((template) => {
     const rowCount = template.document.rows.length;
     const dataLabel = template.includeData ? `${rowCount} row${rowCount === 1 ? "" : "s"} included` : "No data included";
-    return `<article class="template-item" data-template-id="${escapeHtml(template.id)}"><div class="template-item-info"><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(formatTemplateDate(template.savedAt))} · ${escapeHtml(dataLabel)}</small></div><div class="template-item-actions"><button class="button quiet compact" type="button" data-template-action="open">Open</button><button class="button quiet compact" type="button" data-template-action="download">File</button><button class="button quiet compact danger" type="button" data-template-action="delete">Delete</button></div></article>`;
+    return `<article class="template-item" data-template-id="${escapeHtml(template.id)}"><div class="template-item-info"><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(formatTemplateDate(template.savedAt))} · ${escapeHtml(dataLabel)}</small></div><div class="template-item-actions"><button class="button quiet compact" type="button" data-template-action="open">Open</button><button class="button quiet compact danger" type="button" data-template-action="delete">Delete</button></div></article>`;
   }).join("") : `<div class="template-empty">No saved templates yet. Save the current fields and layout above.</div>`;
 }
 
@@ -1634,9 +1616,8 @@ function saveTemplateFromDialog() {
   const name = $("#templateNameInput").value.trim() || documentState.name || "Password slip template";
   const record = templateRecordFromDocument(documentState, name, $("#templateIncludeDataInput").checked);
   const stored = storeTemplateRecord(record);
-  downloadTemplateRecord(record);
   renderTemplateList();
-  toast(stored ? `Template “${name}” saved` : `Template file downloaded; browser storage is full`, stored ? "" : "error");
+  toast(stored ? `Template “${name}” saved` : "Could not save the template. Storage may be full.", stored ? "" : "error");
 }
 
 function openTemplateRecord(record) {
@@ -2126,8 +2107,7 @@ function commandActions() {
     { icon: "✎", label: "Bulk edit selected rows", detail: "Selection", run: openBulkEdit },
     { icon: "◇", label: "Save workspace", detail: "File · ⌘S", run: downloadWorkspace },
     { icon: "◇", label: "Open workspace", detail: "File · ⌘O", run: () => $("#loadWorkspaceInput").click() },
-    { icon: "◇", label: "Save template", detail: "Fields, rules and layout · ⇧⌘T", run: openTemplates },
-    { icon: "◇", label: "Open templates", detail: "Saved or file", run: openTemplates },
+    { icon: "◇", label: "Templates", detail: "Saved setups and template files · ⇧⌘T", run: openTemplates },
     { icon: "⌘", label: "Keyboard shortcuts", detail: "Mac", run: openShortcuts },
     { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout · ⇧⌘⌫", run: clearAllData },
     { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
@@ -2207,10 +2187,8 @@ function renderServiceStatus(status) {
   $("#startAtLoginInput").checked = Boolean(status.start_at_login);
   $("#startAtLoginInput").disabled = !status.start_at_login_supported;
   $("#checkUpdatesButton").disabled = Boolean(status.checking || status.updating);
-  const canUpdate = Boolean(status.update_available && status.working_tree_clean && status.can_fast_forward && !status.updating && !status.checking);
   $("#installUpdateButton").hidden = !status.update_available;
-  $("#installUpdateButton").disabled = !canUpdate;
-  $("#updateAvailableButton").hidden = !canUpdate;
+  $("#installUpdateButton").disabled = Boolean(status.updating || status.checking || !status.working_tree_clean || !status.can_fast_forward);
   let message = status.update_error || status.update_message || "Ready to check for updates.";
   if (status.update_available && !status.can_fast_forward) {
     message = "This checkout has diverged from the selected branch. Update it manually.";
@@ -2457,14 +2435,13 @@ function installEvents() {
   });
   document.addEventListener("click", closeMoreMenu);
   $("#exportPdfButton").addEventListener("click", () => exportCurrentScope());
-  $("#quickResetButton").addEventListener("click", resetEverything);
   $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
   $("#exportCsvButton").addEventListener("click", exportCsv);
   $("#downloadWorkspaceButton").addEventListener("click", downloadWorkspace);
   $("#loadWorkspaceButton").addEventListener("click", () => $("#loadWorkspaceInput").click());
   $("#loadWorkspaceInput").addEventListener("change", (event) => loadWorkspaceFile(event.target.files[0]));
-  $("#saveTemplateMenuButton").addEventListener("click", openTemplates);
   $("#openTemplatesButton").addEventListener("click", openTemplates);
+  $("#openTemplatesHeaderButton").addEventListener("click", openTemplates);
   $("#shortcutsButton").addEventListener("click", openShortcuts);
   $("#saveTemplateButton").addEventListener("click", saveTemplateFromDialog);
   $("#openTemplateFileButton").addEventListener("click", () => $("#loadTemplateInput").click());
@@ -2473,8 +2450,6 @@ function installEvents() {
   $("#clearDataTabButton").addEventListener("click", clearAllData);
   $("#themeButton").addEventListener("click", toggleTheme);
   $("#settingsMenuButton").addEventListener("click", openAppSettings);
-  $("#appSettingsButton").addEventListener("click", openAppSettings);
-  $("#updateAvailableButton").addEventListener("click", openAppSettings);
   $("#closeAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
   $("#doneAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
   $("#checkUpdatesButton").addEventListener("click", checkStudioUpdates);
@@ -2655,7 +2630,6 @@ function installEvents() {
     const record = loadSavedTemplates().find((template) => template.id === item.dataset.templateId);
     if (!record) return;
     if (action === "open") openTemplateRecord(record);
-    if (action === "download") downloadTemplateRecord(record);
     if (action === "delete" && await confirmAction("Delete template?", `Remove “${record.name}” from saved templates?`, "Delete template")) {
       saveSavedTemplates(loadSavedTemplates().filter((template) => template.id !== record.id));
       renderTemplateList();

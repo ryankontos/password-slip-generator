@@ -23,10 +23,8 @@
         <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
       </span>
       <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
-      <button id="updateAvailableButton" class="button update-ready compact" hidden>Update available</button>
-      <button id="appSettingsButton" class="icon-button settings-trigger" title="App settings" aria-label="App settings">⚙</button>
+      <button id="openTemplatesHeaderButton" class="button secondary compact"><span class="command-glyph">◇</span> Templates</button>
       <button id="exportPdfButton" class="button primary compact">Export PDF</button>
-      <button id="quickResetButton" class="button secondary compact" title="Reset everything">Reset</button>
       <button id="moreButton" class="icon-button" title="More actions" aria-label="More actions" aria-expanded="false">•••</button>
       <div id="moreMenu" class="action-menu" hidden>
         <button id="exportCsvButton"><span>↓</span> Export data as CSV</button>
@@ -34,7 +32,6 @@
         <button id="downloadWorkspaceButton"><span>↓</span> Save workspace</button>
         <button id="loadWorkspaceButton"><span>↑</span> Open workspace</button>
         <input id="loadWorkspaceInput" type="file" accept=".json,.password-slips,.password-slip-workspace" hidden>
-        <button id="saveTemplateMenuButton"><span>◇</span> Save template</button>
         <button id="openTemplatesButton"><span>◇</span> Templates</button>
         <button id="shortcutsButton"><span>⌘</span> Keyboard shortcuts</button>
         <button id="themeButton"><span>◐</span> Toggle theme</button>
@@ -130,6 +127,17 @@
           <span id="ruleTestStatus" class="rule-test-status"></span>
           <button id="disableRulesButton" class="text-button">Disable all</button>
         </div>
+        <details class="slip-notes-settings">
+          <summary><span>Slip notes</span><small>Default text and type</small><span class="slip-notes-chevron" aria-hidden="true">⌄</span></summary>
+          <div class="slip-notes-content">
+            <label class="note-label">Default text<textarea id="noteTextInput" rows="3" maxlength="1200" placeholder="Optional note, instructions or disclaimer"></textarea></label>
+            <div class="form-grid two">
+              <label>Typeface<select id="noteFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Size <span class="unit">pt</span><input id="noteSizeInput" type="number" min="5" max="12" step="0.5"></label>
+            </div>
+            <div class="note-rule-row"><span class="field-help">The last matching note rule replaces or clears this text.</span><button id="addNoteRuleButton" class="button secondary compact" type="button">＋ Add note rule</button></div>
+          </div>
+        </details>
         <div id="ruleList" class="rule-list"></div>
         <div id="rulesEmpty" class="empty-state compact-empty" hidden>
           <div class="empty-icon">⌁</div><h2>No rules</h2><button class="button primary" data-action="add-rule">Add rule</button>
@@ -152,6 +160,21 @@
             <label id="stackedLabelWidthControl" class="inline-setting" hidden>Label column width <span><input id="stackedLabelWidthInput" type="number" min="18" max="60" step="1" aria-label="Stacked label column width"> %</span></label>
             <label id="stackedSplitControl" class="inline-setting" hidden>First column width <span><input id="stackedSplitInput" type="number" min="30" max="70" step="1" aria-label="First stacked column width"> %</span></label>
           </section>
+          <section class="settings-section span-two">
+            <h2>Appearance</h2>
+            <div class="form-grid two">
+              <label>Accent<input id="accentInput" type="color"></label>
+              <label>Text<input id="inkInput" type="color"></label>
+              <label>Paper colour<input id="paperColorInput" type="color"></label>
+              <label>Divider colour<input id="borderColorInput" type="color"></label>
+              <label>Labels <span class="unit">pt</span><input id="labelSizeInput" type="number" min="4" max="18" step="1"></label>
+              <label>Values <span class="unit">pt</span><input id="valueSizeInput" type="number" min="5" max="26" step="1"></label>
+              <label>Label typeface<select id="labelFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Value typeface<select id="fontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Label case<select id="labelCaseInput"><option value="original">Original</option><option value="upper">UPPERCASE</option><option value="title">Title Case</option></select></label>
+              <div class="palette-row span-two"><label>Palette<select id="paletteSelect" aria-label="Choose a saved colour palette"><option value="">Choose a saved palette</option></select></label><label>Name<input id="paletteNameInput" type="text" maxlength="80" placeholder="Name this palette" autocomplete="off"></label><button id="savePaletteButton" class="button secondary compact" type="button">Save palette</button><button id="deletePaletteButton" class="button quiet compact danger" type="button" disabled>Delete</button><small class="palette-help">Also included in workspaces and templates.</small></div>
+            </div>
+          </section>
           <section class="settings-section">
             <h2>Sheet</h2>
             <div class="form-grid two">
@@ -164,34 +187,6 @@
             </div>
           </section>
           <section class="settings-section span-two">
-            <h2>Output</h2>
-            <label class="output-name-control">PDF filename suffix<select id="filenameTimestampInput"><option value="none">None</option><option value="date">Date · YYYY-MM-DD</option><option value="datetime">Date and time · YYYY-MM-DD_HH-mm</option></select></label>
-          </section>
-          <section class="settings-section span-two">
-            <h2>Text below slips</h2>
-            <label class="note-label">Default text<textarea id="noteTextInput" rows="3" maxlength="1200" placeholder="Optional note, instructions or disclaimer"></textarea></label>
-            <div class="form-grid two">
-              <label>Typeface<select id="noteFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
-              <label>Size <span class="unit">pt</span><input id="noteSizeInput" type="number" min="5" max="12" step="0.5"></label>
-            </div>
-            <div class="note-rule-row"><span class="field-help">Rules can replace or clear this text per slip. The last matching note rule wins.</span><button id="addNoteRuleButton" class="button secondary compact" type="button">＋ Add note rule</button></div>
-          </section>
-          <section class="settings-section">
-            <h2>Type &amp; colour</h2>
-            <div class="form-grid two">
-              <label>Accent<input id="accentInput" type="color"></label>
-              <label>Text<input id="inkInput" type="color"></label>
-              <label>Paper colour<input id="paperColorInput" type="color"></label>
-              <label>Divider colour<input id="borderColorInput" type="color"></label>
-              <label>Labels <span class="unit">pt</span><input id="labelSizeInput" type="number" min="4" max="18" step="1"></label>
-              <label>Values <span class="unit">pt</span><input id="valueSizeInput" type="number" min="5" max="26" step="1"></label>
-              <label>Label typeface<select id="labelFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
-              <label>Value typeface<select id="fontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
-              <label>Label case<select id="labelCaseInput"><option value="original">Original</option><option value="upper">UPPERCASE</option><option value="title">Title Case</option></select></label>
-              <div class="palette-row span-two"><label>Palette<select id="paletteSelect" aria-label="Choose a saved colour palette"><option value="">Choose a saved palette</option></select></label><label>Name<input id="paletteNameInput" type="text" maxlength="80" placeholder="Name this palette" autocomplete="off"></label><button id="savePaletteButton" class="button secondary compact" type="button">Save palette</button><button id="deletePaletteButton" class="button quiet compact danger" type="button" disabled>Delete</button><small class="palette-help">Saved in this browser and included in workspaces and templates.</small></div>
-            </div>
-          </section>
-          <section class="settings-section span-two">
             <h2>Marks</h2>
             <div class="toggle-grid">
               <label class="toggle-row"><input id="borderInput" type="checkbox"><span class="switch"></span><span><strong>Slip border</strong><small>Outline each finished slip</small></span></label>
@@ -199,6 +194,10 @@
               <label class="toggle-row"><input id="footerInput" type="checkbox"><span class="switch"></span><span><strong>PDF footer</strong><small>Export date and page number</small></span></label>
               <label class="toggle-row"><input id="fieldLinesInput" type="checkbox"><span class="switch"></span><span><strong>Field dividers</strong><small>Rules between field cells</small></span></label>
             </div>
+          </section>
+          <section class="settings-section span-two">
+            <h2>PDF filename</h2>
+            <label class="output-name-control">Add export date and time<select id="filenameTimestampInput"><option value="none">None</option><option value="date">Date · YYYY-MM-DD</option><option value="datetime">Date and time · YYYY-MM-DD_HH-mm</option></select></label>
           </section>
         </div>
       </div>
@@ -314,7 +313,7 @@
 
   <dialog id="templatesDialog" class="modal">
     <form method="dialog" class="modal-card templates-card">
-      <header class="modal-header"><div><h2>Templates</h2><p>Save fields, rules and layout for reuse. Data is optional.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <header class="modal-header"><div><h2>Templates</h2><p>Reuse fields, rules and layout. Rows are optional.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
       <div class="modal-body templates-body">
         <div class="template-save-panel">
           <div class="template-save-fields">
@@ -323,11 +322,11 @@
           </div>
           <button id="saveTemplateButton" class="button primary" type="button">Save template</button>
         </div>
-        <div class="template-file-row"><strong>Open a template file</strong><span>Use a .password-slip-template file from anywhere.</span><button id="openTemplateFileButton" class="button secondary" type="button">Choose file</button><input id="loadTemplateInput" type="file" accept=".json,.password-slip-template" hidden></div>
-        <div class="template-list-header"><h3>Saved templates</h3><span>Stored in this browser</span></div>
+        <div class="template-file-row"><strong>Import template file</strong><span>Open a template you already have.</span><button id="openTemplateFileButton" class="button secondary" type="button">Choose file</button><input id="loadTemplateInput" type="file" accept=".json,.password-slip-template" hidden></div>
+        <div class="template-list-header"><h3>Saved templates</h3><span>Available in this app</span></div>
         <div id="templateList" class="template-list"></div>
       </div>
-      <footer class="modal-footer"><span>Saving also downloads a template file.</span><button class="button secondary" value="cancel">Done</button></footer>
+      <footer class="modal-footer"><span>Saved templates stay available here.</span><button class="button secondary" value="cancel">Done</button></footer>
     </form>
   </dialog>
 
