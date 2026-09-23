@@ -133,6 +133,9 @@ class StudioHandler(BaseHTTPRequestHandler):
             if path == "/api/service/branch":
                 self._json(self.server.service.set_branch(str(payload.get("branch", ""))))
                 return
+            if path == "/api/service/channel":
+                self._json(self.server.service.set_channel(str(payload.get("channel", ""))))
+                return
             if path == "/api/service/login":
                 if not isinstance(payload.get("enabled"), bool):
                     raise StudioError("Choose whether Studio should start at login.")

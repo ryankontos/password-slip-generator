@@ -14,7 +14,7 @@ python3 start_password_slip_studio.py
 
 The studio opens at `http://127.0.0.1:8768` and keeps running in the background after the launcher closes. Pass `--no-open` to start it without opening a browser, `--foreground` to keep it attached to the terminal, or `--port 8878` to use another local port. Use App settings (⚙) to quit Studio.
 
-App settings also lets you start Studio at macOS login and check for updates. The update monitor checks the selected Git branch every five minutes; installing an update only fast-forwards a clean checkout, then restarts the background service. It never overwrites local edits. The local service log and settings are in the ignored `runtime/` directory. Browser workspace data remains in the browser.
+App settings also lets you start Studio at macOS login and check for updates. The update monitor checks the selected update channel every minute. Stable releases track `master`; Development builds track `development` when that branch is published. Available updates show their release notes before installing; an update only switches or fast-forwards a clean checkout, then restarts the background service. It never overwrites local edits. The local service log and settings are in the ignored `runtime/` directory. Browser workspace data remains in the browser.
 
 To run the original command-line generator directly:
 

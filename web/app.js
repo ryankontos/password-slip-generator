@@ -2155,6 +2155,8 @@ function toggleTheme() {
 
 let serviceCommitAtLoad = "";
 let serviceRestartPending = false;
+let serviceUpdatePromptKey = "";
+let serviceStatus = null;
 
 async function serviceRequest(path, payload) {
   const response = await fetch(`/api/service${path}`, {
@@ -2169,18 +2171,38 @@ async function serviceRequest(path, payload) {
 }
 
 function renderServiceStatus(status) {
+  if (!status || typeof status !== "object") return;
+  serviceStatus = status;
   if (!serviceCommitAtLoad) serviceCommitAtLoad = status.running_commit || "";
   if (serviceRestartPending && serviceCommitAtLoad && status.running_commit !== serviceCommitAtLoad) {
     window.location.reload();
     return;
   }
   if (serviceRestartPending && status.update_error && !status.updating) serviceRestartPending = false;
-  const branch = $("#updateBranchSelect");
-  const branches = [...new Set([...(status.branches || []), status.branch].filter(Boolean))];
-  const options = branches.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
-  if (branch.innerHTML !== options) branch.innerHTML = options;
-  branch.value = status.branch || "";
-  branch.disabled = Boolean(status.updating || status.checking);
+  const busy = Boolean(status.checking || status.updating);
+  const updateButton = $("#updateAvailableButton");
+  updateButton.hidden = !status.update_available;
+  updateButton.disabled = busy;
+  updateButton.setAttribute("aria-busy", String(busy));
+  updateButton.setAttribute("aria-label", status.updating ? "Updating Studio" : `Review ${status.channel_label || "selected channel"} update`);
+  updateButton.title = status.working_tree_clean === false
+    ? "Review update notes · local changes must be committed or moved before updating"
+    : "Review update notes and install";
+  const checkHeaderButton = $("#checkUpdatesHeaderButton");
+  checkHeaderButton.disabled = busy;
+  checkHeaderButton.setAttribute("aria-busy", String(Boolean(status.checking)));
+  checkHeaderButton.setAttribute("aria-label", status.checking ? "Checking for updates" : "Check for updates");
+  checkHeaderButton.title = status.checking ? "Checking for updates…" : status.update_error || "Check for updates";
+  const channel = $("#updateChannelSelect");
+  channel.value = status.update_channel || "stable";
+  channel.disabled = Boolean(status.updating || status.checking);
+  for (const option of channel.options) {
+    const details = status.channels?.[option.value];
+    option.disabled = false;
+    option.title = details?.available === false
+      ? `Git branch: ${details.branch}. It will be checked on origin when selected.`
+      : (details?.branch ? `Git branch: ${details.branch}` : "");
+  }
   $("#serviceVersion").textContent = status.running_commit ? status.running_commit.slice(0, 8) : "";
   $("#backgroundStatus").textContent = status.background ? "Running" : "Foreground";
   $("#backgroundStatus").classList.toggle("active", Boolean(status.background));
@@ -2191,12 +2213,20 @@ function renderServiceStatus(status) {
   $("#installUpdateButton").disabled = Boolean(status.updating || status.checking || !status.working_tree_clean || !status.can_fast_forward);
   let message = status.update_error || status.update_message || "Ready to check for updates.";
   if (status.update_available && !status.can_fast_forward) {
-    message = "This checkout has diverged from the selected branch. Update it manually.";
+    message = "The selected channel has local commits or has diverged. No local commits will be removed.";
   } else if (status.update_available && !status.working_tree_clean) {
     message = "Update available, but this checkout has local changes. Commit or move them first.";
   }
   $("#updateStatusText").textContent = message;
   $("#updateStatusText").classList.toggle("error", Boolean(status.update_error || (status.update_available && (!status.working_tree_clean || !status.can_fast_forward))));
+  if (status.update_available && !status.checking && !status.updating) {
+    const promptKey = `${status.update_channel || ""}:${status.branch || ""}:${status.remote_commit || ""}`;
+    if (promptKey && promptKey !== serviceUpdatePromptKey) {
+      toast(`${status.channel_switch_required ? "Switch available to" : "Update available on"} ${status.channel_label || "the selected channel"}.`, "info");
+      serviceUpdatePromptKey = promptKey;
+    }
+  }
+  if ($("#updateNotesDialog").open) renderUpdateNotesDialog(status);
 }
 
 async function refreshServiceStatus() {
@@ -2216,15 +2246,28 @@ function openAppSettings() {
 }
 
 async function checkStudioUpdates() {
+  const lastChecked = Number(serviceStatus?.last_checked || 0);
   try {
     renderServiceStatus(await serviceRequest("/check", {}));
     toast("Checking for updates…");
+    const deadline = Date.now() + 75_000;
+    while (Date.now() < deadline) {
+      const status = await serviceRequest("");
+      renderServiceStatus(status);
+      if (!status.checking && Number(status.last_checked || 0) > lastChecked) {
+        if (status.update_error) toast(status.update_error, "error");
+        else if (!status.update_available) toast(`Studio is up to date on ${status.branch}.`, "success");
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    toast("The update check is taking longer than expected. Its result will appear in App settings.", "info");
   } catch (error) { toast(error.message, "error"); }
 }
 
-async function changeUpdateBranch() {
+async function changeUpdateChannel() {
   try {
-    renderServiceStatus(await serviceRequest("/branch", { branch: $("#updateBranchSelect").value }));
+    renderServiceStatus(await serviceRequest("/channel", { channel: $("#updateChannelSelect").value }));
   } catch (error) { toast(error.message, "error"); refreshServiceStatus(); }
 }
 
@@ -2236,16 +2279,93 @@ async function changeStartAtLogin() {
 }
 
 async function installStudioUpdate() {
-  if (!await confirmAction("Update Studio", "Studio will download the update and restart. Your browser workspace stays saved locally.", "Update & restart")) return;
+  if (!serviceStatus?.update_available || serviceStatus.checking || serviceStatus.updating) return;
+  if (serviceStatus.working_tree_clean === false || serviceStatus.can_fast_forward === false) {
+    renderUpdateNotesDialog(serviceStatus);
+    return;
+  }
   flushPersistence();
   try {
     serviceRestartPending = true;
     renderServiceStatus(await serviceRequest("/update", {}));
     $("#updateStatusText").textContent = "Updating Studio…";
+    renderUpdateNotesDialog(serviceStatus);
+    $("#updateNotesDialog").close();
   } catch (error) {
     serviceRestartPending = false;
     toast(error.message, "error");
   }
+}
+
+function renderUpdateMarkdown(markdown) {
+  const inline = (line) => escapeHtml(line)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  const lines = String(markdown || "").replace(/\r/g, "").split("\n");
+  const blocks = [];
+  let paragraph = [];
+  let list = [];
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push(`<p>${paragraph.map(inline).join("<br>")}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (list.length) blocks.push(`<ul>${list.map((item) => `<li>${inline(item)}</li>`).join("")}</ul>`);
+    list = [];
+  };
+  for (const line of lines) {
+    const heading = line.match(/^#{1,3}\s+(.+)$/);
+    const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
+    if (heading) {
+      flushParagraph(); flushList();
+      const level = Math.min(3, line.match(/^#+/)[0].length + 1);
+      blocks.push(`<h${level}>${inline(heading[1])}</h${level}>`);
+    } else if (bullet) {
+      flushParagraph(); list.push(bullet[1]);
+    } else if (/^\s*[-*_]{3,}\s*$/.test(line)) {
+      flushParagraph(); flushList(); blocks.push("<hr>");
+    } else if (!line.trim()) {
+      flushParagraph(); flushList();
+    } else {
+      flushList(); paragraph.push(line.trim());
+    }
+  }
+  flushParagraph(); flushList();
+  return blocks.join("") || "<p>No details were included with this update.</p>";
+}
+
+function renderUpdateNotesDialog(status = serviceStatus) {
+  if (!status) return;
+  const branch = status.branch || "selected channel";
+  const behind = Number(status.behind_count || 0);
+  const channelLabel = status.channel_label || "selected channel";
+  $("#updateNotesSummary").textContent = status.channel_switch_required
+    ? `Switch Studio from ${status.current_branch || "the current branch"} to ${channelLabel} (${branch})${behind > 0 ? ` · ${behind} new commit${behind === 1 ? "" : "s"}` : ""}.`
+    : `${behind} new commit${behind === 1 ? "" : "s"} available on ${channelLabel} (${branch}).`;
+  const notes = Array.isArray(status.update_notes) ? status.update_notes : [];
+  $("#updateNotesContent").innerHTML = notes.length
+    ? notes.map((note) => {
+      const title = String(note.file || "Update notes").replace(/\.md$/i, "").replace(/[-_]+/g, " ");
+      return `<article class="update-note"><h3>${escapeHtml(title)}</h3><div class="update-note-markdown">${renderUpdateMarkdown(note.markdown)}</div></article>`;
+    }).join("")
+    : `<div class="update-note update-note-empty"><h3>Update details</h3><p>No release notes were included with this update.</p></div>`;
+  const constraints = [];
+  if (status.working_tree_clean === false) constraints.push("Commit or move your local project changes before updating.");
+  if (status.can_fast_forward === false) constraints.push("The selected channel has local commits or has diverged from origin. No local commits will be removed.");
+  $("#updateNotesConstraint").textContent = constraints.join(" ");
+  $("#updateNotesConstraint").hidden = constraints.length === 0;
+  const button = $("#confirmUpdateButton");
+  button.disabled = Boolean(status.checking || status.updating || !status.update_available || constraints.length);
+  button.textContent = status.updating ? "Updating…" : status.channel_switch_required ? "Switch & restart" : "Update & restart";
+}
+
+function openUpdateNotesDialog() {
+  const status = serviceStatus;
+  if (!status?.update_available) return;
+  renderUpdateNotesDialog(status);
+  $("#updateNotesDialog").showModal();
 }
 
 async function quitStudio() {
@@ -2453,8 +2573,13 @@ function installEvents() {
   $("#closeAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
   $("#doneAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
   $("#checkUpdatesButton").addEventListener("click", checkStudioUpdates);
-  $("#installUpdateButton").addEventListener("click", installStudioUpdate);
-  $("#updateBranchSelect").addEventListener("change", changeUpdateBranch);
+  $("#installUpdateButton").addEventListener("click", openUpdateNotesDialog);
+  $("#updateAvailableButton").addEventListener("click", openUpdateNotesDialog);
+  $("#checkUpdatesHeaderButton").addEventListener("click", checkStudioUpdates);
+  $("#closeUpdateNotesButton").addEventListener("click", () => $("#updateNotesDialog").close());
+  $("#laterUpdateButton").addEventListener("click", () => $("#updateNotesDialog").close());
+  $("#confirmUpdateButton").addEventListener("click", installStudioUpdate);
+  $("#updateChannelSelect").addEventListener("change", changeUpdateChannel);
   $("#startAtLoginInput").addEventListener("change", changeStartAtLogin);
   $("#quitStudioButton").addEventListener("click", quitStudio);
   $("#resetMenuButton").addEventListener("click", resetEverything);
@@ -2976,4 +3101,4 @@ refreshServiceStatus();
 window.setInterval(() => {
   if (serviceRestartPending || $("#appSettingsDialog").open) refreshServiceStatus();
 }, 2500);
-window.setInterval(refreshServiceStatus, 30000);
+window.setInterval(refreshServiceStatus, 15000);

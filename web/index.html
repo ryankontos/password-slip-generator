@@ -22,6 +22,8 @@
         <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
         <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
       </span>
+      <button id="updateAvailableButton" class="icon-button update-available-button" type="button" aria-label="Review available update" aria-controls="updateNotesDialog" title="Review update notes" hidden>↓</button>
+      <button id="checkUpdatesHeaderButton" class="icon-button update-check-button" type="button" aria-label="Check for updates" title="Check for updates">↻</button>
       <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
       <button id="openTemplatesHeaderButton" class="button secondary compact"><span class="command-glyph">◇</span> Templates</button>
       <button id="exportPdfButton" class="button primary compact">Export PDF</button>
@@ -365,11 +367,20 @@
         <div class="service-setting"><div><strong>Start at login</strong><p>Open Studio automatically when you sign in to this Mac.</p></div><label class="service-switch"><input id="startAtLoginInput" type="checkbox" aria-label="Start at login"><span></span></label></div>
         <div class="service-update-section">
           <div class="service-update-heading"><strong>Updates</strong><span id="serviceVersion" class="service-version"></span></div>
-          <div class="service-update-controls"><label>Branch <select id="updateBranchSelect" aria-label="Update branch"></select></label><button id="checkUpdatesButton" class="button secondary compact">Check now</button><button id="installUpdateButton" class="button primary compact" hidden>Update &amp; restart</button></div>
+          <div class="service-update-controls"><label>Build channel<select id="updateChannelSelect" aria-label="Build channel"><option value="stable">Stable releases</option><option value="development">Development builds (development)</option></select></label><button id="checkUpdatesButton" class="button secondary compact">Check now</button><button id="installUpdateButton" class="button primary compact" hidden>Review update</button></div>
           <p id="updateStatusText" class="service-message" role="status" aria-live="polite">Checking for updates…</p>
         </div>
       </div>
       <footer class="modal-footer"><button id="quitStudioButton" class="button secondary danger">Quit Studio</button><button id="doneAppSettingsButton" class="button primary">Done</button></footer>
+    </section>
+  </dialog>
+
+  <dialog id="updateNotesDialog" class="modal update-notes-dialog" aria-labelledby="updateNotesTitle">
+    <section class="modal-card update-notes-card">
+      <header class="modal-header"><div><h2 id="updateNotesTitle">Studio update</h2><p id="updateNotesSummary"></p></div><button id="closeUpdateNotesButton" class="icon-button" type="button" aria-label="Later">×</button></header>
+      <div id="updateNotesContent" class="update-notes-content"></div>
+      <p id="updateNotesConstraint" class="update-notes-constraint" role="status" hidden></p>
+      <footer class="modal-footer"><span>Studio restarts to finish the update. Your workspace stays saved.</span><button id="laterUpdateButton" class="button secondary" type="button">Later</button><button id="confirmUpdateButton" class="button primary" type="button">Update &amp; restart</button></footer>
     </section>
   </dialog>
 

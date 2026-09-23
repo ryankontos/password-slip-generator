@@ -88,6 +88,12 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .app-header .icon-button:hover { color: var(--ink); background: var(--surface-hover); }
 .app-header .button.secondary { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
 .app-header .button.secondary:hover { background: var(--surface-hover); }
+.app-header .update-check-button { font-size: 19px; }
+.app-header .update-available-button { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 800; }
+.app-header .update-available-button:hover { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
+.app-header .update-check-button[aria-busy="true"] { animation: update-check-spin .8s linear infinite; color: var(--accent); }
+@keyframes update-check-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .app-header .update-check-button[aria-busy="true"] { animation: none; } }
 
 .workspace { height: calc(100vh - 68px); display: grid; grid-template-columns: 180px minmax(430px, 1fr) 8px var(--preview-width); min-width: 900px; }
 .rail { min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
@@ -394,6 +400,23 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .service-update-controls .button { height: 36px; }
 .service-message { min-height: 17px; margin-top: 12px; }
 .service-message.error { color: var(--danger); }
+.update-notes-card { width: min(640px, calc(100vw - 32px)); }
+.update-notes-content { min-height: 100px; max-height: min(55vh, 520px); display: grid; align-content: start; gap: 9px; overflow: auto; padding: 15px; }
+.update-note { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-soft); }
+.update-note h3 { margin: 0 0 8px; font-size: 13px; }
+.update-note-markdown { color: var(--muted); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.update-note-markdown > :first-child { margin-top: 0; }
+.update-note-markdown > :last-child { margin-bottom: 0; }
+.update-note-markdown p { margin: 7px 0; }
+.update-note-markdown h2, .update-note-markdown h3 { margin: 12px 0 5px; color: var(--ink); font-size: 12px; }
+.update-note-markdown ul { margin: 5px 0 8px; padding-left: 20px; }
+.update-note-markdown li + li { margin-top: 3px; }
+.update-note-markdown code { padding: 1px 4px; border-radius: 3px; background: var(--surface); color: var(--ink); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.update-note-markdown a { color: var(--accent); }
+.update-note-markdown hr { border: 0; border-top: 1px solid var(--line); }
+.update-note-empty p { margin: 0; color: var(--muted); font-size: 12px; }
+.update-notes-constraint { margin: 0; padding: 11px 15px; border-top: 1px solid var(--line); background: var(--danger-soft); color: var(--danger); font-size: 12px; line-height: 1.45; }
+.update-notes-dialog .modal-footer { flex-wrap: wrap; }
 .modal-footer { min-height: 55px; display: flex; align-items: center; justify-content: flex-end; gap: 7px; padding: 9px 14px; border-top: 1px solid var(--line); background: var(--surface-soft); color: var(--muted); font-size: 11px; }
 .modal-footer > span:first-child { margin-right: auto; }
 .import-card { width: min(900px, calc(100vw - 40px)); min-height: 520px; }
@@ -522,6 +545,10 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
   .view-actions { max-width: 70%; }
 }
 
+@media (max-width: 1280px) {
+  .header-history { display: none; }
+}
+
 @media (max-width: 760px) {
   .app-header { grid-template-columns: 38px minmax(130px, 1fr) auto; gap: 8px; }
   #commandButton { display: none; }
@@ -551,6 +578,7 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
   .palette-row .button { justify-self: start; }
   .view-header { padding-inline: 14px; }
   .slip-notes-settings { margin-inline: 14px; }
+  .update-notes-dialog .modal-footer > span:first-child { flex-basis: 100%; }
   .import-options { grid-template-columns: 1fr; }
   .import-options .span-two { grid-column: auto; }
   .mapping-toolbar { align-items: flex-start; flex-wrap: wrap; }

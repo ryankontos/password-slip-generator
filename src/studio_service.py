@@ -17,7 +17,39 @@ ROOT = Path(__file__).resolve().parent.parent
 RUNTIME = ROOT / "runtime"
 SETTINGS = RUNTIME / "service-settings.json"
 SERVICE_LABEL = "com.ryankontos.password-slip-studio"
-UPDATE_INTERVAL_SECONDS = 300
+UPDATE_INTERVAL_SECONDS = 60
+UPDATE_NOTES_DIRECTORY = "update-notes"
+UPDATE_NOTES_MAX_COUNT = 20
+UPDATE_NOTE_MAX_CHARACTERS = 6000
+UPDATE_CHANNELS = {
+    "stable": {"label": "Stable releases", "branch": "master"},
+    # Keep development isolated from the older, unrelated `main` history.
+    "development": {"label": "Development builds", "branch": "development"},
+}
+
+
+def update_notes_since(base_commit: str, target_ref: str) -> list[dict[str, str]]:
+    """Read bounded Markdown release notes added or changed by an update."""
+    changed = git(
+        "diff", "--name-only", "--diff-filter=ACMR",
+        f"{base_commit}..{target_ref}", "--", UPDATE_NOTES_DIRECTORY,
+    )
+    if changed.returncode != 0:
+        return []
+    notes: list[dict[str, str]] = []
+    for path in sorted(set(changed.stdout.splitlines()), reverse=True)[:UPDATE_NOTES_MAX_COUNT]:
+        parts = path.split("/")
+        if (len(parts) != 2 or parts[0] != UPDATE_NOTES_DIRECTORY
+                or not parts[1].lower().endswith(".md")
+                or parts[1] in {"", ".", ".."}):
+            continue
+        result = git("show", f"{target_ref}:{path}", timeout=5)
+        if result.returncode != 0:
+            continue
+        markdown = result.stdout.strip()
+        if markdown:
+            notes.append({"file": parts[1], "markdown": markdown[:UPDATE_NOTE_MAX_CHARACTERS]})
+    return notes
 
 
 def control_file_for_port(port: int) -> Path:
@@ -97,16 +129,34 @@ class StudioService:
         self._git_lock = threading.Lock()
         self._stop = threading.Event()
         self._state: dict[str, Any] = {
-            "checking": False, "updating": False, "update_available": False,
+            "checking": False, "manual_check": False, "updating": False, "update_available": False,
             "update_error": "", "update_message": "Checking for updates…",
             "remote_commit": "", "behind_count": 0, "last_checked": 0,
-            "can_fast_forward": False, "working_tree_clean": False,
+            "can_fast_forward": False, "channel_switch_required": False,
+            "working_tree_clean": False, "update_notes": [],
         }
         threading.Thread(target=self._poll, name="studio-update-monitor", daemon=True).start()
 
     def _branch(self) -> str:
-        selected = str(read_settings().get("update_branch") or current_branch())
-        return selected if valid_branch(selected) else current_branch()
+        settings = read_settings()
+        channel = settings.get("update_channel")
+        if isinstance(channel, str) and channel in UPDATE_CHANNELS:
+            return UPDATE_CHANNELS[channel]["branch"]
+        # Migrate an existing explicit branch choice when possible.
+        legacy_branch = str(settings.get("update_branch") or "").strip()
+        for config in UPDATE_CHANNELS.values():
+            if legacy_branch == config["branch"]:
+                return legacy_branch
+        return UPDATE_CHANNELS["stable"]["branch"]
+
+    def _channel(self) -> str:
+        settings = read_settings()
+        channel = settings.get("update_channel")
+        if isinstance(channel, str) and channel in UPDATE_CHANNELS:
+            return channel
+        legacy_branch = str(settings.get("update_branch") or "").strip()
+        return next((name for name, config in UPDATE_CHANNELS.items()
+                     if legacy_branch == config["branch"]), "stable")
 
     def _poll(self) -> None:
         while not self._stop.is_set():
@@ -120,7 +170,11 @@ class StudioService:
         with self._lock:
             result = dict(self._state)
         result.update({
-            "branch": self._branch(), "branches": available_branches(),
+            "branch": self._branch(), "update_channel": self._channel(),
+            "channel_label": UPDATE_CHANNELS[self._channel()]["label"],
+            "channels": {name: {**config, "available": config["branch"] in available_branches()}
+                         for name, config in UPDATE_CHANNELS.items()},
+            "branches": available_branches(),
             "current_branch": current_branch(), "current_commit": git_text("rev-parse", "HEAD"),
             "running_commit": self.server.commit_id,
             "background": self.supervised, "start_at_login_supported": sys.platform == "darwin",
@@ -129,15 +183,30 @@ class StudioService:
         return result
 
     def request_check(self) -> dict[str, Any]:
-        threading.Thread(target=self._check, name="studio-update-check", daemon=True).start()
+        with self._lock:
+            if self._state["updating"]:
+                return self.status()
+            if self._state["checking"]:
+                self._state["manual_check"] = True
+                self._state["update_message"] = "Checking for updates…"
+                return self.status()
+        threading.Thread(target=self._check, kwargs={"manual": True},
+                         name="studio-update-check", daemon=True).start()
         return self.status()
 
-    def _check(self) -> None:
+    def _check(self, *, manual: bool = False) -> None:
         with self._lock:
             if self._state["checking"] or self._state["updating"]:
+                if manual and self._state["checking"]:
+                    self._state["manual_check"] = True
+                    self._state["update_message"] = "Checking for updates…"
                 return
-            self._state.update(checking=True, update_error="", update_message="Checking for updates…")
+            self._state["checking"] = True
+            self._state["manual_check"] = manual
+            if manual:
+                self._state.update(update_error="", update_message="Checking for updates…")
         branch = self._branch()
+        channel = self._channel()
         try:
             with self._git_lock:
                 if git("remote", "get-url", "origin", timeout=5).returncode != 0:
@@ -145,41 +214,68 @@ class StudioService:
                 remote_ref = f"refs/remotes/origin/{branch}"
                 fetched = git("fetch", "--quiet", "origin", f"+refs/heads/{branch}:{remote_ref}", timeout=60)
                 if fetched.returncode != 0:
-                    raise RuntimeError(f"Could not check origin/{branch}. Check the network and branch name.")
+                    remote_branch = git("ls-remote", "--heads", "origin", f"refs/heads/{branch}", timeout=15)
+                    if remote_branch.returncode == 0 and not remote_branch.stdout.strip():
+                        raise RuntimeError(f"The {UPDATE_CHANNELS[channel]['label']} branch (`{branch}`) is not published on origin.")
+                    raise RuntimeError(f"Could not check origin/{branch}. Check the network and repository connection.")
                 remote = git_text("rev-parse", "--verify", remote_ref)
                 head = git_text("rev-parse", "HEAD")
                 if not remote or not head:
-                    raise RuntimeError(f"origin/{branch} is not available.")
-                behind = int(git_text("rev-list", "--count", f"HEAD..{remote_ref}") or "0")
+                    raise RuntimeError(f"The {UPDATE_CHANNELS[channel]['label']} branch (`{branch}`) is not published yet.")
+                on_target_branch = current_branch() == branch
+                local_target = git_text("rev-parse", "--verify", f"refs/heads/{branch}") if not on_target_branch else head
+                base = local_target or ""
+                can_switch_or_fast_forward = True
+                behind = 0
+                if base:
+                    can_switch_or_fast_forward = git("merge-base", "--is-ancestor", base, remote).returncode == 0
+                    if can_switch_or_fast_forward:
+                        behind = int(git_text("rev-list", "--count", f"{base}..{remote_ref}") or "0")
+                else:
+                    merge_base = git_text("merge-base", head, remote)
+                    behind = int(git_text("rev-list", "--count", f"{merge_base or remote}..{remote_ref}") or "0")
                 clean = not bool(git_text("status", "--porcelain", "--untracked-files=all"))
-                fast_forward = git("merge-base", "--is-ancestor", head, remote).returncode == 0
+                channel_switch = not on_target_branch
+                update_available = channel_switch or (remote != head and behind > 0)
+                notes = update_notes_since(head, remote_ref) if update_available else []
             with self._lock:
                 self._state.update(
                     branch=branch, remote_commit=remote, current_commit=head,
-                    behind_count=behind, update_available=remote != head and behind > 0,
-                    working_tree_clean=clean, can_fast_forward=fast_forward,
-                    update_error="", last_checked=time.time(),
-                    update_message=(f"Update available on {branch}." if remote != head and behind > 0 and fast_forward
-                                    else "This checkout has diverged from the selected branch. Update it manually."
-                                    if remote != head and behind > 0 else f"No updates on {branch}."),
+                    update_channel=channel, channel_label=UPDATE_CHANNELS[channel]["label"],
+                    behind_count=behind, update_available=update_available,
+                    channel_switch_required=channel_switch,
+                    working_tree_clean=clean, can_fast_forward=can_switch_or_fast_forward,
+                    update_error="", last_checked=time.time(), update_notes=notes,
+                    update_message=(f"Switch to {UPDATE_CHANNELS[channel]['label']} ({branch})." if channel_switch
+                                    else f"Update available on {UPDATE_CHANNELS[channel]['label']}." if update_available and can_switch_or_fast_forward
+                                    else "This checkout has diverged from the selected update channel. Update it manually."
+                                    if update_available else f"Up to date on {UPDATE_CHANNELS[channel]['label']} (branch {branch})."),
                 )
         except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
             with self._lock:
-                self._state.update(update_error=str(exc), update_message=str(exc), last_checked=time.time())
+                self._state.update(update_error=str(exc), update_message=str(exc),
+                                   last_checked=time.time(), update_notes=[])
         finally:
             with self._lock:
                 self._state["checking"] = False
+                self._state["manual_check"] = False
 
     def set_branch(self, branch: str) -> dict[str, Any]:
-        if not valid_branch(branch):
-            raise ValueError("Choose a valid Git branch.")
-        if branch not in available_branches() and branch != current_branch():
-            raise ValueError("Choose a branch available on origin.")
+        channel = next((name for name, config in UPDATE_CHANNELS.items()
+                        if branch == config["branch"]), None)
+        if channel is None:
+            raise ValueError("Choose an update channel instead of a custom Git branch.")
+        return self.set_channel(channel)
+
+    def set_channel(self, channel: str) -> dict[str, Any]:
+        if not isinstance(channel, str) or channel not in UPDATE_CHANNELS:
+            raise ValueError("Choose Stable releases or Development builds.")
         with self._lock:
-            if self._state["updating"]:
-                raise ValueError("Wait for the update to finish before changing branches.")
+            if self._state["updating"] or self._state["checking"]:
+                raise ValueError("Wait for the update check to finish before changing channels.")
         values = read_settings()
-        values["update_branch"] = branch
+        values["update_channel"] = channel
+        values["update_branch"] = UPDATE_CHANNELS[channel]["branch"]
         save_settings(values)
         self.request_check()
         return self.status()
@@ -194,6 +290,7 @@ class StudioService:
 
     def _update(self) -> None:
         branch = self._branch()
+        channel = self._channel()
         try:
             with self._git_lock:
                 if git_text("status", "--porcelain", "--untracked-files=all"):
@@ -205,26 +302,36 @@ class StudioService:
                 remote = git_text("rev-parse", "--verify", remote_ref)
                 head = git_text("rev-parse", "HEAD")
                 if not remote or not head:
-                    raise RuntimeError(f"origin/{branch} is not available.")
-                if remote == head:
+                    raise RuntimeError(f"The {UPDATE_CHANNELS[channel]['label']} branch (`{branch}`) is not published yet.")
+                on_target_branch = current_branch() == branch
+                if on_target_branch and remote == head:
                     with self._lock:
-                        self._state.update(update_available=False, update_message=f"Up to date on {branch}.")
+                        self._state.update(update_available=False, update_message=f"Up to date on {UPDATE_CHANNELS[channel]['label']}.")
                     return
-                if git("merge-base", "--is-ancestor", head, remote).returncode != 0:
-                    raise RuntimeError("The selected branch has diverged from this checkout. Update it manually.")
-                if current_branch() != branch:
-                    switched = git("switch", branch) if git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0 else git("switch", "--track", "-c", branch, f"origin/{branch}")
+                target_branch_exists = git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode == 0
+                if target_branch_exists:
+                    target_head = git_text("rev-parse", f"refs/heads/{branch}")
+                    if git("merge-base", "--is-ancestor", target_head, remote).returncode != 0:
+                        raise RuntimeError("The selected channel branch has local commits or has diverged. No local commits were removed.")
+                    if not on_target_branch:
+                        switched = git("switch", branch)
+                        if switched.returncode != 0:
+                            raise RuntimeError(f"Could not switch to {branch}. Update the checkout manually.")
+                    if target_head != remote:
+                        pulled = git("pull", "--ff-only", "origin", branch, timeout=120)
+                        if pulled.returncode != 0:
+                            raise RuntimeError("The update could not fast-forward. Update the checkout manually.")
+                else:
+                    switched = git("switch", "--track", "-c", branch, f"origin/{branch}")
                     if switched.returncode != 0:
-                        raise RuntimeError(f"Could not switch to {branch}. Update it manually.")
-                pulled = git("pull", "--ff-only", "origin", branch, timeout=120)
-                if pulled.returncode != 0:
-                    raise RuntimeError("The update could not fast-forward. Update the checkout manually.")
+                        raise RuntimeError(f"Could not switch to {branch}. Update the checkout manually.")
                 new_head = git_text("rev-parse", "HEAD")
                 if new_head != remote:
                     raise RuntimeError("The update finished but the new version could not be verified.")
             with self._lock:
                 self._state.update(update_available=False, current_commit=new_head, remote_commit=new_head,
-                                   behind_count=0, update_message="Restarting Studio…")
+                                   behind_count=0, channel_switch_required=False,
+                                   update_notes=[], update_message="Restarting Studio…")
             if self.supervised:
                 write_control_action("restart", self.control_file)
             else:
