@@ -111,6 +111,38 @@ class ServiceControlTests(unittest.TestCase):
         self.assertEqual(service._state["update_notes"], [{"file": "notes.md", "markdown": "Changes"}])
         self.assertFalse(service._state["checking"])
 
+    def test_existing_target_branch_reports_commits_since_current_checkout(self) -> None:
+        service = studio_service.StudioService.__new__(studio_service.StudioService)
+        service._lock = threading.RLock()
+        service._git_lock = threading.Lock()
+        service._state = {"checking": False, "updating": False}
+        service._branch = Mock(return_value="development")
+        service._channel = Mock(return_value="development")
+        rev_list_args = []
+
+        def fake_text(*args, **_kwargs):
+            if args[:2] == ("rev-parse", "--verify") and args[-1] == "refs/remotes/origin/development":
+                return "development-remote"
+            if args[:2] == ("rev-parse", "--verify") and args[-1] == "refs/heads/development":
+                return "development-local"
+            if args[0] == "rev-parse" and args[-1] == "HEAD":
+                return "master-head"
+            if args[0] == "rev-list":
+                rev_list_args.append(args)
+                return "2"
+            return ""
+
+        with (patch.object(studio_service, "git", return_value=Mock(returncode=0)),
+              patch.object(studio_service, "git_text", side_effect=fake_text),
+              patch.object(studio_service, "current_branch", return_value="master"),
+              patch.object(studio_service, "update_notes_since", return_value=[])):
+            service._check(manual=True)
+
+        self.assertEqual(service._state["behind_count"], 2)
+        self.assertEqual(rev_list_args, [("rev-list", "--count", "master-head..refs/remotes/origin/development")])
+        self.assertTrue(service._state["channel_switch_required"])
+        self.assertTrue(service._state["can_fast_forward"])
+
     def test_missing_channel_ref_has_a_clear_status(self) -> None:
         service = studio_service.StudioService.__new__(studio_service.StudioService)
         service._lock = threading.RLock()

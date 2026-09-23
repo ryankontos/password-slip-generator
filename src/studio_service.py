@@ -226,14 +226,9 @@ class StudioService:
                 local_target = git_text("rev-parse", "--verify", f"refs/heads/{branch}") if not on_target_branch else head
                 base = local_target or ""
                 can_switch_or_fast_forward = True
-                behind = 0
                 if base:
                     can_switch_or_fast_forward = git("merge-base", "--is-ancestor", base, remote).returncode == 0
-                    if can_switch_or_fast_forward:
-                        behind = int(git_text("rev-list", "--count", f"{base}..{remote_ref}") or "0")
-                else:
-                    merge_base = git_text("merge-base", head, remote)
-                    behind = int(git_text("rev-list", "--count", f"{merge_base or remote}..{remote_ref}") or "0")
+                behind = int(git_text("rev-list", "--count", f"{head}..{remote_ref}") or "0")
                 clean = not bool(git_text("status", "--porcelain", "--untracked-files=all"))
                 channel_switch = not on_target_branch
                 update_available = channel_switch or (remote != head and behind > 0)
