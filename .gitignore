@@ -1,7 +1,9 @@
 .venv/
 .env
 __pycache__/
+*.pyc
 tmp/
+runtime/
 .DS_Store
 settings/settings.json
 settings/layout_settings.json

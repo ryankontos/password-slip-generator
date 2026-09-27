@@ -1,4 +1,5 @@
 #!/bin/zsh
+
 set -e
 cd "${0:A:h}"
 
@@ -21,7 +22,7 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
   "$SYSTEM_PYTHON" -m venv .venv
 fi
 
-if ! "$VENV_PYTHON" -c 'import openpyxl, reportlab' >/dev/null 2>&1; then
-  "$VENV_PYTHON" -m pip install -r requirements.txt
+if ! .venv/bin/python -c 'import openpyxl, reportlab' >/dev/null 2>&1; then
+  .venv/bin/python -m pip install -r requirements.txt
 fi
-exec "$VENV_PYTHON" src/password_slips.py
+exec .venv/bin/python src/password_slips.py "$@"

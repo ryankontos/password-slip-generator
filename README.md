@@ -1,32 +1,55 @@
-# password-slip-generator
+# Password Slip Studio
 
-Created by Ryan Kontos, 2026. Licensed under the 0BSD licence.
+Password Slip Studio is a local browser tool for turning spreadsheet rows into printable password slips. It keeps the working document in the browser and can save portable workspace and template files.
 
-Download the SharePoint Excel file to your Downloads folder, then use the launcher for your computer:
+## Start
 
-- macOS: open `run_password_slips.command`. It uses the Python included with macOS and creates a local `.venv` automatically.
-- Windows: double-click `run_password_slips.bat`. Install Python 3.9 or newer from [python.org](https://www.python.org/downloads/windows/) first, selecting “Add Python to PATH”; the launcher creates the local `.venv` and installs the required packages.
+On macOS, double-click `run_password_slip_studio.command` to launch the browser studio, or `run_password_slips.command` to use the original terminal generator. Both launchers use the repository's `.venv` and install workbook/PDF dependencies on first run.
 
-On either platform, the first run may take a moment while the Excel and PDF packages are installed.
+From a terminal:
 
-Press Enter to use the newest Excel file in Downloads, then choose the sheet and column letters. Add `*` after a letter, such as `B*`, to print that column with `password_font`; add `-`, such as `C-`, when that column may truncate instead of shrinking. The selected header names and options are previewed in print order, with options shown in brackets, so they can be confirmed or reselected.
-
-Hidden spreadsheet rows are always excluded. Row selection is optional. Choose all rows, a saved quick rule set, create a new rule set, or enter specific spreadsheet rows such as `2,5,9` or `10-15`. When creating a rule, the script lists existing values from that column so you can choose one quickly.
-
-Row selection is optional. Choose all rows, a saved quick rule set, create a new rule set, or enter specific spreadsheet rows such as `2,5,9` or `10-15`. A rule set can contain several rules, applied together with AND, and can be named for one-step reuse on later runs.
-
-After row selection, the script reports the blanks needed to finish the last slip page and asks only for any additional blank slips. The PDF is then written automatically to Downloads. Set `PASSWORD_SLIPS_OUTPUT_FOLDER` in `.env` to use another folder; there is no output-folder prompt.
-
-A compact summary is always included as the first page(s) of the PDF and contains the selected workbook rows, excluding automatic and extra blank slips. Extra titled blank columns can be added for handwritten notes with one JSON array:
-
-```dotenv
-PASSWORD_SLIPS_EXTRA_SUMMARY_COLUMNS=["Notes","Follow-up"]
+```bash
+python3 start_password_slip_studio.py
 ```
 
-If `PASSWORD_SLIPS_EMAIL_ADDRESS` is set, the script asks after exporting whether to open a draft in the default mail app. The draft is addressed to that email and has a subject like `Generated Password Slips: Staff — 2026-08-07 14:30`. The PDF is not attached automatically, so the generated path remains visible for manual attachment on macOS and Windows.
+The studio opens at `http://127.0.0.1:8768` and keeps running in the background after the launcher closes. Pass `--no-open` to start it without opening a browser, `--foreground` to keep it attached to the terminal, or `--port 8878` to use another local port. Use App settings (⚙) to quit Studio.
 
-Copy `.env.example` to `.env` for the complete configuration template. Non-blank `PASSWORD_SLIPS_*` values override generated JSON settings. Interactive choices are remembered in `settings/settings.json`; layout defaults are in `settings/layout_settings.json` and can also be overridden by `.env`. Column selections and rule references are stored as letters, such as `A` and `C`, rather than numbers.
+App settings also lets you start Studio at macOS login and check for updates. The update monitor checks the selected update channel every minute. Stable releases track `master`; Development builds track `development` when that branch is published. Available updates show their release notes before installing; an update only switches or fast-forwards a clean checkout, then restarts the background service. It never overwrites local edits. The local service log and settings are in the ignored `runtime/` directory. Browser workspace data remains in the browser.
 
-For an older JSON configuration, open `migrate_settings_to_env.command` on macOS or `migrate_settings_to_env.bat` on Windows. It merges the old app and layout settings into `.env`, converts numeric column references to letters, and preserves `.env` fields that do not exist in the old format. Run it with `--dry-run` from Terminal or Command Prompt to preview the migration.
+To run the original command-line generator directly:
 
-See `LICENSE` for the full licence text.
+```bash
+python3 src/password_slips.py
+```
+
+## Studio workflow
+
+- Start with an empty data set. Define fields, add rows manually, or import a workbook.
+- Edit rows inline, paste tab-separated blocks from Excel or Sheets, duplicate rows, reorder rows, hide slips, bulk edit selected rows, and export CSV.
+- Resize Data-grid field widths by dragging a header divider or using its arrow keys. Widths are saved with the workspace/template. Click a field heading for its settings sheet, or use its menu to rename, reorder, duplicate, or delete without leaving Data. In Fields, only the handle starts a reorder drag, so field names remain selectable.
+- Use the `New row` button at the bottom of the data table or `⌘↵`. A field can provide a default value for every manually added row. In the grid, `Enter`/`⇧Enter` moves down/up and `Tab`/`⇧Tab` moves across fields; reaching the end with `Tab` adds a row.
+- Filter rows to work quickly. Filtering clears the selection; Shift-click row checkboxes to select a visible range. With no rows selected, PDF preview and export use every printable row.
+- Import `.xlsx`, `.xlsm`, and `.csv` files. The default is to replace existing rows. Select a worksheet, choose all or specific spreadsheet row numbers, mark imported rows hidden, and opt in to fields one at a time.
+- Replace the current field set or keep it and map spreadsheet fields into existing fields. New fields can have their own display names. Field mappings are remembered by sheet name and headers, not by the workbook file.
+- Fields default to text. Password-like headers are inferred as password fields; all other imported fields remain text unless changed manually.
+- Set field visibility to Always, Only with a value (an alphanumeric character is required), or Hidden by default. Rules can show/hide fields or hide an entire slip using all/any conditions and a Not switch. Hide wins when show and hide rules conflict.
+- Select rows to customize field visibility together, apply one selected row's visibility to the selection, or reset selected rows to automatic visibility.
+- Hidden imported rows remain available in the rule tester and data model but are not shown in the data list or printed.
+- Use Manage hidden below the data table to selectively make hidden rows printable again without putting them back into the main list.
+- Choose one of two layouts: Horizontal (the compact label band format) or Stacked (better for many fields, with an optional two-column arrangement). Configure paper, orientation, margin, gap, slip height, colours, font families, label/value sizes, label case, borders, field dividers, cut marks, and footer.
+- Stacked slips can set the label-column width and, in two-column mode, the first column's share of the slip. Optional small text below slips has its own typeface and size; the last matching note rule can replace or clear it per slip. PDF pages reserve the height of the longest note beneath every slip. Export filenames can append the date or a local date-and-time stamp (`YYYY-MM-DD_HH-mm`).
+- The preview is generated from the same server-rendered PDF used for export. It updates while editing and after selection changes, renders large documents page-by-page as you scroll, can be zoomed from 50% to 600%, and the divider beside it can be dragged or adjusted with the keyboard.
+- Name the document in the header; the title becomes the PDF filename. Save named colour palettes, workspaces, and templates. These are persisted locally and workspace/template files include document settings, palettes, preferences, and reusable import mappings.
+- Use `⌘K` for commands. Other shortcuts are listed in the Keyboard shortcuts dialog. `⌘Z` and `⇧⌘Z` keep native text-field undo available while editing.
+
+## Development
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m unittest discover -s tests
+PYTHONPATH=src python3 src/studio_server.py --verbose
+```
+
+The original terminal generator remains in `src/password_slips.py` and is available through `run_password_slips.command` as a separate workflow from the studio.
+
+Created by Ryan Kontos, 2026. Licensed under the [0BSD licence](LICENSE).

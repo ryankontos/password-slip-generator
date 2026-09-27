@@ -1,0 +1,24 @@
+{
+  "name": "Password Slip Studio",
+  "short_name": "Slip Studio",
+  "description": "Create and print password slips.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eaf1f8",
+  "theme_color": "#eaf1f8",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

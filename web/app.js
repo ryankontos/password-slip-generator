@@ -1,0 +1,3194 @@
+"use strict";
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const clone = (value) => JSON.parse(JSON.stringify(value));
+const uid = (prefix = "id") => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+const PREVIEW_MIN_WIDTH = 360;
+const PREVIEW_MAX_WIDTH = 920;
+const PREVIEW_MAX_ZOOM = 600;
+const clampPreviewWidth = (value) => Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, Number(value) || 520));
+const DOCUMENT_STORAGE_KEY = "password-slip-studio-document";
+const PREFERENCES_STORAGE_KEY = "password-slip-studio-preferences";
+const IMPORT_PREFERENCES_STORAGE_KEY = "password-slip-studio-import-preferences";
+const PREFERENCE_DEFAULTS = Object.freeze({ view: "data", pageSize: 50, zoom: 110, previewWidth: 520, lastImportSheetName: "", theme: "light" });
+
+function loadStudioPreferences() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(PREFERENCES_STORAGE_KEY) || "{}"); } catch (_) {}
+  const legacyTheme = (() => { try { return localStorage.getItem("pss-theme") || ""; } catch (_) { return ""; } })();
+  const legacySheet = (() => { try { return localStorage.getItem("pss-last-import-sheet") || ""; } catch (_) { return ""; } })();
+  const legacyPreviewWidth = (() => { try { return localStorage.getItem("pss-preview-width"); } catch (_) { return null; } })();
+  const allowedViews = new Set(["data", "columns", "rules", "layout"]);
+  const allowedPageSizes = new Set([25, 50, 100, 250]);
+  const theme = saved.theme === "dark" || legacyTheme === "dark" ? "dark" : "light";
+  const pageSize = Number(saved.pageSize);
+  const zoom = Number(saved.zoom);
+  return {
+    view: allowedViews.has(saved.view) ? saved.view : PREFERENCE_DEFAULTS.view,
+    pageSize: allowedPageSizes.has(pageSize) ? pageSize : PREFERENCE_DEFAULTS.pageSize,
+    zoom: Number.isFinite(zoom) ? Math.min(PREVIEW_MAX_ZOOM, Math.max(50, zoom)) : PREFERENCE_DEFAULTS.zoom,
+    previewWidth: clampPreviewWidth(saved.previewWidth ?? legacyPreviewWidth ?? PREFERENCE_DEFAULTS.previewWidth),
+    lastImportSheetName: String(saved.lastImportSheetName ?? legacySheet ?? ""),
+    theme,
+  };
+}
+
+function saveStudioPreferences(patch = {}) {
+  const current = loadStudioPreferences();
+  const next = { ...current, ...patch };
+  next.previewWidth = clampPreviewWidth(next.previewWidth);
+  next.zoom = Math.min(PREVIEW_MAX_ZOOM, Math.max(50, Number(next.zoom) || PREFERENCE_DEFAULTS.zoom));
+  next.pageSize = [25, 50, 100, 250].includes(Number(next.pageSize)) ? Number(next.pageSize) : PREFERENCE_DEFAULTS.pageSize;
+  next.lastImportSheetName = String(next.lastImportSheetName || "");
+  next.view = ["data", "columns", "rules", "layout"].includes(next.view) ? next.view : PREFERENCE_DEFAULTS.view;
+  next.theme = next.theme === "dark" ? "dark" : "light";
+  try {
+    localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(next));
+    localStorage.setItem("pss-theme", next.theme);
+    localStorage.setItem("pss-last-import-sheet", next.lastImportSheetName);
+    localStorage.setItem("pss-preview-width", String(next.previewWidth));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+const initialPreferences = loadStudioPreferences();
+
+const COLOR_KEYS = ["accent", "ink", "paperColor", "borderColor"];
+const PALETTE_STORAGE_KEY = "pss-color-palettes";
+const MAX_COLOR_PALETTES = 20;
+const TEMPLATE_STORAGE_KEY = "pss-saved-templates";
+const MAX_SAVED_TEMPLATES = 12;
+
+function loadColorPalettes() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PALETTE_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((palette) => palette && palette.id && String(palette.name || "").trim() && palette.colors && COLOR_KEYS.every((key) => /^#[0-9a-f]{6}$/i.test(palette.colors[key]))).slice(0, MAX_COLOR_PALETTES) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveColorPalettes(palettes) {
+  try {
+    localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(palettes.slice(0, MAX_COLOR_PALETTES)));
+    renderColorPalettes();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function currentColorPalette() {
+  return Object.fromEntries(COLOR_KEYS.map((key) => [key, documentState.layout[key]]));
+}
+
+function renderColorPalettes() {
+  const select = $("#paletteSelect");
+  if (!select) return;
+  const selected = select.value;
+  const palettes = loadColorPalettes();
+  select.innerHTML = `<option value="">Choose a saved palette</option>${palettes.map((palette) => `<option value="${escapeHtml(palette.id)}">${escapeHtml(palette.name)}</option>`).join("")}`;
+  select.value = palettes.some((palette) => palette.id === selected) ? selected : "";
+  $("#deletePaletteButton").disabled = !select.value;
+}
+
+function saveCurrentColorPalette() {
+  const name = $("#paletteNameInput").value.trim();
+  if (!name) { toast("Give the palette a name first", "error"); $("#paletteNameInput").focus(); return; }
+  const existing = loadColorPalettes().find((palette) => palette.name.trim().toLowerCase() === name.toLowerCase());
+  const record = { id: existing?.id || uid("palette"), name, savedAt: new Date().toISOString(), colors: currentColorPalette() };
+  if (!saveColorPalettes([record, ...loadColorPalettes().filter((palette) => palette.id !== record.id && palette.name.trim().toLowerCase() !== name.toLowerCase())])) {
+    toast("The palette could not be saved in this browser", "error");
+    return;
+  }
+  $("#paletteSelect").value = record.id;
+  $("#paletteNameInput").value = record.name;
+  renderColorPalettes();
+  toast(`Palette “${name}” saved`);
+}
+
+function applySelectedColorPalette() {
+  const palette = loadColorPalettes().find((item) => item.id === $("#paletteSelect").value);
+  if (!palette) return;
+  commit((state) => COLOR_KEYS.forEach((key) => { state.layout[key] = palette.colors[key]; }));
+  $("#paletteNameInput").value = palette.name;
+}
+
+async function deleteSelectedColorPalette() {
+  const id = $("#paletteSelect").value;
+  const palette = loadColorPalettes().find((item) => item.id === id);
+  if (!palette) return;
+  if (!await confirmAction("Delete palette?", `Remove “${palette.name}” from saved palettes?`, "Delete palette")) return;
+  saveColorPalettes(loadColorPalettes().filter((item) => item.id !== id));
+  $("#paletteNameInput").value = "";
+  toast("Palette deleted");
+}
+
+function loadSavedTemplates() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TEMPLATE_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item) => item && item.document && Array.isArray(item.document.columns) && Array.isArray(item.document.rows)).slice(0, MAX_SAVED_TEMPLATES) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveSavedTemplates(templates) {
+  try {
+    localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates.slice(0, MAX_SAVED_TEMPLATES)));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function loadImportPreferences() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(IMPORT_PREFERENCES_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function importPreferenceKey(sheet) {
+  if (!sheet) return "";
+  const name = normaliseImportName(sheet.name);
+  const headers = (sheet.headers || []).map(normaliseImportName).join("|");
+  return `${name}::${headers}`;
+}
+
+function savedImportMappings(sheet) {
+  const preferences = loadImportPreferences();
+  const exact = preferences[importPreferenceKey(sheet)];
+  if (exact && Array.isArray(exact.mappings)) return exact.mappings;
+  const sheetName = normaliseImportName(sheet?.name);
+  if (!sheetName) return null;
+  const fallback = Object.values(preferences).find((item) => item?.sheetName && normaliseImportName(item.sheetName) === sheetName && Array.isArray(item.mappings));
+  return fallback?.mappings || null;
+}
+
+function saveImportMappings(sheet, mappings) {
+  if (!sheet || !Array.isArray(mappings) || !mappings.length) return;
+  const preferences = loadImportPreferences();
+  const key = importPreferenceKey(sheet);
+  if (!key) return;
+  preferences[key] = {
+    sheetName: sheet.name,
+    headers: [...(sheet.headers || [])],
+    mappings: mappings.map((mapping) => ({
+      sourceIndex: Number(mapping.sourceIndex),
+      header: String(mapping.header || ""),
+      include: Boolean(mapping.include),
+      target: String(mapping.target || "__create__"),
+      newName: String(mapping.newName || ""),
+      visibility: ["always", "nonempty", "never"].includes(mapping.visibility) ? mapping.visibility : "always",
+    })),
+    savedAt: new Date().toISOString(),
+  };
+  const entries = Object.entries(preferences).sort(([, left], [, right]) => String(right?.savedAt || "").localeCompare(String(left?.savedAt || ""))).slice(0, 40);
+  try { localStorage.setItem(IMPORT_PREFERENCES_STORAGE_KEY, JSON.stringify(Object.fromEntries(entries))); } catch (_) {}
+}
+
+function importPreferencesSnapshot() {
+  return loadImportPreferences();
+}
+
+function restoreImportPreferences(preferences) {
+  if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return;
+  try { localStorage.setItem(IMPORT_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences)); } catch (_) {}
+}
+
+const defaultLayout = Object.freeze({
+  mode: "horizontal",
+  paper: "a4",
+  orientation: "portrait",
+  margin: 10,
+  gap: 0,
+  slipHeight: 36,
+  accent: "#00539b",
+  ink: "#151719",
+  paperColor: "#ffffff",
+  borderColor: "#c9ced4",
+  labelSize: 10,
+  valueSize: 14,
+  font: "Helvetica",
+  labelFont: "Helvetica",
+  labelCase: "original",
+  valueAlign: "left",
+  labelWidth: 34,
+  stackedColumns: 1,
+  stackedSplit: 50,
+  noteText: "",
+  noteFont: "Helvetica",
+  noteSize: 7,
+  padding: 2,
+  showBorder: false,
+  cutMarks: true,
+  footer: true,
+  fieldLines: true,
+  showBlankFields: true,
+  filenameTimestamp: "none",
+});
+
+function starterDocument() {
+  const columns = [
+    { id: "name", label: "Name", sourceNames: [], group: "", type: "text", style: "strong", defaultValue: "", visibility: "always" },
+    { id: "username", label: "Username", sourceNames: [], group: "", type: "text", style: "standard", defaultValue: "", visibility: "always" },
+    { id: "password", label: "Password", sourceNames: [], group: "", type: "password", style: "mono", defaultValue: "", visibility: "always" },
+    { id: "recovery", label: "Recovery code", sourceNames: [], group: "", type: "password", style: "mono", defaultValue: "", visibility: "always" },
+  ];
+  return {
+    version: 1,
+    name: "Untitled password slips",
+    columns,
+    rows: [],
+    rules: [],
+    layout: clone(defaultLayout),
+  };
+}
+
+const ui = {
+  view: initialPreferences.view,
+  selectedRows: new Set(),
+  search: "",
+  fieldSearch: "",
+  ruleSearch: "",
+  history: [],
+  future: [],
+  zoom: initialPreferences.zoom,
+  dataPage: 0,
+  pageSize: initialPreferences.pageSize,
+  importData: null,
+  importMappingSearch: "",
+  rowOptionsId: null,
+  ruleTestRowId: "",
+  commandIndex: 0,
+  saveTimer: null,
+  dirty: false,
+  previewWidth: initialPreferences.previewWidth,
+  previewReady: false,
+  previewTimer: null,
+  previewRevision: 0,
+  previewCleanup: null,
+  lastImportSheetName: initialPreferences.lastImportSheetName,
+  defaultValueEdits: new Set(),
+  ruleNoteEdits: new Set(),
+  editingDefaultNote: false,
+  selectionAnchor: "",
+  dataFieldMenuId: "",
+  fieldSheetId: "",
+};
+
+let pdfRendererPromise = null;
+
+function loadPdfRenderer() {
+  if (!pdfRendererPromise) {
+    pdfRendererPromise = import("/vendor/pdf.min.mjs").then((pdfjs) => {
+      pdfjs.GlobalWorkerOptions.workerSrc = "/vendor/pdf.worker.min.mjs";
+      return pdfjs;
+    });
+    pdfRendererPromise.catch(() => { pdfRendererPromise = null; });
+  }
+  return pdfRendererPromise;
+}
+
+function loadDocument() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DOCUMENT_STORAGE_KEY));
+    if (saved && Array.isArray(saved.columns) && Array.isArray(saved.rows)) {
+      const legacyNames = ["Ava Chen", "Noah Williams", "Mia Patel", "Leo Martin", "Zoe Taylor", "Eli Brown"];
+      // Only clear the sample generated by the first prototype. Matching row
+      // names alone could destroy a legitimate imported workbook on reload.
+      const isLegacySample = saved.name === "Term 3 password slips"
+        && saved.rows.length === legacyNames.length
+        && saved.rows.every((row, index) => row?.values?.name === legacyNames[index]);
+      if (!isLegacySample) {
+        if (!saved.rows.length && saved.name === "Term 3 password slips") saved.name = "Untitled password slips";
+        return normaliseDocument(saved);
+      }
+      localStorage.removeItem(DOCUMENT_STORAGE_KEY);
+    }
+  } catch (_) {}
+  return starterDocument();
+}
+
+function normaliseDocument(input) {
+  const document = clone(input);
+  document.version = 1;
+  document.name = String(document.name || "Untitled password slips");
+  document.columns = Array.isArray(document.columns) ? document.columns : [];
+  document.rows = Array.isArray(document.rows) ? document.rows : [];
+  document.rules = Array.isArray(document.rules) ? document.rules.filter((rule) => ["show_field", "hide_field", "hide_slip", "set_note", "clear_note"].includes(rule?.action)) : [];
+  delete document.views;
+  delete document.importConfigs;
+  const legacyFilenameDate = Boolean(document.layout?.appendDateToFilename) && document.layout?.filenameTimestamp === undefined;
+  document.layout = { ...defaultLayout, ...(document.layout || {}) };
+  document.layout.mode = document.layout.mode === "stacked" ? "stacked" : "horizontal";
+  document.layout.stackedColumns = Number(document.layout.stackedColumns) === 2 ? 2 : 1;
+  document.layout.labelWidth = Math.min(60, Math.max(18, Number(document.layout.labelWidth) || 34));
+  document.layout.stackedSplit = Math.min(70, Math.max(30, Number(document.layout.stackedSplit) || 50));
+  document.layout.noteText = String(document.layout.noteText || "").slice(0, 1200);
+  document.layout.noteSize = Math.min(12, Math.max(5, Number(document.layout.noteSize) || 7));
+  document.layout.noteFont = ["Helvetica", "Times-Roman", "Courier"].includes(document.layout.noteFont) ? document.layout.noteFont : "Helvetica";
+  document.layout.font = ["Helvetica", "Times-Roman", "Courier"].includes(document.layout.font) ? document.layout.font : defaultLayout.font;
+  document.layout.labelFont = ["Helvetica", "Times-Roman", "Courier"].includes(document.layout.labelFont) ? document.layout.labelFont : defaultLayout.labelFont;
+  document.layout.labelCase = ["original", "upper", "title"].includes(document.layout.labelCase) ? document.layout.labelCase : defaultLayout.labelCase;
+  document.layout.valueAlign = ["left", "center", "right"].includes(document.layout.valueAlign) ? document.layout.valueAlign : defaultLayout.valueAlign;
+  document.layout.filenameTimestamp = legacyFilenameDate ? "date" :
+    ["none", "date", "datetime"].includes(document.layout.filenameTimestamp) ? document.layout.filenameTimestamp : "none";
+  delete document.layout.appendDateToFilename;
+  document.columns.forEach((column, index) => {
+    column.id = String(column.id || uniqueColumnId(`column_${index + 1}`, document.columns));
+    column.label = String(column.label || `Column ${index + 1}`);
+    column.group = String(column.group || "").trim();
+    column.type = ["text", "password", "number", "date", "url"].includes(column.type) ? column.type : "text";
+    column.style = ["standard", "strong", "mono"].includes(column.style) ? column.style : (column.type === "password" ? "mono" : "standard");
+    column.valueTransform = ["as_entered", "upper", "lower", "title", "mask_last4"].includes(column.valueTransform) ? column.valueTransform : "as_entered";
+    column.valueAlign = ["default", "left", "center", "right"].includes(column.valueAlign) ? column.valueAlign : "default";
+    column.defaultValue = String(column.defaultValue ?? "");
+    column.visibility = ["always", "nonempty", "never"].includes(column.visibility) ? column.visibility : "always";
+    column.sourceNames = [...new Set((Array.isArray(column.sourceNames) ? column.sourceNames : []).map((name) => String(name).trim()).filter(Boolean))];
+    column.gridWidth = Math.min(600, Math.max(120, Number(column.gridWidth) || 180));
+    delete column.width;
+    delete column.required;
+    delete column.unique;
+  });
+  const columnIds = new Set(document.columns.map((column) => column.id));
+  const operatorIds = new Set(["not_empty", "empty", "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with", "greater_than", "less_than", "matches"]);
+  document.rules = document.rules.map((rule, index) => {
+    const action = ["show_field", "hide_field", "hide_slip", "set_note", "clear_note"].includes(rule.action) ? rule.action : "hide_field";
+    const fallbackField = document.columns[0]?.id || "";
+    const conditions = Array.isArray(rule.conditions) ? rule.conditions.filter((condition) => condition && typeof condition === "object").map((condition) => ({
+      field: columnIds.has(String(condition.field || "")) ? String(condition.field) : fallbackField,
+      operator: operatorIds.has(condition.operator) ? condition.operator : "not_empty",
+      value: String(condition.value ?? ""),
+    })) : [];
+    return {
+      id: String(rule.id || uid(`rule_${index + 1}`)),
+      name: String(rule.name || "Rule"),
+      enabled: rule.enabled !== false,
+      action,
+      target: ["hide_slip", "set_note", "clear_note"].includes(action) ? "" : (columnIds.has(String(rule.target || "")) ? String(rule.target) : fallbackField),
+      noteText: String(rule.noteText || "").slice(0, 1200),
+      match: rule.match === "any" ? "any" : "all",
+      negate: Boolean(rule.negate),
+      conditions,
+    };
+  });
+  document.rows.forEach((row) => {
+    row.id ||= uid("row");
+    row.values = row.values && typeof row.values === "object" ? row.values : {};
+    row.overrides = row.overrides && typeof row.overrides === "object" ? row.overrides : {};
+    delete row.layoutOverride;
+    row.hidden = Boolean(row.hidden || row.disabled);
+    delete row.disabled;
+  });
+  return document;
+}
+
+let documentState = loadDocument();
+
+function snapshot() { return JSON.stringify(documentState); }
+
+function persistDocumentNow() {
+  try {
+    localStorage.setItem(DOCUMENT_STORAGE_KEY, snapshot());
+    ui.dirty = false;
+    $("#saveStatus").textContent = "Saved";
+    return true;
+  } catch (_) {
+    $("#saveStatus").textContent = "Storage unavailable";
+    return false;
+  }
+}
+
+function pushHistory() {
+  ui.history.push(snapshot());
+  if (ui.history.length > 60) ui.history.shift();
+  ui.future = [];
+}
+
+function commit(mutator, { render = true } = {}) {
+  pushHistory();
+  mutator(documentState);
+  changed();
+  if (render) renderAll();
+}
+
+function changed() {
+  ui.dirty = true;
+  $("#saveStatus").textContent = "Saving…";
+  clearTimeout(ui.saveTimer);
+  ui.saveTimer = setTimeout(persistDocumentNow, 220);
+}
+
+function flushPersistence() {
+  clearTimeout(ui.saveTimer);
+  if (ui.dirty) persistDocumentNow();
+}
+
+function restore(serialised) {
+  documentState = normaliseDocument(JSON.parse(serialised));
+  clearRowSelection();
+  ui.defaultValueEdits.clear();
+  ui.ruleNoteEdits.clear();
+  ui.editingDefaultNote = false;
+  renderAll();
+  changed();
+}
+
+function undo() {
+  if (!ui.history.length) return;
+  ui.future.push(snapshot());
+  restore(ui.history.pop());
+}
+
+function redo() {
+  if (!ui.future.length) return;
+  ui.history.push(snapshot());
+  restore(ui.future.pop());
+}
+
+function showView(view) {
+  ui.view = view;
+  saveStudioPreferences({ view });
+  $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === view));
+  $$(".view").forEach((panel) => panel.classList.toggle("active", panel.id === `${view}View`));
+  if (view === "data") requestAnimationFrame(() => $("#rowSearch").focus());
+}
+
+function rowValuesText(row) {
+  return documentState.columns.map((column) => row.values[column.id] ?? "").join(" ").toLowerCase();
+}
+
+function filteredRows() {
+  const query = ui.search.trim().toLowerCase();
+  return documentState.rows.filter((row) => !row.hidden && (!query || rowValuesText(row).includes(query)));
+}
+
+function conditionMatches(condition, values) {
+  const actual = String(values[condition.field] ?? "");
+  const expected = String(condition.value ?? "");
+  const left = actual.toLowerCase();
+  const right = expected.toLowerCase();
+  switch (condition.operator) {
+    case "not_empty": return Boolean(actual.trim());
+    case "empty": return !actual.trim();
+    case "equals": return left === right;
+    case "not_equals": return left !== right;
+    case "contains": return left.includes(right);
+    case "not_contains": return !left.includes(right);
+    case "starts_with": return left.startsWith(right);
+    case "ends_with": return left.endsWith(right);
+    case "greater_than": {
+      const actualNumber = actual.trim() === "" ? NaN : Number(actual);
+      const expectedNumber = expected.trim() === "" ? NaN : Number(expected);
+      return Number.isFinite(actualNumber) && Number.isFinite(expectedNumber) && actualNumber > expectedNumber;
+    }
+    case "less_than": {
+      const actualNumber = actual.trim() === "" ? NaN : Number(actual);
+      const expectedNumber = expected.trim() === "" ? NaN : Number(expected);
+      return Number.isFinite(actualNumber) && Number.isFinite(expectedNumber) && actualNumber < expectedNumber;
+    }
+    case "matches": try { return new RegExp(expected, "i").test(actual); } catch (_) { return false; }
+    default: return false;
+  }
+}
+
+function ruleMatches(rule, values) {
+  if (!Array.isArray(rule.conditions) || !rule.conditions.length) return false;
+  const results = rule.conditions.map((condition) => conditionMatches(condition, values));
+  const matched = rule.match === "any" ? results.some(Boolean) : results.every(Boolean);
+  return rule.negate ? !matched : matched;
+}
+
+function includedRowsFor(state) {
+  const hideRules = (state.rules || []).filter((rule) => rule.enabled !== false && rule.action === "hide_slip");
+  return (state.rows || []).filter((row) => !row.hidden && !hideRules.some((rule) => ruleMatches(rule, row.values || {})));
+}
+
+function includedRows() {
+  return includedRowsFor(documentState);
+}
+
+function previewDocumentSource() {
+  const source = clone(documentState);
+  const input = document.activeElement;
+  if (!input?.classList?.contains("cell-input")) return source;
+  const rowId = input.closest("tr[data-row-id]")?.dataset.rowId;
+  const columnId = input.dataset.columnId;
+  const row = source.rows.find((item) => item.id === rowId);
+  if (row && columnId) row.values[columnId] = input.value;
+  return source;
+}
+
+function printScopeRows(source = documentState) {
+  const printable = includedRowsFor(source);
+  return ui.selectedRows.size ? printable.filter((row) => ui.selectedRows.has(row.id)) : printable;
+}
+
+function printScopeSource() {
+  const source = previewDocumentSource();
+  source.rows = printScopeRows(source).map((row) => clone(row));
+  return source;
+}
+
+function rowHiddenReason(row) {
+  if (row.hidden) return "Hidden manually";
+  const rule = documentState.rules.find((item) => item.enabled !== false && item.action === "hide_slip" && ruleMatches(item, row.values));
+  return rule ? `Hidden by rule: ${rule.name || "Unnamed rule"}` : "";
+}
+
+function renderAll() {
+  $("#documentName").value = documentState.name;
+  renderData();
+  renderColumns();
+  renderRules();
+  renderLayout();
+  applyPreviewZoom();
+  schedulePdfPreview();
+  $("#columnCount").textContent = documentState.columns.length;
+  $("#ruleCount").textContent = documentState.rules.length;
+  $("#undoButton").disabled = !ui.history.length;
+  $("#redoButton").disabled = !ui.future.length;
+}
+
+function renderData() {
+  [...ui.selectedRows].forEach((id) => { if (!documentState.rows.some((row) => row.id === id && !row.hidden)) ui.selectedRows.delete(id); });
+  if (ui.selectionAnchor && !documentState.rows.some((row) => row.id === ui.selectionAnchor && !row.hidden)) ui.selectionAnchor = "";
+  const allRows = filteredRows();
+  const pageCount = Math.max(1, Math.ceil(allRows.length / ui.pageSize));
+  ui.dataPage = Math.min(ui.dataPage, pageCount - 1);
+  const rows = allRows.slice(ui.dataPage * ui.pageSize, (ui.dataPage + 1) * ui.pageSize);
+  const hidden = documentState.rows.filter((row) => row.hidden).length;
+  const visibleTotal = documentState.rows.length - hidden;
+  $("#clearDataButton").hidden = documentState.rows.length === 0;
+  $("#clearDataTabButton").hidden = documentState.rows.length === 0;
+  $("#appendRowButton").hidden = allRows.length === 0;
+  $("#dataPagination").hidden = allRows.length === 0;
+  $("#rowSearch").value = ui.search;
+  $("#dataSummary").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
+  const gridWidth = (column) => Math.min(600, Math.max(120, Number(column.gridWidth) || 180));
+  $("#dataColgroup").innerHTML = `<col style="width:38px"><col style="width:43px">${documentState.columns.map((column) => `<col data-column-id="${escapeHtml(column.id)}" style="width:${gridWidth(column)}px">`).join("")}<col style="width:42px">`;
+  const totalWidth = 38 + 43 + 42 + documentState.columns.reduce((sum, column) => sum + gridWidth(column), 0);
+  $(".data-table").style.width = `max(100%, ${totalWidth}px)`;
+  $("#dataHead").innerHTML = `<tr><th><input id="selectAllRows" type="checkbox" aria-label="Select all filtered rows" ${allRows.length && allRows.every((row) => ui.selectedRows.has(row.id)) ? "checked" : ""}></th><th class="row-number-head">#</th>${documentState.columns.map((column) => `<th class="field-head" data-column-id="${escapeHtml(column.id)}"><span class="field-head-content"><button class="data-field-title" data-action="open-field-sheet" title="Edit ${escapeHtml(column.label)}">${escapeHtml(column.label)}</button><button class="data-field-menu-trigger" data-action="open-field-menu" title="${escapeHtml(column.label)} options" aria-label="${escapeHtml(column.label)} options">•••</button></span><span class="column-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize ${escapeHtml(column.label)} column" aria-valuemin="120" aria-valuemax="600" aria-valuenow="${gridWidth(column)}"></span></th>`).join("")}<th class="row-menu-head"></th></tr>`;
+  $("#dataBody").innerHTML = rows.map((row) => {
+    const originalIndex = documentState.rows.indexOf(row) + 1;
+    const customized = Object.keys(row.overrides || {}).length > 0;
+    const hiddenReason = rowHiddenReason(row);
+    return `<tr data-row-id="${row.id}" class="${ui.selectedRows.has(row.id) ? "selected" : ""} ${customized ? "customized" : ""} ${hiddenReason ? "excluded" : ""}" title="${escapeHtml(hiddenReason)}">
+      <td class="select-cell"><input class="row-select" type="checkbox" ${ui.selectedRows.has(row.id) ? "checked" : ""} aria-label="Select row ${originalIndex}"></td>
+      <td class="row-number" draggable="true">⠿ ${originalIndex}${hiddenReason ? " ⊘" : ""}${customized ? " ✦" : ""}</td>
+      ${documentState.columns.map((column) => `<td><input type="text" class="cell-input ${column.style === "mono" || column.type === "password" ? "password-cell" : ""}" data-column-id="${column.id}" value="${escapeHtml(row.values[column.id] ?? "")}" aria-label="${escapeHtml(column.label)}, row ${originalIndex}"></td>`).join("")}
+      <td class="row-menu"><button class="row-menu-button" data-action="row-options" title="Row options" aria-label="Row ${originalIndex} options">•••</button></td>
+    </tr>`;
+  }).join("");
+  const empty = $("#dataEmpty");
+  empty.hidden = Boolean(allRows.length);
+  if (!allRows.length) {
+    if (ui.search) {
+      empty.innerHTML = `<div class="empty-icon">⌕</div><h2>No matching rows</h2><p>Nothing in the visible rows matches “${escapeHtml(ui.search)}”.</p><button class="button quiet compact" data-action="clear-row-search" type="button">Clear filter</button>`;
+    } else if (documentState.rows.length && hidden === documentState.rows.length) {
+      empty.innerHTML = `<div class="empty-icon">▦</div><h2>No visible rows</h2><p>All ${hidden} stored row${hidden === 1 ? " is" : "s are"} hidden from the data list and PDF.</p>`;
+    } else {
+      empty.innerHTML = `<div class="empty-icon">▦</div><h2>No rows</h2>`;
+    }
+  }
+  const rowText = ui.search ? `${allRows.length} of ${visibleTotal} rows` : `${allRows.length} rows`;
+  $("#visibleRowCount").textContent = hidden ? `${rowText} · ${hidden} hidden` : rowText;
+  $("#visibleRowCount").classList.toggle("warning-text", hidden > 0);
+  const hiddenButton = $("#manageHiddenButton");
+  hiddenButton.hidden = hidden === 0;
+  hiddenButton.textContent = `Manage hidden (${hidden})`;
+  $("#pageSizeInput").value = String(ui.pageSize);
+  $("#dataPageLabel").textContent = allRows.length ? `Page ${ui.dataPage + 1} / ${pageCount}` : "No pages";
+  $("#dataPrevButton").disabled = !allRows.length || ui.dataPage <= 0;
+  $("#dataNextButton").disabled = !allRows.length || ui.dataPage >= pageCount - 1;
+  renderSelectionToolbar();
+}
+
+function focusGridCell(rowId, columnId) {
+  requestAnimationFrame(() => {
+    const row = [...document.querySelectorAll("tr[data-row-id]")].find((item) => item.dataset.rowId === rowId);
+    const input = [...(row?.querySelectorAll(".cell-input") || [])].find((item) => item.dataset.columnId === columnId);
+    input?.focus();
+  });
+}
+
+function commitGridCellValue(input) {
+  const rowId = input?.closest("tr[data-row-id]")?.dataset.rowId;
+  const columnId = input?.dataset.columnId;
+  if (!rowId || !columnId) return false;
+  const row = documentState.rows.find((item) => item.id === rowId);
+  if (!row || String(row.values[columnId] ?? "") === input.value) return false;
+  commit((state) => {
+    const next = state.rows.find((item) => item.id === rowId);
+    if (next) next.values[columnId] = input.value;
+  });
+  return true;
+}
+
+function moveGridCell(input, rowDirection = 0, columnDirection = 0) {
+  const rowId = input.closest("tr[data-row-id]")?.dataset.rowId;
+  const columnId = input.dataset.columnId;
+  if (!rowId || !columnId) return;
+  commitGridCellValue(input);
+  const visible = filteredRows();
+  const columns = documentState.columns;
+  const rowIndex = visible.findIndex((item) => item.id === rowId);
+  const columnIndex = columns.findIndex((column) => column.id === columnId);
+  if (rowIndex < 0 || columnIndex < 0) return;
+  if (columnDirection) {
+    const nextColumnIndex = columnIndex + columnDirection;
+    if (nextColumnIndex >= 0 && nextColumnIndex < columns.length) {
+      focusGridCell(rowId, columns[nextColumnIndex].id);
+      return;
+    }
+    const nextRow = visible[rowIndex + (columnDirection > 0 ? 1 : -1)];
+    if (nextRow) {
+      focusGridCell(nextRow.id, columns[columnDirection > 0 ? 0 : columns.length - 1].id);
+    } else if (columnDirection > 0 && !ui.search) {
+      addRow();
+    }
+    return;
+  }
+  const nextRow = visible[rowIndex + rowDirection];
+  if (nextRow) {
+    focusGridCell(nextRow.id, columnId);
+  } else if (rowDirection > 0 && !ui.search) {
+    addRow();
+  }
+}
+
+function renderSelectionToolbar() {
+  const count = [...ui.selectedRows].filter((id) => documentState.rows.some((row) => row.id === id)).length;
+  const printableCount = printScopeRows(previewDocumentSource()).length;
+  $("#selectionToolbar").hidden = count === 0;
+  $("#selectionCount").textContent = printableCount === count ? `${count} selected` : `${count} selected · ${printableCount} printable`;
+  $("#selectionCount").title = "Shift-click a row checkbox to select a range";
+  $("#selectionCount").classList.toggle("warning-text", printableCount < count);
+  const bulkEditButton = $("#bulkEditButton");
+  if (bulkEditButton) bulkEditButton.disabled = count === 0;
+  const customizeButton = $("#customizeSelectedButton");
+  if (customizeButton) customizeButton.disabled = count === 0;
+  const resetButton = $("#resetSelectedLayoutsButton");
+  if (resetButton) resetButton.disabled = count === 0;
+}
+
+function openSelectedRowOptions() {
+  const row = documentState.rows.find((item) => ui.selectedRows.has(item.id));
+  if (!row) { toast("Select at least one row first", "error"); return; }
+  openRowOptions(row.id);
+}
+
+function selectedRows() {
+  return documentState.rows.filter((row) => ui.selectedRows.has(row.id));
+}
+
+function clearRowSelection() {
+  ui.selectedRows.clear();
+  ui.selectionAnchor = "";
+}
+
+function bulkEditTransform(value, operation, fields = {}) {
+  const text = String(value ?? "");
+  switch (operation) {
+    case "set": return String(fields.value ?? "");
+    case "clear": return "";
+    case "replace": return fields.find ? text.split(String(fields.find)).join(String(fields.replacement ?? "")) : text;
+    case "prefix": return `${String(fields.text ?? "")}${text}`;
+    case "suffix": return `${text}${String(fields.text ?? "")}`;
+    case "upper": return text.toUpperCase();
+    case "lower": return text.toLowerCase();
+    case "title": return text.replace(/\b\w/g, (letter) => letter.toUpperCase());
+    case "trim": return text.trim();
+    default: return text;
+  }
+}
+
+function bulkEditFields() {
+  const operation = $("#bulkEditOperation").value;
+  if (operation === "set") return `<label>Value<input id="bulkEditValue" type="text" placeholder="Value for every selected row" autocomplete="off"></label>`;
+  if (operation === "replace") return `<div class="bulk-edit-inline"><label>Find<input id="bulkEditFind" type="text" placeholder="Text to find" autocomplete="off"></label><label>Replace with<input id="bulkEditReplacement" type="text" placeholder="Replacement text" autocomplete="off"></label></div>`;
+  if (operation === "prefix" || operation === "suffix") return `<label>${operation === "prefix" ? "Prefix" : "Suffix"}<input id="bulkEditText" type="text" placeholder="Text to add" autocomplete="off"></label>`;
+  return `<span class="bulk-edit-helper">This operation changes the selected column in place.</span>`;
+}
+
+function bulkEditFieldValues() {
+  return {
+    value: $("#bulkEditValue")?.value || "",
+    find: $("#bulkEditFind")?.value || "",
+    replacement: $("#bulkEditReplacement")?.value || "",
+    text: $("#bulkEditText")?.value || "",
+  };
+}
+
+function updateBulkEditPreview() {
+  const rows = selectedRows();
+  const column = documentState.columns.find((item) => item.id === $("#bulkEditColumn")?.value);
+  const operation = $("#bulkEditOperation")?.value || "set";
+  const preview = $("#bulkEditPreview");
+  if (!preview) return;
+  if (!rows.length) { preview.textContent = "Select at least one row first."; return; }
+  if (!column) { preview.textContent = "Choose a column to edit."; return; }
+  const fields = bulkEditFieldValues();
+  if (operation === "replace" && !fields.find) { preview.textContent = "Enter text to find before applying a replacement."; preview.classList.add("warning"); return; }
+  preview.classList.remove("warning");
+  const changed = rows.filter((row) => String(row.values?.[column.id] ?? "") !== bulkEditTransform(row.values?.[column.id] ?? "", operation, fields));
+  const first = rows.find((row) => changed.includes(row));
+  const sample = first ? ` Preview: “${String(first.values?.[column.id] ?? "").slice(0, 32)}” → “${bulkEditTransform(first.values?.[column.id] ?? "", operation, fields).slice(0, 32)}”.` : " No values would change.";
+  preview.textContent = `${changed.length} of ${rows.length} selected row${rows.length === 1 ? "" : "s"} will change in “${column.label}”.${sample}`;
+}
+
+function renderBulkEditFields() {
+  const fields = $("#bulkEditFields");
+  if (!fields) return;
+  fields.innerHTML = bulkEditFields();
+  fields.querySelectorAll("input").forEach((input) => input.addEventListener("input", updateBulkEditPreview));
+  updateBulkEditPreview();
+}
+
+function openBulkEdit() {
+  const rows = selectedRows();
+  if (!rows.length) { toast("Select at least one row first", "error"); return; }
+  $("#bulkEditSummary").textContent = `${rows.length} selected row${rows.length === 1 ? "" : "s"} · changes can be undone`;
+  $("#bulkEditColumn").innerHTML = documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}">${escapeHtml(column.label)}</option>`).join("");
+  $("#bulkEditOperation").value = "set";
+  renderBulkEditFields();
+  $("#bulkEditDialog").showModal();
+  requestAnimationFrame(() => $("#bulkEditColumn").focus());
+}
+
+function applyBulkEdit() {
+  const rows = selectedRows();
+  const column = documentState.columns.find((item) => item.id === $("#bulkEditColumn").value);
+  const operation = $("#bulkEditOperation").value;
+  const fields = bulkEditFieldValues();
+  if (!rows.length || !column) { toast("Select rows and a column first", "error"); return; }
+  if (operation === "replace" && !fields.find) { toast("Enter text to find before replacing", "error"); return; }
+  const changed = rows.filter((row) => String(row.values?.[column.id] ?? "") !== bulkEditTransform(row.values?.[column.id] ?? "", operation, fields));
+  if (!changed.length) { $("#bulkEditDialog").close(); toast("No selected values needed changing"); return; }
+  const ids = new Set(changed.map((row) => row.id));
+  commit((state) => state.rows.forEach((row) => {
+    if (ids.has(row.id)) row.values[column.id] = bulkEditTransform(row.values?.[column.id] ?? "", operation, fields);
+  }));
+  $("#bulkEditDialog").close();
+  toast(`Updated ${changed.length} row${changed.length === 1 ? "" : "s"} in “${column.label}”`);
+}
+
+function columnOptions(selected) {
+  return documentState.columns.map((column) => `<option value="${column.id}" ${column.id === selected ? "selected" : ""}>${escapeHtml(column.label)}</option>`).join("");
+}
+
+function moveField(columnId, direction) {
+  const index = documentState.columns.findIndex((column) => column.id === columnId);
+  const next = index + direction;
+  if (index < 0 || next < 0 || next >= documentState.columns.length) return;
+  commit((state) => {
+    const [column] = state.columns.splice(index, 1);
+    state.columns.splice(next, 0, column);
+  });
+  closeDataFieldMenu();
+  if ($("#fieldSheetDialog").open) renderFieldSheet();
+}
+
+function duplicateField(columnId) {
+  commit((state) => {
+    const source = state.columns.find((column) => column.id === columnId);
+    if (!source) return;
+    const copy = { ...clone(source), id: uniqueColumnId(`${source.id}_copy`, state.columns), label: `${source.label} copy` };
+    state.columns.splice(state.columns.indexOf(source) + 1, 0, copy);
+    state.rows.forEach((row) => { row.values[copy.id] = row.values[source.id] ?? ""; });
+  });
+  closeDataFieldMenu();
+}
+
+async function deleteField(columnId) {
+  if (documentState.columns.length === 1) { toast("A studio needs at least one field.", "error"); return; }
+  const column = documentState.columns.find((item) => item.id === columnId);
+  if (!column || !await confirmAction("Delete field?", `“${column.label}” and its values will be removed.`, "Delete")) return;
+  commit((state) => {
+    state.columns = state.columns.filter((item) => item.id !== columnId);
+    state.rows.forEach((row) => { delete row.values[columnId]; delete row.overrides[columnId]; });
+    state.rules = state.rules.filter((rule) => (rule.action !== "show_field" && rule.action !== "hide_field" || rule.target !== columnId) && !rule.conditions.some((condition) => condition.field === columnId));
+  });
+  closeDataFieldMenu();
+  if ($("#fieldSheetDialog").open) $("#fieldSheetDialog").close();
+}
+
+function closeDataFieldMenu() {
+  $("#dataFieldMenu").hidden = true;
+  ui.dataFieldMenuId = "";
+}
+
+function openDataFieldMenu(columnId, anchor) {
+  const column = documentState.columns.find((item) => item.id === columnId);
+  if (!column) return;
+  ui.dataFieldMenuId = columnId;
+  const menu = $("#dataFieldMenu");
+  $("#dataFieldRenameInput").value = column.label;
+  const index = documentState.columns.indexOf(column);
+  $("#dataFieldMoveLeft").disabled = index === 0;
+  $("#dataFieldMoveRight").disabled = index === documentState.columns.length - 1;
+  $("#dataFieldDeleteButton").disabled = documentState.columns.length === 1;
+  menu.hidden = false;
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(window.innerWidth - 236, rect.left))}px`;
+  menu.style.top = `${Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 4))}px`;
+  requestAnimationFrame(() => $("#dataFieldRenameInput").select());
+}
+
+function renderFieldSheet() {
+  const column = documentState.columns.find((item) => item.id === ui.fieldSheetId);
+  if (!column) { $("#fieldSheetDialog").close(); return; }
+  const index = documentState.columns.indexOf(column);
+  $("#fieldSheetName").value = column.label;
+  $("#fieldSheetType").value = column.type;
+  $("#fieldSheetDefault").value = column.defaultValue || "";
+  $("#fieldSheetStyle").value = column.style;
+  $("#fieldSheetVisibility").value = column.visibility;
+  $("#fieldSheetTransform").value = column.valueTransform || "as_entered";
+  $("#fieldSheetAlign").value = column.valueAlign || "default";
+  $("#fieldSheetGridWidth").value = String(column.gridWidth || 180);
+  $("#fieldSheetMoveLeft").disabled = index === 0;
+  $("#fieldSheetMoveRight").disabled = index === documentState.columns.length - 1;
+  $("#fieldSheetDelete").disabled = documentState.columns.length === 1;
+}
+
+function openFieldSheet(columnId) {
+  if (!documentState.columns.some((column) => column.id === columnId)) return;
+  closeDataFieldMenu();
+  ui.fieldSheetId = columnId;
+  renderFieldSheet();
+  $("#fieldSheetDialog").showModal();
+  requestAnimationFrame(() => $("#fieldSheetName").focus());
+}
+
+function renderColumns() {
+  const query = ui.fieldSearch.trim().toLowerCase();
+  const columns = documentState.columns.filter((column) => !query || `${column.label} ${column.id} ${column.group || ""}`.toLowerCase().includes(query));
+  $("#fieldSearch").value = ui.fieldSearch;
+  $("#fieldSummary").textContent = query ? `${columns.length} of ${documentState.columns.length} fields` : `${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
+  $("#columnList").innerHTML = columns.length ? columns.map((column) => `<article class="column-row" data-column-id="${column.id}">
+    <div class="column-row-top">
+      <button class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)} to reorder">⠿</button>
+      <label class="column-control column-name-control"><span>Name</span><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field name"></label>
+      <label class="column-control column-type-control"><span>Type</span><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select></label>
+      <label class="column-control column-visibility-control"><span>Show on slip</span><select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select></label>
+      <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field" aria-label="Duplicate ${escapeHtml(column.label)} field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field" aria-label="Delete ${escapeHtml(column.label)} field">×</button></div>
+    </div>
+    <div class="column-row-bottom">
+      <label class="column-control column-default-control"><span>Default when adding a row</span><input class="column-default-input" type="text" value="${escapeHtml(column.defaultValue)}" placeholder="None" aria-label="${escapeHtml(column.label)} default value" autocomplete="off"></label>
+      <label class="column-control column-format-control"><span>Value style</span><select class="column-format-input" aria-label="${escapeHtml(column.label)} value style"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select></label>
+      <details class="field-options"><summary>More options</summary><div><label>Text<select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select></label><label>Alignment<select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></label></div></details>
+    </div>
+  </article>`).join("") : `<div class="empty-state compact-empty"><div class="empty-icon">⌕</div><h2>No matching fields</h2><button class="button quiet compact" type="button" data-action="clear-field-search">Clear filter</button></div>`;
+}
+
+const operatorLabels = {
+  not_empty: "has a value",
+  empty: "is empty",
+  equals: "equals",
+  not_equals: "does not equal",
+  contains: "contains",
+  not_contains: "does not contain",
+  starts_with: "starts with",
+  ends_with: "ends with",
+  greater_than: "is greater than",
+  less_than: "is less than",
+  matches: "matches pattern",
+};
+
+const actionLabels = {
+  show_field: "Show field",
+  hide_field: "Hide field",
+  hide_slip: "Hide entire slip",
+  set_note: "Set text below slip",
+  clear_note: "Clear text below slip",
+};
+
+function actionOptions(selected) {
+  return Object.entries(actionLabels).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function operatorOptions(selected) {
+  return Object.entries(operatorLabels).map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function renderRules() {
+  const active = documentState.rules.filter((rule) => rule.enabled !== false).length;
+  const query = ui.ruleSearch.trim().toLowerCase();
+  const visibleRules = documentState.rules.filter((rule) => {
+    if (!query) return true;
+    const target = documentState.columns.find((column) => column.id === rule.target)?.label || (rule.action === "hide_slip" ? "Entire slip" : ["set_note", "clear_note"].includes(rule.action) ? "Text below slip" : "");
+    const conditionText = (rule.conditions || []).map((condition) => `${documentState.columns.find((column) => column.id === condition.field)?.label || ""} ${operatorLabels[condition.operator] || condition.operator} ${condition.value || ""}`).join(" ");
+    return `${rule.name || ""} ${rule.action || ""} ${actionLabels[rule.action] || ""} ${target} ${rule.noteText || ""} ${conditionText}`.toLowerCase().includes(query);
+  });
+  $("#ruleSearch").value = ui.ruleSearch;
+  $("#ruleHeaderSummary").textContent = query ? `${visibleRules.length} of ${documentState.rules.length} rules` : "Rules run per slip. If show and hide both match a field, hide wins.";
+  const testSelect = $("#ruleTestRowSelect");
+  const testRows = documentState.rows;
+  const testRow = testRows.find((row) => row.id === ui.ruleTestRowId);
+  if (!testRow) ui.ruleTestRowId = "";
+  const hasRules = documentState.rules.length > 0;
+  const testControl = testSelect?.closest(".rule-test-control");
+  if (testControl) testControl.hidden = !hasRules;
+  $("#ruleTestStatus").hidden = !hasRules;
+  if (testSelect) {
+    testSelect.innerHTML = `<option value="">No row selected</option>${testRows.map((row, index) => { const label = documentState.columns.map((column) => String(row.values?.[column.id] ?? "").trim()).find(Boolean) || `Row ${index + 1}`; return `<option value="${escapeHtml(row.id)}">${escapeHtml(`Row ${index + 1} · ${label}`)}${row.hidden ? " · hidden" : ""}</option>`; }).join("")}`;
+    testSelect.value = ui.ruleTestRowId;
+    testSelect.disabled = !testRows.length;
+  }
+  const selectedTestRow = testRows.find((row) => row.id === ui.ruleTestRowId);
+  const selectedHiddenReason = selectedTestRow ? rowHiddenReason(selectedTestRow) : "";
+  $("#ruleTestStatus").textContent = selectedTestRow ? (selectedHiddenReason || "Printable · rule matches are shown on each card") : (testRows.length ? "Select a row to inspect its rule matches" : "Add or import rows to test rules");
+  $("#ruleSummary").textContent = query ? `${visibleRules.length} shown · ${active} active · ${documentState.rules.length} total` : `${active} active rule${active === 1 ? "" : "s"} · ${documentState.rules.length} total`;
+  $("#disableRulesButton").textContent = active ? "Disable all" : "Enable all";
+  $("#disableRulesButton").hidden = !hasRules;
+  $("#ruleList").innerHTML = visibleRules.length ? visibleRules.map((rule, index) => { const matching = documentState.rows.filter((row) => ruleMatches(rule, row.values)).length; const testMatch = selectedTestRow && rule.enabled !== false ? ruleMatches(rule, selectedTestRow.values) : null; const testLabel = selectedTestRow ? (rule.enabled === false ? "Disabled" : testMatch ? "Matches test row" : "No match") : ""; return `<article class="rule-card ${rule.enabled === false ? "disabled" : ""}" data-rule-id="${rule.id}">
+    <header class="rule-header"><button class="drag-handle rule-drag-handle" draggable="true" title="Drag to reorder rule" aria-label="Drag rule ${index + 1}">⠿</button><span class="rule-number">${index + 1}</span><input class="rule-name-input" value="${escapeHtml(rule.name || actionLabels[rule.action] || "Rule")}" aria-label="Rule name"><span class="rule-match-count">${matching} matching</span>${testLabel ? `<span class="rule-test-chip ${testMatch ? "pass" : "fail"}">${escapeHtml(testLabel)}</span>` : ""}<label class="rule-enabled"><input class="rule-enabled-input" type="checkbox" ${rule.enabled !== false ? "checked" : ""}> Active</label><button class="icon-button small" data-action="duplicate-rule" title="Duplicate rule">⧉</button><button class="icon-button small" data-action="delete-rule" title="Delete rule">×</button></header>
+    <div class="rule-body">
+      <div class="rule-action-row"><span>Then</span><select class="rule-action-input" aria-label="Rule action">${actionOptions(rule.action)}</select>${rule.action === "hide_slip" ? `<span class="rule-target-label">Entire slip</span>` : ["set_note", "clear_note"].includes(rule.action) ? `<span class="rule-target-label">Text below slip</span>` : `<select class="rule-target-input" aria-label="Field affected by rule">${columnOptions(rule.target)}</select>`}</div>
+      ${rule.action === "set_note" ? `<label class="rule-note-control">Text to show<textarea class="rule-note-input" maxlength="1200" rows="3" aria-label="Text below slip for this rule">${escapeHtml(rule.noteText || "")}</textarea></label>` : ""}
+      <div class="conditions">
+        ${(rule.conditions || []).map((condition, conditionIndex) => `<div class="condition-row" data-condition-index="${conditionIndex}"><span class="condition-join">${conditionIndex ? (rule.match === "any" ? "OR" : "AND") : "If"}</span><select class="condition-field" aria-label="Condition field">${columnOptions(condition.field)}</select><select class="condition-operator" aria-label="Condition operator">${operatorOptions(condition.operator)}</select><input class="condition-value" aria-label="Condition value" value="${escapeHtml(condition.value || "")}" placeholder="Value" ${["empty", "not_empty"].includes(condition.operator) ? "hidden" : ""}><button class="condition-delete" data-action="delete-condition" title="Remove condition">×</button></div>`).join("")}
+        <div class="condition-footer"><button class="text-button" data-action="add-condition">＋ Add condition</button><label class="match-control">Match<select class="rule-match-input"><option value="all" ${rule.match !== "any" ? "selected" : ""}>all conditions</option><option value="any" ${rule.match === "any" ? "selected" : ""}>any condition</option></select></label><label class="negate-control"><input class="rule-negate-input" type="checkbox" ${rule.negate ? "checked" : ""}> Not</label></div>
+      </div>
+    </div>
+  </article>`; }).join("") : query && documentState.rules.length ? `<div class="empty-state compact-empty"><div class="empty-icon">⌕</div><h2>No matching rules</h2><button class="button quiet compact" type="button" data-action="clear-rule-search">Clear filter</button></div>` : "";
+  $("#rulesEmpty").hidden = Boolean(documentState.rules.length);
+}
+
+// The preview is rendered from the same server-generated PDF bytes used for export.
+// Keeping pagination in the studio avoids the browser PDF plug-in and its chrome.
+function renderLayout() {
+  const layout = documentState.layout;
+  renderColorPalettes();
+  $$(".layout-mode").forEach((button) => button.classList.toggle("active", button.dataset.mode === layout.mode));
+  const bindings = {
+    paperInput: layout.paper,
+    orientationInput: layout.orientation,
+    marginInput: layout.margin,
+    gapInput: layout.gap,
+    slipHeightInput: layout.slipHeight,
+    accentInput: layout.accent,
+    inkInput: layout.ink,
+    paperColorInput: layout.paperColor,
+    borderColorInput: layout.borderColor,
+    noteFontInput: layout.noteFont,
+    noteSizeInput: layout.noteSize,
+    labelSizeInput: layout.labelSize,
+    valueSizeInput: layout.valueSize,
+    fontInput: layout.font,
+    labelFontInput: layout.labelFont,
+    labelCaseInput: layout.labelCase,
+  };
+  Object.entries(bindings).forEach(([id, value]) => { const control = $("#" + id); if (control) control.value = value; });
+  $("#borderInput").checked = layout.showBorder;
+  $("#cutMarksInput").checked = layout.cutMarks;
+  $("#footerInput").checked = layout.footer;
+  $("#fieldLinesInput").checked = layout.fieldLines;
+  $("#filenameTimestampInput").value = layout.filenameTimestamp || "none";
+  if (document.activeElement !== $("#noteTextInput")) $("#noteTextInput").value = layout.noteText || "";
+  $("#stackedColumnsInput").value = String(layout.stackedColumns || 1);
+  $("#stackedColumnsControl").hidden = layout.mode !== "stacked";
+  $("#stackedLabelWidthInput").value = String(layout.labelWidth || 34);
+  $("#stackedLabelWidthControl").hidden = layout.mode !== "stacked";
+  $("#stackedSplitInput").value = String(layout.stackedSplit || 50);
+  $("#stackedSplitControl").hidden = layout.mode !== "stacked" || layout.stackedColumns !== 2;
+  $("#slipHeightOutput").textContent = `${layout.slipHeight} mm`;
+  const pageHeight = layout.orientation === "landscape" ? (layout.paper === "letter" ? 215.9 : 210) : (layout.paper === "letter" ? 279.4 : 297);
+  const usable = pageHeight - (2 * Number(layout.margin || 0)) - (layout.footer ? 7 : 0);
+  const perPage = Math.max(0, Math.floor((usable + Number(layout.gap || 0)) / (Number(layout.slipHeight || 1) + Number(layout.gap || 0))));
+  $("#sheetCapacity").textContent = `Up to ${perPage} slip${perPage === 1 ? "" : "s"} per page${layout.noteText || documentState.rules.some((rule) => rule.enabled !== false && rule.action === "set_note" && rule.noteText) ? " · note text may reduce capacity" : ""}`;
+}
+
+function applyPreviewZoom() {
+  $("#zoomLabel").textContent = `${ui.zoom}%`;
+}
+
+function setPreviewError(message) {
+  const error = $("#previewError");
+  if (!error) return;
+  $("#previewErrorMessage").textContent = String(message || "The PDF preview could not be rendered.");
+  error.hidden = false;
+}
+
+function clearPreviewError() {
+  const error = $("#previewError");
+  if (error) error.hidden = true;
+}
+
+function disposePdfPreview() {
+  const cleanup = ui.previewCleanup;
+  ui.previewCleanup = null;
+  if (cleanup) Promise.resolve(cleanup()).catch(() => {});
+}
+
+function clearPdfPreview(message = "Add or import rows to preview the PDF.", isError = false) {
+  ui.previewRevision += 1;
+  disposePdfPreview();
+  ui.previewReady = false;
+  const frame = $("#pdfPreviewFrame");
+  frame.hidden = true;
+  frame.removeAttribute("src");
+  const pages = $("#pdfPreviewPages");
+  pages.hidden = true;
+  pages.replaceChildren();
+  $("#previewPlaceholder").hidden = false;
+  $("#previewPlaceholder").textContent = message;
+  if (isError) setPreviewError(message);
+  else clearPreviewError();
+}
+
+function schedulePdfPreview(immediate = false) {
+  clearTimeout(ui.previewTimer);
+  if (!documentState.rows.length || !documentState.columns.length) {
+    clearPdfPreview();
+    $("#previewStats").textContent = documentState.rows.length ? "No columns" : "No rows";
+    return;
+  }
+  const printableCount = printScopeRows(previewDocumentSource()).length;
+  if (!printableCount) {
+    clearPdfPreview("No printable slips. Show a hidden row or change the hide-slip rules to render a PDF.");
+    $("#previewStats").textContent = `0 printable · ${documentState.rows.length} stored`;
+    return;
+  }
+  $("#previewStats").textContent = "Rendering…";
+  ui.previewTimer = setTimeout(renderPdfPreview, immediate ? 0 : 400);
+}
+
+async function renderPdfPages(bytes, revision) {
+  const pdfjs = await loadPdfRenderer();
+  const loadingTask = pdfjs.getDocument({ data: bytes });
+  const pdf = await loadingTask.promise;
+  if (revision !== ui.previewRevision) {
+    await Promise.resolve(pdf.destroy()).catch(() => {});
+    return null;
+  }
+  const viewport = $("#previewViewport");
+  const pages = $("#pdfPreviewPages");
+  const pageFragment = document.createDocumentFragment();
+  const fitWidth = Math.max(1, viewport.clientWidth - 32);
+  let firstPage;
+  try {
+    firstPage = await pdf.getPage(1);
+  } catch (error) {
+    await Promise.resolve(pdf.destroy()).catch(() => {});
+    throw error;
+  }
+  const baseViewport = firstPage.getViewport({ scale: 1 });
+  const fitScale = Math.min(1, fitWidth / baseViewport.width);
+  const displayScale = fitScale * (ui.zoom / 100);
+  const displayViewport = firstPage.getViewport({ scale: displayScale });
+  const pageWidth = Math.ceil(displayViewport.width);
+  const pageHeight = Math.ceil(displayViewport.height);
+  const wrappers = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "pdf-preview-page";
+    wrapper.dataset.pageNumber = String(pageNumber);
+    wrapper.dataset.rendered = "false";
+    wrapper.style.width = `${pageWidth}px`;
+    wrapper.style.height = `${pageHeight}px`;
+    wrapper.setAttribute("role", "img");
+    wrapper.setAttribute("aria-label", `PDF page ${pageNumber} of ${pdf.numPages}`);
+    wrapper.textContent = `Page ${pageNumber}`;
+    wrappers.push(wrapper);
+    pageFragment.append(wrapper);
+  }
+  pages.replaceChildren(pageFragment);
+  pages.hidden = false;
+  $("#pdfPreviewFrame").hidden = true;
+  $("#pdfPreviewFrame").removeAttribute("src");
+
+  let disposed = false;
+  let observer = null;
+  const rendered = new WeakSet();
+  const rendering = new WeakSet();
+  const renderPage = async (wrapper) => {
+    if (disposed || revision !== ui.previewRevision || rendered.has(wrapper) || rendering.has(wrapper)) return;
+    rendering.add(wrapper);
+    const pageNumber = Number(wrapper.dataset.pageNumber);
+    let page = null;
+    try {
+      page = pageNumber === 1 ? firstPage : await pdf.getPage(pageNumber);
+      if (disposed || revision !== ui.previewRevision) return;
+      const pageViewport = page.getViewport({ scale: displayScale });
+      const outputScale = Math.max(1, window.devicePixelRatio || 1);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.ceil(pageViewport.width * outputScale));
+      canvas.height = Math.max(1, Math.ceil(pageViewport.height * outputScale));
+      canvas.style.width = `${Math.ceil(pageViewport.width)}px`;
+      canvas.style.height = `${Math.ceil(pageViewport.height)}px`;
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute("aria-label", `PDF page ${pageNumber} of ${pdf.numPages}`);
+      const renderViewport = page.getViewport({ scale: pageViewport.scale * outputScale });
+      await page.render({ canvasContext: canvas.getContext("2d", { alpha: false }), viewport: renderViewport }).promise;
+      if (disposed || revision !== ui.previewRevision) return;
+      wrapper.replaceChildren(canvas);
+      wrapper.dataset.rendered = "true";
+      rendered.add(wrapper);
+    } finally {
+      rendering.delete(wrapper);
+      page?.cleanup?.();
+    }
+  };
+  const renderDeferredPage = (wrapper) => {
+    renderPage(wrapper).catch(() => {
+      if (disposed || revision !== ui.previewRevision) return;
+      wrapper.dataset.rendered = "error";
+      wrapper.textContent = "Page unavailable";
+    });
+  };
+  if (window.IntersectionObserver) {
+    // The pages element is the actual scrolling surface. Observing against it
+    // avoids treating every page as visible when the outer panel itself does
+    // not scroll.
+    observer = new IntersectionObserver((entries) => entries.filter((entry) => entry.isIntersecting).forEach((entry) => renderDeferredPage(entry.target)), { root: pages, rootMargin: "600px 0px" });
+    wrappers.forEach((wrapper) => observer.observe(wrapper));
+  } else {
+    wrappers.forEach(renderDeferredPage);
+  }
+  try {
+    await renderPage(wrappers[0]);
+  } catch (error) {
+    disposed = true;
+    observer?.disconnect();
+    await Promise.resolve(pdf.destroy()).catch(() => {});
+    throw error;
+  }
+  const cleanup = async () => {
+    disposed = true;
+    observer?.disconnect();
+    await Promise.resolve(pdf.destroy()).catch(() => {});
+  };
+  ui.previewCleanup = cleanup;
+  return pdf.numPages;
+}
+
+async function renderPdfPreview() {
+  const revision = ++ui.previewRevision;
+  disposePdfPreview();
+  const renderAttempt = async (attempt) => {
+    if (revision !== ui.previewRevision) return;
+    try {
+      const source = printScopeSource();
+      const response = await fetch("/api/pdf", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document: source }),
+      });
+      if (!response.ok) {
+        let message = "The PDF preview could not be rendered.";
+        try { message = (await response.json()).error || message; } catch (_) {}
+        throw new Error(message);
+      }
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/pdf")) throw new Error("The preview server returned an invalid PDF response.");
+      const bytes = await response.arrayBuffer();
+      if (revision !== ui.previewRevision) return;
+      const pageCount = await renderPdfPages(bytes, revision);
+      if (revision !== ui.previewRevision) return;
+      ui.previewReady = true;
+      const frame = $("#pdfPreviewFrame");
+      frame.hidden = true;
+      frame.removeAttribute("src");
+      $("#previewPlaceholder").hidden = true;
+      clearPreviewError();
+      const printableCount = source.rows.length;
+      const scopeLabel = ui.selectedRows.size ? `${ui.selectedRows.size} selected · ` : "";
+      const pageLabel = `${pageCount} page${pageCount === 1 ? "" : "s"}`;
+      $("#previewStats").textContent = `${scopeLabel}${printableCount} printable · ${pageLabel} · ${documentState.layout.mode}`;
+      $("#zoomLabel").textContent = `${ui.zoom}%`;
+    } catch (error) {
+      if (revision !== ui.previewRevision) return;
+      if (attempt < 2) {
+        setTimeout(() => renderAttempt(attempt + 1), 250 * (attempt + 1));
+        return;
+      }
+      if (ui.previewReady) {
+        $("#previewStats").textContent = "Preview update failed · showing last render";
+        setPreviewError(`Could not refresh the preview: ${error.message}`);
+        return;
+      }
+      clearPdfPreview(`PDF preview error: ${error.message}`, true);
+      $("#previewStats").textContent = "Preview unavailable";
+    }
+  };
+  renderAttempt(0);
+}
+
+function renderPreview() {
+  schedulePdfPreview();
+}
+
+function addRow() {
+  // A newly created row has no guarantee of matching the active filter. Clear
+  // it so the row is immediately visible and the first cell can receive focus.
+  ui.search = "";
+  ui.dataPage = 0;
+  const row = { id: uid("row"), values: Object.fromEntries(documentState.columns.map((column) => [column.id, column.defaultValue ?? ""])), hidden: false, overrides: {} };
+  commit((state) => state.rows.push(row));
+  showView("data");
+  requestAnimationFrame(() => $(`[data-row-id="${row.id}"] .cell-input`)?.focus());
+}
+
+function addColumn(label = "New field") {
+  ui.fieldSearch = "";
+  const id = uniqueColumnId(label);
+  commit((state) => {
+    state.columns.push({ id, label, sourceNames: [], group: "", type: "text", style: "standard", valueAlign: "default", defaultValue: "", visibility: "always" });
+    state.rows.forEach((row) => { row.values[id] = ""; });
+  });
+  showView("columns");
+  requestAnimationFrame(() => $(`[data-column-id="${id}"] .column-label-input`)?.select());
+}
+
+function uniqueColumnId(label, existing = documentState.columns) {
+  const base = String(label || "column").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30) || "column";
+  const ids = new Set(existing.map((column) => column.id));
+  let candidate = base;
+  let suffix = 2;
+  while (ids.has(candidate)) candidate = `${base}_${suffix++}`;
+  return candidate;
+}
+
+function addRule() {
+  ui.ruleSearch = "";
+  const first = documentState.columns[0]?.id || "";
+  const rule = { id: uid("rule"), name: "New rule", enabled: true, action: "hide_field", target: first, match: "all", conditions: [{ field: first, operator: "empty", value: "" }] };
+  commit((state) => state.rules.push(rule));
+  showView("rules");
+}
+
+function addNoteRule() {
+  ui.ruleSearch = "";
+  const first = documentState.columns[0]?.id || "";
+  const rule = { id: uid("rule"), name: "Set text below slip", enabled: true, action: "set_note", target: "", noteText: "", match: "all", conditions: [{ field: first, operator: "not_empty", value: "" }] };
+  commit((state) => state.rules.push(rule));
+  showView("rules");
+  requestAnimationFrame(() => $("#ruleList .rule-card:last-child .rule-note-input")?.focus());
+}
+
+function openRowOptions(rowId) {
+  const row = documentState.rows.find((item) => item.id === rowId);
+  if (!row) return;
+  ui.rowOptionsId = rowId;
+  $("#rowOptionsName").textContent = documentState.columns.map((column) => row.values[column.id]).find(Boolean) || `Row ${documentState.rows.indexOf(row) + 1}`;
+  $("#rowPrintableInput").checked = !row.hidden;
+  $("#rowOverrideList").innerHTML = documentState.columns.map((column) => `<label class="override-row"><strong>${escapeHtml(column.label)}</strong><select data-column-id="${column.id}"><option value="auto" ${row.overrides[column.id] == null ? "selected" : ""}>Automatic</option><option value="show" ${row.overrides[column.id] === true ? "selected" : ""}>Always show</option><option value="hide" ${row.overrides[column.id] === false ? "selected" : ""}>Always hide</option></select></label>`).join("");
+  const copyButton = $("#copyRowVisibilityButton");
+  if (copyButton) copyButton.hidden = !(ui.selectedRows.size > 1 && ui.selectedRows.has(rowId));
+  if (!$("#rowOptionsDialog").open) $("#rowOptionsDialog").showModal();
+}
+
+function hiddenRowLabel(row, index) {
+  const value = documentState.columns.map((column) => String(row.values?.[column.id] ?? "").trim()).find(Boolean);
+  return value || `Row ${documentState.rows.indexOf(row) + 1 || index + 1}`;
+}
+
+function renderHiddenRows() {
+  const rows = documentState.rows.filter((row) => row.hidden);
+  $("#hiddenRowsSummary").textContent = rows.length ? `${rows.length} hidden row${rows.length === 1 ? "" : "s"} · available to rules, not printed` : "No hidden rows";
+  $("#hiddenRowsList").innerHTML = rows.map((row, index) => `<label class="hidden-row-item"><input class="hidden-row-checkbox" type="checkbox" data-row-id="${escapeHtml(row.id)}" aria-label="Select hidden row ${index + 1}"><strong>${escapeHtml(hiddenRowLabel(row, index))}</strong><small>Row ${documentState.rows.indexOf(row) + 1}</small></label>`).join("") || `<div class="template-empty">Hidden rows will appear here.</div>`;
+  $("#selectAllHiddenRows").checked = false;
+  $("#selectAllHiddenRows").disabled = !rows.length;
+  $("#showHiddenSelectedButton").disabled = true;
+}
+
+function openHiddenRows() {
+  if (!documentState.rows.some((row) => row.hidden)) { toast("There are no hidden rows"); return; }
+  renderHiddenRows();
+  $("#hiddenRowsDialog").showModal();
+}
+
+function updateHiddenRowSelection() {
+  const checks = $$(".hidden-row-checkbox", $("#hiddenRowsList"));
+  const selected = checks.filter((input) => input.checked).length;
+  $("#selectAllHiddenRows").checked = Boolean(checks.length && selected === checks.length);
+  $("#showHiddenSelectedButton").disabled = selected === 0;
+}
+
+function showSelectedHiddenRows() {
+  const ids = new Set($$(".hidden-row-checkbox:checked", $("#hiddenRowsList")).map((input) => input.dataset.rowId));
+  if (!ids.size) return;
+  commit((state) => state.rows.forEach((row) => { if (ids.has(row.id)) row.hidden = false; }));
+  $("#hiddenRowsDialog").close();
+  toast(`${ids.size} hidden row${ids.size === 1 ? "" : "s"} made printable`);
+}
+
+function resetSelectedVisibility() {
+  const ids = new Set(ui.selectedRows);
+  if (!ids.size) { toast("Select at least one row first", "error"); return; }
+  const customized = selectedRows().filter((row) => Object.keys(row.overrides || {}).length);
+  if (!customized.length) { toast("Selected rows already use automatic visibility"); return; }
+  commit((state) => state.rows.forEach((row) => { if (ids.has(row.id)) row.overrides = {}; }));
+  toast(`Reset visibility on ${customized.length} selected row${customized.length === 1 ? "" : "s"}`);
+}
+
+function copyRowVisibilityToSelection() {
+  const source = documentState.rows.find((row) => row.id === ui.rowOptionsId);
+  const ids = new Set(ui.selectedRows);
+  if (!source || ids.size < 2 || !ids.has(source.id)) {
+    toast("Select the source row and at least one other row first", "error");
+    return;
+  }
+  const overrides = clone(source.overrides || {});
+  commit((state) => state.rows.forEach((row) => { if (ids.has(row.id)) row.overrides = clone(overrides); }));
+  toast(`Applied field visibility to ${ids.size} selected rows`);
+}
+
+function toast(message, type = "") {
+  const element = document.createElement("div");
+  element.className = `toast ${type}`;
+  element.textContent = message;
+  $("#toastRegion").append(element);
+  setTimeout(() => element.remove(), 3200);
+}
+
+function confirmAction(title, message, label = "Confirm") {
+  $("#confirmTitle").textContent = title;
+  $("#confirmMessage").textContent = message;
+  $("#confirmActionButton").textContent = label;
+  const dialog = $("#confirmDialog");
+  dialog.showModal();
+  return new Promise((resolve) => dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true }));
+}
+
+function downloadBlob(blob, filename) {
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function exportCsv() {
+  const source = previewDocumentSource();
+  const lines = [source.columns.map((column) => csvCell(column.label)).join(",")];
+  source.rows.forEach((row) => lines.push(source.columns.map((column) => csvCell(row.values?.[column.id] ?? "")).join(",")));
+  downloadBlob(new Blob([`\uFEFF${lines.join("\r\n")}\r\n`], { type: "text/csv;charset=utf-8" }), `${safeFilename(source.name)}.csv`);
+  toast("CSV exported");
+}
+
+function parseClipboardGrid(text) {
+  const normalised = String(text || "").replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+  if (!normalised) return [];
+  return normalised.split("\n").map((line) => line.split("\t"));
+}
+
+function pasteIntoDataGrid(event) {
+  const input = event.target.closest(".cell-input");
+  const text = event.clipboardData?.getData("text/plain") || "";
+  if (!input || (!text.includes("\t") && !text.includes("\n"))) return;
+  const grid = parseClipboardGrid(text);
+  if (!grid.length) return;
+  const rowElement = input.closest("tr[data-row-id]");
+  const rowId = rowElement?.dataset.rowId;
+  const columnId = input.dataset.columnId;
+  const visible = filteredRows();
+  const visibleStart = visible.findIndex((row) => row.id === rowId);
+  const columnStart = documentState.columns.findIndex((column) => column.id === columnId);
+  if (visibleStart < 0 || columnStart < 0) return;
+  const writableColumns = documentState.columns.length - columnStart;
+  if (!writableColumns) return;
+  const rowIds = visible.slice(visibleStart, visibleStart + grid.length).map((row) => row.id);
+  const additions = Math.max(0, grid.length - rowIds.length);
+  event.preventDefault();
+  commit((state) => {
+    for (let index = 0; index < additions; index += 1) {
+      const row = { id: uid("row"), values: Object.fromEntries(state.columns.map((column) => [column.id, column.defaultValue ?? ""])), hidden: false, overrides: {} };
+      state.rows.push(row);
+      rowIds.push(row.id);
+    }
+    grid.forEach((line, rowOffset) => {
+      const row = state.rows.find((item) => item.id === rowIds[rowOffset]);
+      if (!row) return;
+      line.slice(0, writableColumns).forEach((value, columnOffset) => {
+        row.values[state.columns[columnStart + columnOffset].id] = value;
+      });
+    });
+  });
+  const cells = grid.reduce((total, line) => total + Math.min(line.length, writableColumns), 0);
+  toast(`Pasted ${cells} cell${cells === 1 ? "" : "s"} across ${grid.length} row${grid.length === 1 ? "" : "s"}`);
+}
+
+async function copyVisibleRows() {
+  const source = previewDocumentSource();
+  const query = ui.search.trim().toLowerCase();
+  const rows = source.rows.filter((row) => !row.hidden && (!query || rowValuesText(row).includes(query)));
+  const text = [source.columns.map((column) => column.label).join("\t"), ...rows.map((row) => source.columns.map((column) => String(row.values?.[column.id] ?? "")).join("\t"))].join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`${rows.length} row${rows.length === 1 ? "" : "s"} copied`);
+  } catch (_) {
+    toast("Clipboard access was not available", "error");
+  }
+}
+
+function safeFilename(value) {
+  return String(value || "password-slips").replace(/[^a-z0-9._ -]+/gi, "").trim() || "password-slips";
+}
+
+function currentDateStamp(now = new Date()) {
+  return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+}
+
+function pdfDownloadFilename(source, filenameSuffix = "") {
+  const mode = source?.layout?.filenameTimestamp || (source?.layout?.appendDateToFilename ? "date" : "none");
+  const now = new Date();
+  const time = [now.getHours(), now.getMinutes()].map((value) => String(value).padStart(2, "0")).join("-");
+  const dateSuffix = mode === "datetime" ? `-${currentDateStamp(now)}_${time}` : mode === "date" ? `-${currentDateStamp(now)}` : "";
+  return `${safeFilename(source?.name)}${filenameSuffix}${dateSuffix}.pdf`;
+}
+
+async function exportPdf(source = documentState, filenameSuffix = "", triggerButton = null) {
+  if (!Array.isArray(source.rows) || !source.rows.length) { toast("There are no data rows to export. Import a sheet or add a row first.", "error"); return; }
+  if (!includedRowsFor(source).length) { toast("Every row is hidden by its row setting or a hide-slip rule.", "error"); return; }
+  if (!Array.isArray(source.columns) || !source.columns.length) { toast("Add at least one field before exporting.", "error"); return; }
+  const button = triggerButton || $("#exportPdfButton");
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Exporting…";
+  try {
+    const response = await fetch("/api/pdf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ document: source }) });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || "PDF export failed.");
+    }
+    downloadBlob(await response.blob(), pdfDownloadFilename(source, filenameSuffix));
+    const exportedCount = includedRowsFor(source).length;
+    toast(`PDF exported · ${exportedCount} slip${exportedCount === 1 ? "" : "s"}`);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function exportSelectedRows() {
+  await exportCurrentScope($("#exportSelectedButton"));
+}
+
+async function exportCurrentScope(triggerButton = null) {
+  // Build the source before checking the scope so the active grid edit is
+  // included even when that edit changes a hide-slip rule match.
+  const source = printScopeSource();
+  const rows = source.rows;
+  if (!rows.length) { toast(ui.selectedRows.size ? "No selected rows can be printed." : "There are no printable rows to export.", "error"); return; }
+  await exportPdf(source, ui.selectedRows.size ? "-selected" : "", triggerButton);
+}
+
+function currentWorkspacePreferences() {
+  return {
+    ...loadStudioPreferences(),
+    view: ui.view,
+    pageSize: ui.pageSize,
+    zoom: ui.zoom,
+    previewWidth: ui.previewWidth,
+    lastImportSheetName: ui.lastImportSheetName,
+    theme: document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+  };
+}
+
+function applyWorkspacePreferences(preferences, restoreView = false) {
+  if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) return;
+  saveStudioPreferences(preferences);
+  const next = loadStudioPreferences();
+  ui.pageSize = next.pageSize;
+  ui.zoom = next.zoom;
+  ui.previewWidth = next.previewWidth;
+  ui.lastImportSheetName = next.lastImportSheetName;
+  if (restoreView) ui.view = next.view;
+  document.documentElement.dataset.theme = next.theme;
+  setPreviewWidth(ui.previewWidth, false);
+}
+
+function downloadWorkspace() {
+  const workspace = {
+    format: "password-slip-studio-workspace",
+    version: 2,
+    savedAt: new Date().toISOString(),
+    document: documentState,
+    palettes: loadColorPalettes(),
+    preferences: currentWorkspacePreferences(),
+    importPreferences: importPreferencesSnapshot(),
+  };
+  const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: "application/json" });
+  downloadBlob(blob, `${safeFilename(documentState.name)}.password-slip-workspace`);
+  toast("Workspace saved");
+}
+
+function studioFilePayload(parsed) {
+  const format = parsed?.format || "legacy";
+  const document = format === "password-slip-studio-workspace" || format === "password-slip-studio-template" ? parsed.document : parsed;
+  if (!document || !Array.isArray(document.columns) || !Array.isArray(document.rows)) throw new Error("This file is not a valid Password Slip Studio document.");
+  return {
+    document,
+    palettes: Array.isArray(parsed?.palettes) ? parsed.palettes : null,
+    preferences: parsed?.preferences && typeof parsed.preferences === "object" ? parsed.preferences : null,
+    importPreferences: parsed?.importPreferences && typeof parsed.importPreferences === "object" ? parsed.importPreferences : null,
+    format,
+  };
+}
+
+function applyOpenedDocument(incoming, palettes, message, preferences = null, importPreferences = null, restoreView = false) {
+  pushHistory();
+  documentState = normaliseDocument(incoming);
+  if (Array.isArray(palettes)) saveColorPalettes(palettes);
+  if (importPreferences) restoreImportPreferences(importPreferences);
+  applyWorkspacePreferences(preferences, restoreView);
+  clearRowSelection();
+  ui.defaultValueEdits.clear();
+  ui.search = "";
+  ui.fieldSearch = "";
+  ui.ruleSearch = "";
+  ui.dataPage = 0;
+  changed();
+  renderAll();
+  showView(restoreView ? ui.view : "data");
+  toast(message);
+}
+
+async function loadWorkspaceFile(file) {
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    const payload = studioFilePayload(parsed);
+    if (payload.format === "password-slip-studio-template") throw new Error("This is a template. Open it from Templates.");
+    applyOpenedDocument(payload.document, payload.palettes, "Workspace opened", payload.preferences, payload.importPreferences, true);
+  } catch (error) {
+    toast(error.message || "The workspace could not be opened.", "error");
+  } finally {
+    // Let the user choose the same file again after a failed or repeated open.
+    $("#loadWorkspaceInput").value = "";
+  }
+}
+
+function templateRecordFromDocument(document, name, includeData) {
+  const templateDocument = clone(document);
+  templateDocument.name = name;
+  if (!includeData) templateDocument.rows = [];
+  const existing = loadSavedTemplates().find((item) => String(item.name || "").trim().toLowerCase() === name.trim().toLowerCase());
+  return {
+    id: existing?.id || uid("template"),
+    name,
+    savedAt: new Date().toISOString(),
+    includeData,
+    document: normaliseDocument(templateDocument),
+    palettes: loadColorPalettes(),
+    preferences: currentWorkspacePreferences(),
+    importPreferences: importPreferencesSnapshot(),
+  };
+}
+
+function storeTemplateRecord(record) {
+  const templates = loadSavedTemplates().filter((item) => item.id !== record.id && String(item.name || "").trim().toLowerCase() !== record.name.trim().toLowerCase());
+  return saveSavedTemplates([record, ...templates]);
+}
+
+function formatTemplateDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Saved template" : `Saved ${date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}`;
+}
+
+function renderTemplateList() {
+  const list = $("#templateList");
+  if (!list) return;
+  const templates = loadSavedTemplates();
+  list.innerHTML = templates.length ? templates.map((template) => {
+    const rowCount = template.document.rows.length;
+    const dataLabel = template.includeData ? `${rowCount} row${rowCount === 1 ? "" : "s"} included` : "No data included";
+    return `<article class="template-item" data-template-id="${escapeHtml(template.id)}"><div class="template-item-info"><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(formatTemplateDate(template.savedAt))} · ${escapeHtml(dataLabel)}</small></div><div class="template-item-actions"><button class="button quiet compact" type="button" data-template-action="open">Open</button><button class="button quiet compact danger" type="button" data-template-action="delete">Delete</button></div></article>`;
+  }).join("") : `<div class="template-empty">No saved templates yet. Save the current fields and layout above.</div>`;
+}
+
+function openTemplates() {
+  $("#templateNameInput").value = documentState.name;
+  $("#templateIncludeDataInput").checked = false;
+  renderTemplateList();
+  $("#templatesDialog").showModal();
+  requestAnimationFrame(() => $("#templateNameInput").focus());
+}
+
+function saveTemplateFromDialog() {
+  const name = $("#templateNameInput").value.trim() || documentState.name || "Password slip template";
+  const record = templateRecordFromDocument(documentState, name, $("#templateIncludeDataInput").checked);
+  const stored = storeTemplateRecord(record);
+  renderTemplateList();
+  toast(stored ? `Template “${name}” saved` : "Could not save the template. Storage may be full.", stored ? "" : "error");
+}
+
+function openTemplateRecord(record) {
+  if (!record?.document) return;
+  const templateDocument = clone(record.document);
+  // The include-data choice is part of the template contract. Honour it even
+  // for older or hand-edited template files that still contain a rows array.
+  if (record.includeData === false) templateDocument.rows = [];
+  applyOpenedDocument(templateDocument, record.palettes, `Template “${record.name || templateDocument.name || "Untitled"}” opened`, record.preferences, record.importPreferences, false);
+  $("#templatesDialog").close();
+}
+
+async function loadTemplateFile(file) {
+  if (!file) return;
+  try {
+    const parsed = JSON.parse(await file.text());
+    const payload = studioFilePayload(parsed);
+    if (payload.format !== "password-slip-studio-template") throw new Error("Choose a .password-slip-template file.");
+    const record = {
+      id: uid("template"),
+      name: String(parsed.name || payload.document.name || file.name.replace(/\.[^.]+$/, "")),
+      savedAt: new Date().toISOString(),
+      includeData: parsed.includeData !== false,
+      document: normaliseDocument(parsed.includeData === false ? { ...payload.document, rows: [] } : payload.document),
+      palettes: payload.palettes || [],
+      preferences: payload.preferences || null,
+      importPreferences: payload.importPreferences || {},
+    };
+    storeTemplateRecord(record);
+    openTemplateRecord(record);
+  } catch (error) {
+    toast(error.message || "The template could not be opened.", "error");
+  } finally {
+    $("#loadTemplateInput").value = "";
+  }
+}
+
+function resetImportDialog() {
+  ui.importData = null;
+  ui.importMappingSearch = "";
+  $("#importChoose").hidden = false;
+  $("#importMap").hidden = true;
+  $("#confirmImportButton").hidden = true;
+  $("#importStepLabel").textContent = "Choose a workbook";
+  $("#importMeta").textContent = "";
+  $("#workbookInput").value = "";
+  $("#importMode").value = "replace";
+  $("#importRowSelectionMode").value = "all";
+  $("#importRowVisibility").value = "printable";
+  $("#importRowNumbers").value = "";
+  $("#importHiddenRowNumbers").value = "";
+  $("#importColumnMode").value = "replace";
+  $("#mappingSearch").value = "";
+  $("#mappingSearchEmpty").hidden = true;
+  $("#importError").hidden = true;
+  $("#importError").textContent = "";
+  updateImportModeNotice();
+}
+
+function showImportError(message) {
+  const error = String(message || "The import could not be completed.");
+  $("#importError").textContent = error;
+  $("#importError").hidden = false;
+  toast(error, "error");
+}
+
+function openImport() {
+  resetImportDialog();
+  $("#importDialog").showModal();
+}
+
+async function importWorkbook(file) {
+  if (!file) return;
+  $("#importError").hidden = true;
+  $("#importError").textContent = "";
+  $("#importMeta").textContent = `Reading ${file.name}…`;
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("The selected file could not be read. Try saving a fresh copy and importing it again."));
+      reader.readAsDataURL(file);
+    });
+    const content = String(dataUrl).split(",", 2)[1];
+    const response = await fetch("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, content }) });
+    let payload;
+    try { payload = await response.json(); }
+    catch (_) { throw new Error("Studio returned an unreadable response while importing the sheet. Retry, then restart Studio if it continues."); }
+    if (!response.ok) throw new Error(payload.error || "The workbook could not be imported.");
+    if (!Array.isArray(payload.sheets) || !payload.sheets.length) throw new Error("The workbook has no readable, visible worksheets.");
+    ui.importData = payload;
+    $("#importSheetSelect").innerHTML = payload.sheets.map((sheet, index) => `<option value="${index}">${escapeHtml(sheet.name)} · ${sheet.rows.length} rows</option>`).join("");
+    const preferredSheet = ui.lastImportSheetName;
+    const preferredIndex = payload.sheets.findIndex((sheet) => normaliseImportName(sheet.name) === normaliseImportName(preferredSheet));
+    if (preferredIndex >= 0) $("#importSheetSelect").value = String(preferredIndex);
+    rememberImportSheet();
+    $("#importChoose").hidden = true;
+    $("#importMap").hidden = false;
+    $("#confirmImportButton").hidden = false;
+    $("#importStepLabel").textContent = "Choose rows and columns";
+    renderImportMapping();
+  } catch (error) {
+    const message = error instanceof TypeError
+      ? "Studio could not reach its local import service. Check that Studio is still running, then retry."
+      : error.message || "The workbook could not be imported.";
+    $("#importMeta").textContent = message;
+    showImportError(message);
+  } finally {
+    // Selecting the same workbook again should still fire the file input.
+    $("#workbookInput").value = "";
+  }
+}
+
+function normaliseImportName(value) {
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function rememberImportSheet() {
+  const sheet = ui.importData?.sheets[Number($("#importSheetSelect")?.value) || 0];
+  if (!sheet) return;
+  ui.lastImportSheetName = sheet.name;
+  saveStudioPreferences({ lastImportSheetName: sheet.name });
+}
+
+function guessedMapping(header) {
+  const normal = normaliseImportName(header);
+  const match = documentState.columns.find((column) => [column.id, column.label, ...(column.sourceNames || [])].some((name) => normaliseImportName(name) === normal));
+  if (match) return match.id;
+  const semantic = (pattern) => documentState.columns.find((column) => pattern.test(`${column.id} ${column.label}`.toLowerCase()));
+  if (/(password|passcode|passwd|pwd|temporarypass)/.test(normal)) return semantic(/password|passcode|passwd|pwd/ )?.id || "__create__";
+  if (/(username|userlogin|loginname|accountname|samaccount)/.test(normal)) return semantic(/username|login|account/ )?.id || "__create__";
+  if (/(recovery|backup|mfa|otp|authenticator|securitycode)/.test(normal)) return semantic(/recovery|code|otp|mfa/ )?.id || "__create__";
+  return "__create__";
+}
+
+function inferImportedColumnType(header, values) {
+  const normal = String(header).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (/(password|passcode|passwd|pwd|pin|secret|recovery|otp|mfa|securitycode)/.test(normal)) return "password";
+  return "text";
+}
+
+function parseImportRowNumbers(value) {
+  const numbers = new Set();
+  const invalid = [];
+  const tokens = String(value || "").split(/[\s,]+/).map((token) => token.trim()).filter(Boolean);
+  tokens.forEach((token) => {
+    const single = /^(\d+)$/.exec(token);
+    const range = /^(\d+)\s*-\s*(\d+)$/.exec(token);
+    if (single) {
+      const number = Number(single[1]);
+      if (number >= 2) numbers.add(number); else invalid.push(token);
+      return;
+    }
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      if (start < 2 || end < start || end - start > 20000) {
+        invalid.push(token);
+        return;
+      }
+      for (let number = start; number <= end; number += 1) numbers.add(number);
+      return;
+    }
+    invalid.push(token);
+  });
+  return { numbers: [...numbers].sort((left, right) => left - right), invalid };
+}
+
+function selectedImportRows(sheet) {
+  const entries = (sheet?.rows || []).map((values, index) => ({
+    values,
+    index,
+    rowNumber: Number(sheet.rowNumbers?.[index] || index + 2),
+  }));
+  if ($("#importRowSelectionMode")?.value !== "manual") return { entries, requested: [], invalid: [], missing: [] };
+  const parsed = parseImportRowNumbers($("#importRowNumbers")?.value);
+  const available = new Map(entries.map((entry) => [entry.rowNumber, entry]));
+  const selected = parsed.numbers.map((number) => available.get(number)).filter(Boolean);
+  const missing = parsed.numbers.filter((number) => !available.has(number));
+  return { entries: selected, requested: parsed.numbers, invalid: parsed.invalid, missing };
+}
+
+function hiddenImportRows(sheet, selectedEntries = selectedImportRows(sheet).entries) {
+  const parsed = parseImportRowNumbers($("#importHiddenRowNumbers")?.value);
+  const available = new Set((sheet?.rowNumbers || []).map(Number));
+  const selected = new Set(selectedEntries.map((entry) => entry.rowNumber));
+  return {
+    numbers: new Set(parsed.numbers.filter((number) => selected.has(number))),
+    invalid: parsed.invalid,
+    missing: parsed.numbers.filter((number) => !available.has(number)),
+    unselected: parsed.numbers.filter((number) => available.has(number) && !selected.has(number)),
+  };
+}
+
+function updateImportRowSelectionControls() {
+  const manual = $("#importRowSelectionMode")?.value === "manual";
+  $("#importRowNumbersWrap").hidden = !manual;
+}
+
+function importTargetOptions(selected) {
+  return `<option value="__create__" ${selected === "__create__" ? "selected" : ""}>Create new field</option>${documentState.columns.map((column) => `<option value="${escapeHtml(column.id)}" ${column.id === selected ? "selected" : ""}>Add to “${escapeHtml(column.label)}”</option>`).join("")}`;
+}
+
+function updateImportMappingControls() {
+  const overwrite = $("#importColumnMode").value === "replace";
+  $$(".mapping-row", $("#mappingList")).forEach((row) => {
+    const include = row.querySelector(".mapping-include")?.checked;
+    const select = row.querySelector(".mapping-select");
+    const newName = row.querySelector(".mapping-new-name");
+    const visibility = row.querySelector(".mapping-visibility");
+    if (!select || !newName) return;
+    if (overwrite && include && select.value !== "__create__") {
+      row.dataset.mergeTarget = select.value;
+      select.value = "__create__";
+      if (!newName.value) newName.value = row.getAttribute("data-source-header") || row.querySelector(".mapping-source")?.textContent?.trim() || "";
+    } else if (!overwrite && select.value === "__create__" && row.dataset.mergeTarget) {
+      select.value = row.dataset.mergeTarget;
+      delete row.dataset.mergeTarget;
+    }
+    select.disabled = !include || overwrite;
+    newName.disabled = !include || select.value !== "__create__";
+    if (visibility) visibility.disabled = !include;
+    row.classList.toggle("mapping-included", Boolean(include));
+  });
+}
+
+function currentImportMappings() {
+  return $$(".mapping-row", $("#mappingList")).map((row, sourceIndex) => {
+    const include = Boolean(row.querySelector(".mapping-include")?.checked);
+    return {
+      sourceIndex: Number(row.dataset.sourceIndex ?? sourceIndex),
+      target: include ? row.querySelector(".mapping-select")?.value || "__create__" : "__skip__",
+      header: row.dataset.sourceHeader || "",
+      include,
+      newName: row.querySelector(".mapping-new-name")?.value.trim() || "",
+      visibility: row.querySelector(".mapping-visibility")?.value || "always",
+    };
+  });
+}
+
+function rememberCurrentImportMappings(sheet) {
+  const mappings = currentImportMappings();
+  $$(".mapping-row", $("#mappingList")).forEach((row, index) => {
+    if (mappings[index] && row.dataset.mergeTarget) mappings[index].target = row.dataset.mergeTarget;
+  });
+  saveImportMappings(sheet, mappings);
+}
+
+function updateMappingSummary() {
+  const mappings = currentImportMappings();
+  const mapped = mappings.filter((item) => item.include && item.target !== "__skip__");
+  const created = mapped.filter((item) => item.target === "__create__").length;
+  const existing = mapped.length - created;
+  const skipped = mappings.length - mapped.length;
+  const duplicateTargets = [...new Set(mapped.filter((item) => item.target !== "__create__").map((item) => item.target).filter((target, index, list) => list.indexOf(target) !== index))];
+  const names = mapped.filter((item) => item.target === "__create__").map((item) => (item.newName || item.header).trim()).filter(Boolean);
+  const nameKeys = names.map(normaliseImportName).filter(Boolean);
+  const duplicateNames = [...new Set(nameKeys.filter((name, index, list) => list.indexOf(name) !== index))];
+  const existingNames = new Set(documentState.columns.flatMap((column) => [column.label, column.id]).map(normaliseImportName).filter(Boolean));
+  const duplicateExistingNames = [...new Set(names.filter((name) => existingNames.has(normaliseImportName(name))))];
+  const duplicateExistingCount = $("#importColumnMode").value === "replace" ? 0 : duplicateExistingNames.length;
+  const duplicateCount = duplicateTargets.length + duplicateNames.length + duplicateExistingCount;
+  $("#mappingSummary").textContent = `${mapped.length} included · ${existing} existing field${existing === 1 ? "" : "s"} · ${created} new field${created === 1 ? "" : "s"} · ${skipped} skipped${duplicateCount ? ` · ${duplicateCount} duplicate name${duplicateCount === 1 ? "" : "s"}` : ""}`;
+  return { duplicateTargets, duplicateNames, duplicateExistingNames };
+}
+
+function filterImportMappingRows() {
+  const query = ui.importMappingSearch.trim().toLowerCase();
+  const rows = $("#mappingList") ? $$(".mapping-row", $("#mappingList")) : [];
+  let visible = 0;
+  rows.forEach((row) => {
+    const sample = row.querySelector(".mapping-sample")?.textContent || "";
+    const haystack = `${row.dataset.sourceHeader || ""} ${sample}`.toLowerCase();
+    const matches = !query || haystack.includes(query);
+    row.hidden = !matches;
+    if (matches) visible += 1;
+  });
+  const search = $("#mappingSearch");
+  if (search) search.value = ui.importMappingSearch;
+  const empty = $("#mappingSearchEmpty");
+  if (empty) empty.hidden = !query || visible > 0;
+}
+
+function updateImportWarning() {
+  const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
+  if (!sheet) {
+    $("#importWarning").hidden = true;
+    $("#importWarning").textContent = "";
+    $("#importError").hidden = true;
+    $("#importError").textContent = "";
+    $("#confirmImportButton").disabled = false;
+    return;
+  }
+  const duplicates = updateMappingSummary();
+  const mappings = currentImportMappings();
+  const selection = selectedImportRows(sheet);
+  const hiddenSelection = hiddenImportRows(sheet, selection.entries);
+  const warnings = [];
+  const errors = [];
+  if (sheet?.truncated) warnings.push("This sheet was limited to the first 20,000 non-empty rows.");
+  if ($("#importRowSelectionMode").value === "manual") {
+    if (selection.invalid.length) errors.push(`Invalid spreadsheet row number${selection.invalid.length === 1 ? "" : "s"}: ${selection.invalid.join(", ")}. Use numbers and ranges such as 2, 5, 10-15.`);
+    if (selection.missing.length) errors.push(`${selection.missing.length} requested row${selection.missing.length === 1 ? " is" : "s are"} not available in this sheet.`);
+    if (!selection.entries.length && !selection.invalid.length && !selection.missing.length) errors.push("Enter at least one spreadsheet row number.");
+  }
+  if (!selection.entries.length && $("#importRowSelectionMode").value !== "manual") errors.push("This sheet has no non-empty rows to import.");
+  if (hiddenSelection.invalid.length) errors.push(`Invalid hidden row number${hiddenSelection.invalid.length === 1 ? "" : "s"}: ${hiddenSelection.invalid.join(", ")}.`);
+  if (hiddenSelection.missing.length) errors.push(`${hiddenSelection.missing.length} hidden row selection${hiddenSelection.missing.length === 1 ? " is" : "s are"} not available in this sheet.`);
+  if (hiddenSelection.unselected.length) errors.push(`${hiddenSelection.unselected.length} hidden row selection${hiddenSelection.unselected.length === 1 ? " is" : "s are"} outside the selected rows.`);
+  if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) errors.push("Select at least one spreadsheet field to import.");
+  if (duplicates.duplicateTargets.length) errors.push("More than one spreadsheet field maps to the same existing field. Choose a different destination.");
+  if (duplicates.duplicateNames.length) errors.push("New field names must be unique. Rename the duplicates.");
+  if ($("#importColumnMode").value !== "replace" && duplicates.duplicateExistingNames.length) errors.push("A new field name matches an existing field. Map it to that field or choose another name.");
+  if ($("#importColumnMode").value === "replace" && mappings.some((mapping) => mapping.include && mapping.target !== "__create__")) errors.push("Replace mode creates new fields. Choose Keep fields to map into existing fields.");
+  if ($("#importColumnMode").value === "replace") warnings.push("Overwrite mode will remove the current columns and rules when you import.");
+  $("#importWarning").hidden = !warnings.length;
+  $("#importWarning").textContent = warnings.join(" ");
+  $("#importError").hidden = !errors.length;
+  $("#importError").textContent = errors.join(" ");
+  $("#confirmImportButton").disabled = errors.length > 0;
+}
+
+function renderImportMapping() {
+  const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
+  if (!sheet) return;
+  updateImportRowSelectionControls();
+  const selectedRows = selectedImportRows(sheet).entries;
+  const savedMappings = savedImportMappings(sheet) || [];
+  $("#mappingList").innerHTML = sheet.headers.map((header, index) => {
+    const normalisedHeader = normaliseImportName(header);
+    const saved = savedMappings.find((mapping) => normaliseImportName(mapping.header) === normalisedHeader)
+      || (normalisedHeader ? null : savedMappings.find((mapping) => Number(mapping.sourceIndex) === index));
+    const guessed = guessedMapping(header);
+    const savedTarget = saved?.target && (saved.target === "__create__" || saved.target === "__skip__" || documentState.columns.some((column) => column.id === saved.target)) ? saved.target : null;
+    const target = savedTarget && savedTarget !== "__skip__" ? savedTarget : guessed;
+    const include = saved ? Boolean(saved.include) : false;
+    const matchedColumn = documentState.columns.find((column) => column.id === target);
+    const matchedLabel = matchedColumn?.label;
+    const newName = saved?.newName || (target === "__create__" ? header : (matchedLabel || header));
+    const visibility = ["always", "nonempty", "never"].includes(saved?.visibility) ? saved.visibility : (matchedColumn?.visibility || "always");
+    return `<div class="mapping-row" data-source-index="${index}" data-source-header="${escapeHtml(header)}"><input class="mapping-include" type="checkbox" aria-label="Include ${escapeHtml(header)}" ${include ? "checked" : ""}><span class="mapping-source">${escapeHtml(header)}</span><select class="mapping-select" aria-label="How to import ${escapeHtml(header)}">${importTargetOptions(target)}</select><input class="mapping-new-name" type="text" value="${escapeHtml(newName)}" placeholder="New field name" aria-label="New name for ${escapeHtml(header)}"><select class="mapping-visibility" aria-label="${escapeHtml(header)} print visibility"><option value="always" ${visibility === "always" ? "selected" : ""}>Always show</option><option value="nonempty" ${visibility === "nonempty" ? "selected" : ""}>With a value</option><option value="never" ${visibility === "never" ? "selected" : ""}>Hidden</option></select><span class="mapping-sample">${escapeHtml(selectedRows.find((entry) => entry.values[index])?.values[index] || sheet.rows.find((row) => row[index])?.[index] || "—")}</span></div>`;
+  }).join("");
+  $("#importMeta").textContent = `${ui.importData.filename} · ${sheet.rows.length} non-empty rows · ${selectedRows.length} selected`;
+  updateImportMappingControls();
+  filterImportMappingRows();
+  updateImportWarning();
+  updateImportModeNotice();
+}
+
+function updateImportModeNotice() {
+  updateImportRowSelectionControls();
+  const replace = $("#importMode").value === "replace";
+  const overwriteColumns = $("#importColumnMode").value === "replace";
+  const hiddenRows = $("#importRowVisibility").value === "hidden";
+  const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
+  const selection = selectedImportRows(sheet);
+  const hiddenSelection = hiddenImportRows(sheet, selection.entries);
+  const incoming = selection.entries.length;
+  const available = sheet?.rows?.length || 0;
+  const selectedNotice = $("#importRowSelectionMode").value === "manual"
+    ? `${incoming} of ${available} selected spreadsheet rows`
+    : `${incoming} non-empty spreadsheet rows`;
+  if (ui.importData && sheet) $("#importMeta").textContent = `${ui.importData.filename} · ${available} non-empty rows · ${incoming} selected`;
+  const rowNotice = replace
+    ? `Rows: all ${documentState.rows.length} existing rows will be removed and replaced by ${selectedNotice}.`
+    : `Rows: ${selectedNotice} will be added after the current ${documentState.rows.length} rows.`;
+  const individuallyHidden = hiddenSelection.numbers.size;
+  const visibilityNotice = hiddenRows
+    ? "Imported rows will be hidden from preview and PDF but remain available in the studio and rule tester."
+    : individuallyHidden
+      ? `${individuallyHidden} selected row${individuallyHidden === 1 ? "" : "s"} will be hidden; the rest will be printable unless a hide-slip rule matches.`
+      : "Imported rows will be printable unless a hide-slip rule matches.";
+  const columnNotice = overwriteColumns
+    ? "Fields: selected spreadsheet fields replace the current fields. Matched fields keep their existing display names."
+    : "Fields: checked spreadsheet fields will be mapped or added; unchecked fields stay out of the studio.";
+  $("#importModeNotice").textContent = `${rowNotice} ${visibilityNotice} ${columnNotice}`;
+  $("#confirmImportButton").textContent = replace ? "Replace rows" : "Import rows";
+  updateImportMappingControls();
+  updateImportWarning();
+}
+
+async function confirmImport() {
+  const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
+  if (!sheet) { showImportError("Choose a worksheet before importing."); return; }
+  const selection = selectedImportRows(sheet);
+  if (selection.invalid.length) {
+    showImportError(`Invalid spreadsheet row number${selection.invalid.length === 1 ? "" : "s"}: ${selection.invalid.join(", ")}. Use numbers and ranges such as 2, 5, 10-15.`);
+    return;
+  }
+  if (!selection.entries.length) {
+    showImportError("No spreadsheet rows are selected. Choose row numbers or switch to all non-empty rows.");
+    return;
+  }
+  const replaceRows = $("#importMode").value === "replace";
+  const overwriteColumns = $("#importColumnMode").value === "replace";
+  const importHidden = $("#importRowVisibility").value === "hidden";
+  const hiddenSelection = hiddenImportRows(sheet, selection.entries);
+  if (hiddenSelection.invalid.length || hiddenSelection.missing.length || hiddenSelection.unselected.length) {
+    showImportError("Hidden row numbers must exist in the selected sheet and be part of the rows being imported.");
+    return;
+  }
+  const mappings = currentImportMappings().filter((mapping) => mapping.include && mapping.target !== "__skip__");
+  if (!mappings.length) {
+    showImportError("Select at least one spreadsheet field to import.");
+    return;
+  }
+  const duplicateIssues = updateMappingSummary();
+  if (duplicateIssues.duplicateTargets.length || duplicateIssues.duplicateNames.length || (!overwriteColumns && duplicateIssues.duplicateExistingNames.length)) {
+    showImportError("Resolve duplicate destinations or field names before importing.");
+    return;
+  }
+  if (overwriteColumns && mappings.some((mapping) => mapping.target !== "__create__")) {
+    showImportError("Replace existing fields creates new fields. Choose Keep fields to map into existing fields.");
+    return;
+  }
+  const destructiveChanges = [];
+  if (replaceRows && documentState.rows.length) destructiveChanges.push(`${documentState.rows.length} existing row${documentState.rows.length === 1 ? "" : "s"}`);
+  if (overwriteColumns && documentState.columns.length) destructiveChanges.push(`${documentState.columns.length} existing field${documentState.columns.length === 1 ? "" : "s"} and any rules that use them`);
+  if (destructiveChanges.length && !await confirmAction("Replace existing studio data?", `This import will remove ${destructiveChanges.join(" and ")}. The selected spreadsheet rows will be imported instead.`, "Replace and import")) return;
+  const state = clone(documentState);
+  try {
+    const targetIds = new Map();
+    const nextColumns = overwriteColumns ? [] : state.columns;
+    const sourceRows = selection.entries.map((entry) => entry.values);
+    mappings.forEach((mapping) => {
+      if (mapping.target === "__create__") {
+        const label = mapping.newName || mapping.header;
+        const id = uniqueColumnId(label, nextColumns);
+        const type = inferImportedColumnType(mapping.header, sourceRows.map((row) => row[mapping.sourceIndex]));
+        nextColumns.push({ id, label, sourceNames: [mapping.header], group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", defaultValue: "", visibility: mapping.visibility });
+        targetIds.set(mapping.sourceIndex, id);
+      } else {
+        const targetColumn = nextColumns.find((column) => column.id === mapping.target);
+        if (targetColumn) {
+          targetColumn.sourceNames = [...new Set([...(targetColumn.sourceNames || []), mapping.header])];
+          targetColumn.visibility = mapping.visibility;
+        }
+        targetIds.set(mapping.sourceIndex, mapping.target);
+      }
+    });
+    if (overwriteColumns) {
+      state.columns = nextColumns;
+      const validColumns = new Set(state.columns.map((column) => column.id));
+      state.rules = state.rules.filter((rule) => (rule.action === "hide_slip" || validColumns.has(rule.target)) && Array.isArray(rule.conditions) && rule.conditions.every((condition) => validColumns.has(condition.field)));
+      state.rows.forEach((row) => { row.values = Object.fromEntries(state.columns.map((column) => [column.id, ""])); row.overrides = {}; });
+    } else {
+      state.columns = nextColumns;
+      state.rows.forEach((row) => { state.columns.forEach((column) => { row.values[column.id] ??= ""; }); });
+    }
+    const imported = selection.entries.map((entry) => {
+      const source = entry.values;
+      const values = Object.fromEntries(state.columns.map((column) => [column.id, ""]));
+      targetIds.forEach((target, sourceIndex) => { values[target] = String(source[sourceIndex] ?? ""); });
+      return { id: uid("row"), values, hidden: importHidden || hiddenSelection.numbers.has(entry.rowNumber), overrides: {} };
+    });
+    if (replaceRows) state.rows = imported;
+    else state.rows.push(...imported);
+  } catch (error) {
+    showImportError(`Import failed before any changes were applied. ${error?.message || "Check the selected fields and try again."}`);
+    return;
+  }
+  // Validate the complete draft before replacing the document so a malformed
+  // mapping cannot leave the existing workspace half-imported.
+  let importedDocument;
+  try { importedDocument = normaliseDocument(state); }
+  catch (error) {
+    showImportError(`Import failed before any changes were applied. ${error?.message || "The imported fields are not valid."}`);
+    return;
+  }
+  rememberCurrentImportMappings(sheet);
+  pushHistory();
+  documentState = importedDocument;
+  // Importing changes the working set. Do not carry an old row selection or
+  // later-page position into the new dataset and accidentally narrow preview/export.
+  clearRowSelection();
+  ui.dataPage = 0;
+  changed();
+  renderAll();
+  $("#importDialog").close();
+  showView("data");
+  const hiddenCount = importHidden ? selection.entries.length : hiddenSelection.numbers.size;
+  toast(`${selection.entries.length} row${selection.entries.length === 1 ? "" : "s"} ${replaceRows ? "replaced the current data" : "imported"}${hiddenCount ? ` · ${hiddenCount} hidden` : ""} · ${mappings.length} field${mappings.length === 1 ? "" : "s"} included`);
+}
+
+function resetWorkspaceUi() {
+  clearRowSelection();
+  ui.defaultValueEdits.clear();
+  ui.search = "";
+  ui.fieldSearch = "";
+  ui.ruleSearch = "";
+  ui.dataPage = 0;
+  ui.ruleTestRowId = "";
+}
+
+async function clearAllData() {
+  if (!documentState.rows.length) { toast("There is no data to clear"); return; }
+  if (!await confirmAction("Clear all data?", `Remove all ${documentState.rows.length} rows? Fields, rules and layout will stay.`, "Clear data")) return;
+  commit((state) => { state.rows = []; });
+  resetWorkspaceUi();
+  renderAll();
+  showView("data");
+  toast("All data cleared");
+}
+
+async function resetEverything() {
+  if (!await confirmAction("Reset everything?", "Remove all rows, fields, rules, saved palettes, templates and remembered import settings? This cannot be undone.", "Reset everything")) return;
+  documentState = starterDocument();
+  ui.history = [];
+  ui.future = [];
+  resetWorkspaceUi();
+  ui.view = PREFERENCE_DEFAULTS.view;
+  ui.pageSize = PREFERENCE_DEFAULTS.pageSize;
+  ui.zoom = PREFERENCE_DEFAULTS.zoom;
+  ui.previewWidth = PREFERENCE_DEFAULTS.previewWidth;
+  ui.lastImportSheetName = "";
+  ui.importData = null;
+  ui.importMappingSearch = "";
+  document.documentElement.dataset.theme = PREFERENCE_DEFAULTS.theme;
+  setPreviewWidth(ui.previewWidth, false);
+  try {
+    [DOCUMENT_STORAGE_KEY, PREFERENCES_STORAGE_KEY, IMPORT_PREFERENCES_STORAGE_KEY, PALETTE_STORAGE_KEY, TEMPLATE_STORAGE_KEY, "pss-theme", "pss-last-import-sheet", "pss-preview-width"].forEach((key) => localStorage.removeItem(key));
+  } catch (_) {}
+  changed();
+  renderAll();
+  showView("data");
+  toast("Studio reset");
+}
+
+function commandActions() {
+  return [
+    { icon: "⇧", label: "Import spreadsheet", detail: "XLSX, XLSM or CSV", run: openImport },
+    { icon: "＋", label: "Add row", detail: "Manual entry · ⌘↵", run: addRow },
+    { icon: "⫶", label: "Add field", detail: "Define a value shown on slips", run: () => addColumn() },
+    { icon: "⌁", label: "Add rule", detail: "Conditional visibility or row filter", run: addRule },
+    { icon: "▦", label: "Go to Data", detail: "D", run: () => showView("data") },
+    { icon: "⫶", label: "Go to Fields", detail: "", run: () => showView("columns") },
+    { icon: "⌁", label: "Go to Rules", detail: "", run: () => showView("rules") },
+    { icon: "▤", label: "Go to Layout", detail: "L", run: () => showView("layout") },
+    { icon: "↓", label: "Export PDF", detail: "Selected rows or all · ⇧⌘E", run: exportCurrentScope },
+    { icon: "↓", label: "Export CSV", detail: "Data", run: exportCsv },
+    { icon: "⧉", label: "Copy visible rows", detail: "Data", run: copyVisibleRows },
+    { icon: "✎", label: "Bulk edit selected rows", detail: "Selection", run: openBulkEdit },
+    { icon: "◇", label: "Save workspace", detail: "File · ⌘S", run: downloadWorkspace },
+    { icon: "◇", label: "Open workspace", detail: "File · ⌘O", run: () => $("#loadWorkspaceInput").click() },
+    { icon: "◇", label: "Templates", detail: "Saved setups and template files · ⇧⌘T", run: openTemplates },
+    { icon: "⌘", label: "Keyboard shortcuts", detail: "Mac", run: openShortcuts },
+    { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout · ⇧⌘⌫", run: clearAllData },
+    { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
+    { icon: "◐", label: "Toggle theme", detail: "", run: toggleTheme },
+    { icon: "⚙", label: "App settings", detail: "Updates and login", run: openAppSettings },
+    { icon: "↻", label: "Check for updates", detail: "App", run: () => { openAppSettings(); checkStudioUpdates(); } },
+  ];
+}
+
+function filteredCommands() {
+  const query = $("#commandInput").value.trim().toLowerCase();
+  return commandActions().filter((action) => !query || `${action.label} ${action.detail}`.toLowerCase().includes(query));
+}
+
+function renderCommands() {
+  const actions = filteredCommands();
+  ui.commandIndex = Math.min(ui.commandIndex, Math.max(0, actions.length - 1));
+  $("#commandList").innerHTML = actions.length ? actions.map((action, index) => `<button class="command-item ${index === ui.commandIndex ? "selected" : ""}" data-command-index="${index}" role="option" aria-selected="${index === ui.commandIndex}"><span>${action.icon}</span><strong>${escapeHtml(action.label)}</strong><small>${escapeHtml(action.detail)}</small></button>`).join("") : `<div class="empty-state compact-empty">No matching commands</div>`;
+}
+
+function openCommands() {
+  ui.commandIndex = 0;
+  $("#commandInput").value = "";
+  renderCommands();
+  $("#commandDialog").showModal();
+  requestAnimationFrame(() => $("#commandInput").focus());
+}
+
+function openShortcuts() {
+  $("#shortcutsDialog").showModal();
+}
+
+function runCommand(index) {
+  const action = filteredCommands()[index];
+  if (!action) return;
+  $("#commandDialog").close();
+  action.run();
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  saveStudioPreferences({ theme: next });
+}
+
+let serviceCommitAtLoad = "";
+let serviceRestartPending = false;
+let serviceUpdatePromptKey = "";
+let serviceStatus = null;
+
+async function serviceRequest(path, payload) {
+  const response = await fetch(`/api/service${path}`, {
+    method: payload === undefined ? "GET" : "POST",
+    headers: payload === undefined ? {} : { "Content-Type": "application/json" },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+    cache: "no-store",
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Studio could not complete the request.");
+  return result;
+}
+
+function renderServiceStatus(status) {
+  if (!status || typeof status !== "object") return;
+  serviceStatus = status;
+  if (!serviceCommitAtLoad) serviceCommitAtLoad = status.running_commit || "";
+  if (serviceRestartPending && serviceCommitAtLoad && status.running_commit !== serviceCommitAtLoad) {
+    window.location.reload();
+    return;
+  }
+  if (serviceRestartPending && status.update_error && !status.updating) serviceRestartPending = false;
+  const busy = Boolean(status.checking || status.updating);
+  const updateButton = $("#updateAvailableButton");
+  updateButton.hidden = !status.update_available;
+  updateButton.disabled = busy;
+  updateButton.setAttribute("aria-busy", String(busy));
+  updateButton.setAttribute("aria-label", status.updating ? "Updating Studio" : `Review ${status.channel_label || "selected channel"} update`);
+  updateButton.title = status.working_tree_clean === false
+    ? "Review update notes · local changes must be committed or moved before updating"
+    : "Review update notes and install";
+  const checkHeaderButton = $("#checkUpdatesHeaderButton");
+  checkHeaderButton.disabled = busy;
+  checkHeaderButton.setAttribute("aria-busy", String(Boolean(status.checking)));
+  checkHeaderButton.setAttribute("aria-label", status.checking ? "Checking for updates" : "Check for updates");
+  checkHeaderButton.title = status.checking ? "Checking for updates…" : status.update_error || "Check for updates";
+  const channel = $("#updateChannelSelect");
+  channel.value = status.update_channel || "stable";
+  channel.disabled = Boolean(status.updating || status.checking);
+  for (const option of channel.options) {
+    const details = status.channels?.[option.value];
+    option.disabled = false;
+    option.title = details?.available === false
+      ? `Git branch: ${details.branch}. It will be checked on origin when selected.`
+      : (details?.branch ? `Git branch: ${details.branch}` : "");
+  }
+  $("#serviceVersion").textContent = status.running_commit ? status.running_commit.slice(0, 8) : "";
+  $("#backgroundStatus").textContent = status.background ? "Running" : "Foreground";
+  $("#backgroundStatus").classList.toggle("active", Boolean(status.background));
+  $("#startAtLoginInput").checked = Boolean(status.start_at_login);
+  $("#startAtLoginInput").disabled = !status.start_at_login_supported;
+  $("#checkUpdatesButton").disabled = Boolean(status.checking || status.updating);
+  $("#installUpdateButton").hidden = !status.update_available;
+  $("#installUpdateButton").disabled = Boolean(status.updating || status.checking || !status.working_tree_clean || !status.can_fast_forward);
+  let message = status.update_error || status.update_message || "Ready to check for updates.";
+  if (status.update_available && !status.can_fast_forward) {
+    message = "The selected channel has local commits or has diverged. No local commits will be removed.";
+  } else if (status.update_available && !status.working_tree_clean) {
+    message = "Update available, but this checkout has local changes. Commit or move them first.";
+  }
+  $("#updateStatusText").textContent = message;
+  $("#updateStatusText").classList.toggle("error", Boolean(status.update_error || (status.update_available && (!status.working_tree_clean || !status.can_fast_forward))));
+  if (status.update_available && !status.checking && !status.updating) {
+    const promptKey = `${status.update_channel || ""}:${status.branch || ""}:${status.remote_commit || ""}`;
+    if (promptKey && promptKey !== serviceUpdatePromptKey) {
+      toast(`${status.channel_switch_required ? "Switch available to" : "Update available on"} ${status.channel_label || "the selected channel"}.`, "info");
+      serviceUpdatePromptKey = promptKey;
+    }
+  }
+  if ($("#updateNotesDialog").open) renderUpdateNotesDialog(status);
+}
+
+async function refreshServiceStatus() {
+  try {
+    renderServiceStatus(await serviceRequest(""));
+  } catch (_) {
+    if (!serviceRestartPending) {
+      $("#updateStatusText").textContent = "Studio is unavailable. Check that the launcher is running.";
+      $("#updateStatusText").classList.add("error");
+    }
+  }
+}
+
+function openAppSettings() {
+  $("#appSettingsDialog").showModal();
+  refreshServiceStatus();
+}
+
+async function checkStudioUpdates() {
+  const lastChecked = Number(serviceStatus?.last_checked || 0);
+  try {
+    renderServiceStatus(await serviceRequest("/check", {}));
+    toast("Checking for updates…");
+    const deadline = Date.now() + 75_000;
+    while (Date.now() < deadline) {
+      const status = await serviceRequest("");
+      renderServiceStatus(status);
+      if (!status.checking && Number(status.last_checked || 0) > lastChecked) {
+        if (status.update_error) toast(status.update_error, "error");
+        else if (!status.update_available) toast(`Studio is up to date on ${status.branch}.`, "success");
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    toast("The update check is taking longer than expected. Its result will appear in App settings.", "info");
+  } catch (error) { toast(error.message, "error"); }
+}
+
+async function changeUpdateChannel() {
+  try {
+    renderServiceStatus(await serviceRequest("/channel", { channel: $("#updateChannelSelect").value }));
+  } catch (error) { toast(error.message, "error"); refreshServiceStatus(); }
+}
+
+async function changeStartAtLogin() {
+  try {
+    renderServiceStatus(await serviceRequest("/login", { enabled: $("#startAtLoginInput").checked }));
+    toast($("#startAtLoginInput").checked ? "Studio will start at login" : "Start at login turned off");
+  } catch (error) { toast(error.message, "error"); refreshServiceStatus(); }
+}
+
+async function installStudioUpdate() {
+  if (!serviceStatus?.update_available || serviceStatus.checking || serviceStatus.updating) return;
+  if (serviceStatus.working_tree_clean === false || serviceStatus.can_fast_forward === false) {
+    renderUpdateNotesDialog(serviceStatus);
+    return;
+  }
+  flushPersistence();
+  try {
+    serviceRestartPending = true;
+    renderServiceStatus(await serviceRequest("/update", {}));
+    $("#updateStatusText").textContent = "Updating Studio…";
+    renderUpdateNotesDialog(serviceStatus);
+    $("#updateNotesDialog").close();
+  } catch (error) {
+    serviceRestartPending = false;
+    toast(error.message, "error");
+  }
+}
+
+function renderUpdateMarkdown(markdown) {
+  const inline = (line) => escapeHtml(line)
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gi, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  const lines = String(markdown || "").replace(/\r/g, "").split("\n");
+  const blocks = [];
+  let paragraph = [];
+  let list = [];
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push(`<p>${paragraph.map(inline).join("<br>")}</p>`);
+    paragraph = [];
+  };
+  const flushList = () => {
+    if (list.length) blocks.push(`<ul>${list.map((item) => `<li>${inline(item)}</li>`).join("")}</ul>`);
+    list = [];
+  };
+  for (const line of lines) {
+    const heading = line.match(/^#{1,3}\s+(.+)$/);
+    const bullet = line.match(/^\s*[-*+]\s+(.+)$/);
+    if (heading) {
+      flushParagraph(); flushList();
+      const level = Math.min(3, line.match(/^#+/)[0].length + 1);
+      blocks.push(`<h${level}>${inline(heading[1])}</h${level}>`);
+    } else if (bullet) {
+      flushParagraph(); list.push(bullet[1]);
+    } else if (/^\s*[-*_]{3,}\s*$/.test(line)) {
+      flushParagraph(); flushList(); blocks.push("<hr>");
+    } else if (!line.trim()) {
+      flushParagraph(); flushList();
+    } else {
+      flushList(); paragraph.push(line.trim());
+    }
+  }
+  flushParagraph(); flushList();
+  return blocks.join("") || "<p>No details were included with this update.</p>";
+}
+
+function renderUpdateNotesDialog(status = serviceStatus) {
+  if (!status) return;
+  const branch = status.branch || "selected channel";
+  const behind = Number(status.behind_count || 0);
+  const channelLabel = status.channel_label || "selected channel";
+  $("#updateNotesSummary").textContent = status.channel_switch_required
+    ? `Switch Studio from ${status.current_branch || "the current branch"} to ${channelLabel} (${branch})${behind > 0 ? ` · ${behind} new commit${behind === 1 ? "" : "s"}` : ""}.`
+    : `${behind} new commit${behind === 1 ? "" : "s"} available on ${channelLabel} (${branch}).`;
+  const notes = Array.isArray(status.update_notes) ? status.update_notes : [];
+  $("#updateNotesContent").innerHTML = notes.length
+    ? notes.map((note) => {
+      const title = String(note.file || "Update notes").replace(/\.md$/i, "").replace(/[-_]+/g, " ");
+      return `<article class="update-note"><h3>${escapeHtml(title)}</h3><div class="update-note-markdown">${renderUpdateMarkdown(note.markdown)}</div></article>`;
+    }).join("")
+    : `<div class="update-note update-note-empty"><h3>Update details</h3><p>No release notes were included with this update.</p></div>`;
+  const constraints = [];
+  if (status.working_tree_clean === false) constraints.push("Commit or move your local project changes before updating.");
+  if (status.can_fast_forward === false) constraints.push("The selected channel has local commits or has diverged from origin. No local commits will be removed.");
+  $("#updateNotesConstraint").textContent = constraints.join(" ");
+  $("#updateNotesConstraint").hidden = constraints.length === 0;
+  const button = $("#confirmUpdateButton");
+  button.disabled = Boolean(status.checking || status.updating || !status.update_available || constraints.length);
+  button.textContent = status.updating ? "Updating…" : status.channel_switch_required ? "Switch & restart" : "Update & restart";
+}
+
+function openUpdateNotesDialog() {
+  const status = serviceStatus;
+  if (!status?.update_available) return;
+  renderUpdateNotesDialog(status);
+  $("#updateNotesDialog").showModal();
+}
+
+async function quitStudio() {
+  if (!await confirmAction("Quit Studio", "The local web service will stop. Your saved workspace remains in this browser.", "Quit Studio")) return;
+  flushPersistence();
+  try {
+    await serviceRequest("/quit", {});
+    $("#appSettingsDialog").close();
+    toast("Studio stopped. Use the launcher to reopen it.");
+  } catch (error) { toast(error.message, "error"); }
+}
+
+function closeMoreMenu() {
+  $("#moreMenu").hidden = true;
+  $("#moreButton").setAttribute("aria-expanded", "false");
+}
+
+function toggleMoreMenu() {
+  const menu = $("#moreMenu");
+  menu.hidden = !menu.hidden;
+  $("#moreButton").setAttribute("aria-expanded", String(!menu.hidden));
+}
+
+function setPreviewWidth(value, persist = true) {
+  ui.previewWidth = clampPreviewWidth(value);
+  document.documentElement.style.setProperty("--preview-width", `${ui.previewWidth}px`);
+  const handle = $("#previewResizeHandle");
+  if (handle) handle.setAttribute("aria-valuenow", String(ui.previewWidth));
+  if (persist) {
+    saveStudioPreferences({ previewWidth: ui.previewWidth });
+  }
+}
+
+function installPreviewResize() {
+  const handle = $("#previewResizeHandle");
+  if (!handle) return;
+  let drag = null;
+  let observedWidth = 0;
+  const finish = (event) => {
+    if (!drag) return;
+    if (event?.pointerId != null && handle.hasPointerCapture?.(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    drag = null;
+    handle.classList.remove("dragging");
+    setPreviewWidth(ui.previewWidth);
+    schedulePdfPreview(true);
+  };
+  handle.addEventListener("pointerdown", (event) => {
+    if (window.matchMedia("(max-width: 860px)").matches) return;
+    drag = { startX: event.clientX, startWidth: ui.previewWidth };
+    handle.classList.add("dragging");
+    handle.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!drag) return;
+    setPreviewWidth(drag.startWidth + drag.startX - event.clientX, false);
+  });
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+  handle.addEventListener("keydown", (event) => {
+    const step = event.shiftKey ? 64 : 24;
+    if (event.key === "ArrowLeft") { event.preventDefault(); setPreviewWidth(ui.previewWidth + step); schedulePdfPreview(true); }
+    if (event.key === "ArrowRight") { event.preventDefault(); setPreviewWidth(ui.previewWidth - step); schedulePdfPreview(true); }
+    if (event.key === "Home") { event.preventDefault(); setPreviewWidth(PREVIEW_MIN_WIDTH); schedulePdfPreview(true); }
+    if (event.key === "End") { event.preventDefault(); setPreviewWidth(PREVIEW_MAX_WIDTH); schedulePdfPreview(true); }
+  });
+  if (window.ResizeObserver) {
+    const viewport = $("#previewViewport");
+    new ResizeObserver((entries) => {
+      const width = Math.round(entries[0]?.contentRect?.width || 0);
+      if (!width || width === observedWidth) return;
+      observedWidth = width;
+      if (!drag && ui.previewReady) schedulePdfPreview(true);
+    }).observe(viewport);
+  }
+}
+
+function installDataFieldControls() {
+  $("#dataHead").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    const columnId = button.closest(".field-head")?.dataset.columnId;
+    if (button.dataset.action === "open-field-sheet") openFieldSheet(columnId);
+    if (button.dataset.action === "open-field-menu") {
+      event.stopPropagation();
+      openDataFieldMenu(columnId, button);
+    }
+  });
+  $("#dataFieldMenu").addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#dataFieldMenu, .data-field-menu-trigger")) closeDataFieldMenu();
+  });
+  $("#dataFieldRenameInput").addEventListener("change", (event) => {
+    const columnId = ui.dataFieldMenuId;
+    if (!columnId) return;
+    const label = event.target.value.trim() || "Untitled field";
+    if (documentState.columns.find((column) => column.id === columnId)?.label !== label) {
+      commit((state) => { state.columns.find((column) => column.id === columnId).label = label; });
+    }
+  });
+  $("#dataFieldRenameInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); event.target.blur(); closeDataFieldMenu(); }
+    if (event.key === "Escape") closeDataFieldMenu();
+  });
+  $("#dataFieldMoveLeft").addEventListener("click", () => moveField(ui.dataFieldMenuId, -1));
+  $("#dataFieldMoveRight").addEventListener("click", () => moveField(ui.dataFieldMenuId, 1));
+  $("#dataFieldOptionsButton").addEventListener("click", () => openFieldSheet(ui.dataFieldMenuId));
+  $("#dataFieldDuplicateButton").addEventListener("click", () => duplicateField(ui.dataFieldMenuId));
+  $("#dataFieldDeleteButton").addEventListener("click", () => deleteField(ui.dataFieldMenuId));
+  $("#closeFieldSheetButton").addEventListener("click", () => $("#fieldSheetDialog").close());
+  $("#fieldSheetDone").addEventListener("click", () => $("#fieldSheetDialog").close());
+  $("#fieldSheetMoveLeft").addEventListener("click", () => moveField(ui.fieldSheetId, -1));
+  $("#fieldSheetMoveRight").addEventListener("click", () => moveField(ui.fieldSheetId, 1));
+  $("#fieldSheetDelete").addEventListener("click", () => deleteField(ui.fieldSheetId));
+  const sheetKeys = {
+    fieldSheetName: "label", fieldSheetType: "type", fieldSheetDefault: "defaultValue",
+    fieldSheetStyle: "style", fieldSheetVisibility: "visibility",
+    fieldSheetTransform: "valueTransform", fieldSheetAlign: "valueAlign", fieldSheetGridWidth: "gridWidth",
+  };
+  Object.entries(sheetKeys).forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => {
+    const columnId = ui.fieldSheetId;
+    const value = id === "fieldSheetName" ? event.target.value.trim() || "Untitled field" :
+      id === "fieldSheetGridWidth" ? Math.min(600, Math.max(120, Number(event.target.value) || 180)) : event.target.value;
+    if (id === "fieldSheetGridWidth") event.target.value = String(value);
+    if (documentState.columns.find((column) => column.id === columnId)?.[key] === value) return;
+    commit((state) => { const column = state.columns.find((item) => item.id === columnId); if (column) column[key] = value; });
+  }));
+  let resize = null;
+  $("#dataHead").addEventListener("pointerdown", (event) => {
+    const handle = event.target.closest(".column-resizer");
+    if (!handle) return;
+    const columnId = handle.closest(".field-head")?.dataset.columnId;
+    const column = documentState.columns.find((item) => item.id === columnId);
+    const col = [...$("#dataColgroup").children].find((item) => item.dataset.columnId === columnId);
+    if (!column || !col) return;
+    resize = { columnId, handle, col, startX: event.clientX, width: Math.round(col.getBoundingClientRect().width), current: Math.round(col.getBoundingClientRect().width) };
+    handle.classList.add("resizing");
+    handle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  $("#dataHead").addEventListener("pointermove", (event) => {
+    if (!resize) return;
+    resize.current = Math.min(600, Math.max(120, Math.round(resize.width + event.clientX - resize.startX)));
+    resize.col.style.width = `${resize.current}px`;
+    resize.handle.setAttribute("aria-valuenow", String(resize.current));
+    const total = 123 + documentState.columns.reduce((sum, column) => sum + (column.id === resize.columnId ? resize.current : Number(column.gridWidth) || 180), 0);
+    $(".data-table").style.width = `max(100%, ${total}px)`;
+  });
+  const finishResize = () => {
+    if (!resize) return;
+    const { columnId, current, handle } = resize;
+    resize = null;
+    handle.classList.remove("resizing");
+    const column = documentState.columns.find((item) => item.id === columnId);
+    if (column && column.gridWidth !== current) commit((state) => { state.columns.find((item) => item.id === columnId).gridWidth = current; });
+  };
+  $("#dataHead").addEventListener("pointerup", finishResize);
+  $("#dataHead").addEventListener("pointercancel", finishResize);
+  $("#dataHead").addEventListener("keydown", (event) => {
+    const handle = event.target.closest(".column-resizer");
+    if (!handle || !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const columnId = handle.closest(".field-head")?.dataset.columnId;
+    const step = event.shiftKey ? 25 : 10;
+    const delta = event.key === "ArrowRight" ? step : -step;
+    commit((state) => {
+      const column = state.columns.find((item) => item.id === columnId);
+      if (column) column.gridWidth = Math.min(600, Math.max(120, (Number(column.gridWidth) || 180) + delta));
+    });
+    requestAnimationFrame(() => [...$("#dataHead").querySelectorAll(".column-resizer")].find((item) => item.closest(".field-head")?.dataset.columnId === columnId)?.focus());
+  });
+}
+
+function installEvents() {
+  installDataFieldControls();
+  $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
+  ["#addRowButton", "#appendRowButton"].forEach((selector) => $(selector).addEventListener("click", addRow));
+  $("#dataImportButton").addEventListener("click", openImport);
+  $("#manageHiddenButton").addEventListener("click", openHiddenRows);
+  $("#addColumnButton").addEventListener("click", () => addColumn());
+  $("#addRuleButton").addEventListener("click", addRule);
+  $("#commandButton").addEventListener("click", openCommands);
+  $("#moreButton").addEventListener("click", (event) => { event.stopPropagation(); toggleMoreMenu(); });
+  $("#moreMenu").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target.closest("button")) requestAnimationFrame(closeMoreMenu);
+  });
+  document.addEventListener("click", closeMoreMenu);
+  $("#exportPdfButton").addEventListener("click", () => exportCurrentScope());
+  $("#exportSelectedButton").addEventListener("click", exportSelectedRows);
+  $("#exportCsvButton").addEventListener("click", exportCsv);
+  $("#downloadWorkspaceButton").addEventListener("click", downloadWorkspace);
+  $("#loadWorkspaceButton").addEventListener("click", () => $("#loadWorkspaceInput").click());
+  $("#loadWorkspaceInput").addEventListener("change", (event) => loadWorkspaceFile(event.target.files[0]));
+  $("#openTemplatesButton").addEventListener("click", openTemplates);
+  $("#openTemplatesHeaderButton").addEventListener("click", openTemplates);
+  $("#shortcutsButton").addEventListener("click", openShortcuts);
+  $("#saveTemplateButton").addEventListener("click", saveTemplateFromDialog);
+  $("#openTemplateFileButton").addEventListener("click", () => $("#loadTemplateInput").click());
+  $("#loadTemplateInput").addEventListener("change", (event) => loadTemplateFile(event.target.files[0]));
+  $("#clearDataButton").addEventListener("click", clearAllData);
+  $("#clearDataTabButton").addEventListener("click", clearAllData);
+  $("#themeButton").addEventListener("click", toggleTheme);
+  $("#settingsMenuButton").addEventListener("click", openAppSettings);
+  $("#closeAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
+  $("#doneAppSettingsButton").addEventListener("click", () => $("#appSettingsDialog").close());
+  $("#checkUpdatesButton").addEventListener("click", checkStudioUpdates);
+  $("#installUpdateButton").addEventListener("click", openUpdateNotesDialog);
+  $("#updateAvailableButton").addEventListener("click", openUpdateNotesDialog);
+  $("#checkUpdatesHeaderButton").addEventListener("click", checkStudioUpdates);
+  $("#closeUpdateNotesButton").addEventListener("click", () => $("#updateNotesDialog").close());
+  $("#laterUpdateButton").addEventListener("click", () => $("#updateNotesDialog").close());
+  $("#confirmUpdateButton").addEventListener("click", installStudioUpdate);
+  $("#updateChannelSelect").addEventListener("change", changeUpdateChannel);
+  $("#startAtLoginInput").addEventListener("change", changeStartAtLogin);
+  $("#quitStudioButton").addEventListener("click", quitStudio);
+  $("#resetMenuButton").addEventListener("click", resetEverything);
+  installPreviewResize();
+  $("#undoButton").addEventListener("click", undo);
+  $("#redoButton").addEventListener("click", redo);
+  $("#rowSearch").addEventListener("input", (event) => {
+    ui.search = event.target.value;
+    ui.dataPage = 0;
+    clearRowSelection();
+    renderData();
+    schedulePdfPreview();
+  });
+  $("#fieldSearch").addEventListener("input", (event) => {
+    ui.fieldSearch = event.target.value;
+    renderColumns();
+  });
+  $("#ruleSearch").addEventListener("input", (event) => {
+    ui.ruleSearch = event.target.value;
+    renderRules();
+  });
+  $("#documentName").addEventListener("input", (event) => {
+    documentState.name = event.target.value.trimStart() || "Untitled password slips";
+    changed();
+  });
+  $("#pageSizeInput").addEventListener("change", (event) => { ui.pageSize = [25, 50, 100, 250].includes(Number(event.target.value)) ? Number(event.target.value) : 50; ui.dataPage = 0; saveStudioPreferences({ pageSize: ui.pageSize }); renderData(); });
+  $("#dataPrevButton").addEventListener("click", () => { ui.dataPage = Math.max(0, ui.dataPage - 1); renderData(); });
+  $("#dataNextButton").addEventListener("click", () => { ui.dataPage += 1; renderData(); });
+  $("#dataView").addEventListener("click", (event) => {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action === "add-row") addRow();
+    if (action === "import") openImport();
+    if (action === "clear-row-search") {
+      ui.search = "";
+      ui.dataPage = 0;
+      clearRowSelection();
+      renderData();
+      requestAnimationFrame(() => $("#rowSearch").focus());
+      schedulePdfPreview();
+    }
+  });
+
+  $("#dataHead").addEventListener("change", (event) => {
+    if (event.target.id !== "selectAllRows") return;
+    filteredRows().forEach((row) => event.target.checked ? ui.selectedRows.add(row.id) : ui.selectedRows.delete(row.id));
+    ui.selectionAnchor = "";
+    renderData();
+    schedulePdfPreview();
+  });
+
+  $("#dataBody").addEventListener("click", (event) => {
+    const checkbox = event.target.closest(".row-select");
+    if (!checkbox) return;
+    const rowId = checkbox.closest("tr[data-row-id]")?.dataset.rowId;
+    if (!rowId) return;
+    if (!event.shiftKey || !ui.selectionAnchor) {
+      ui.selectionAnchor = rowId;
+      return;
+    }
+    const visible = filteredRows();
+    const anchorIndex = visible.findIndex((row) => row.id === ui.selectionAnchor);
+    const targetIndex = visible.findIndex((row) => row.id === rowId);
+    if (anchorIndex < 0 || targetIndex < 0) {
+      ui.selectionAnchor = rowId;
+      return;
+    }
+    event.preventDefault();
+    // The browser has already applied the checkbox toggle by the time the
+    // click handler runs. Use that resulting state for the whole range.
+    const checked = checkbox.checked;
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    visible.slice(start, end + 1).forEach((row) => checked ? ui.selectedRows.add(row.id) : ui.selectedRows.delete(row.id));
+    ui.selectionAnchor = rowId;
+    renderData();
+    schedulePdfPreview();
+  });
+
+  $("#dataBody").addEventListener("change", (event) => {
+    const rowElement = event.target.closest("tr[data-row-id]");
+    if (!rowElement) return;
+    const rowId = rowElement.dataset.rowId;
+    if (event.target.classList.contains("row-select")) {
+      ui.selectionAnchor = rowId;
+      event.target.checked ? ui.selectedRows.add(rowId) : ui.selectedRows.delete(rowId);
+      renderData();
+      schedulePdfPreview();
+      return;
+    }
+    if (event.target.classList.contains("cell-input")) {
+      const columnId = event.target.dataset.columnId;
+      const row = documentState.rows.find((item) => item.id === rowId);
+      const value = event.target.value;
+      if (!row || String(row.values[columnId] ?? "") === value) return;
+      commit((state) => { state.rows.find((item) => item.id === rowId).values[columnId] = value; }, { render: false });
+      const reason = rowHiddenReason(row);
+      const renderedRow = event.target.closest("tr[data-row-id]");
+      renderedRow?.classList.toggle("excluded", Boolean(reason));
+      if (renderedRow) renderedRow.title = reason;
+      $("#undoButton").disabled = false;
+      $("#redoButton").disabled = true;
+      schedulePdfPreview();
+    }
+  });
+  $("#dataBody").addEventListener("input", (event) => {
+    if (event.target.classList.contains("cell-input")) schedulePdfPreview();
+  });
+  $("#dataBody").addEventListener("keydown", (event) => {
+    const input = event.target.closest(".cell-input");
+    if (!input) return;
+    if (event.key === "Escape") {
+      const rowId = input.closest("tr[data-row-id]")?.dataset.rowId;
+      const columnId = input.dataset.columnId;
+      const row = documentState.rows.find((item) => item.id === rowId);
+      if (row) {
+        event.preventDefault();
+        input.value = String(row.values[columnId] ?? "");
+        input.blur();
+      }
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === "Tab") {
+      event.preventDefault();
+      moveGridCell(input, 0, event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    moveGridCell(input, event.shiftKey ? -1 : 1, 0);
+  });
+  $("#dataBody").addEventListener("paste", pasteIntoDataGrid);
+  $("#dataBody").addEventListener("click", (event) => {
+    const button = event.target.closest('[data-action="row-options"]');
+    if (button) openRowOptions(button.closest("tr").dataset.rowId);
+  });
+  let draggedRowId = null;
+  const clearRowDragOver = () => $$("#dataBody tr.drag-over").forEach((row) => row.classList.remove("drag-over"));
+  $("#dataBody").addEventListener("dragstart", (event) => {
+    if (!event.target.classList.contains("row-number")) return event.preventDefault();
+    draggedRowId = event.target.closest("tr").dataset.rowId;
+    clearRowDragOver();
+    event.dataTransfer.effectAllowed = "move";
+  });
+  $("#dataBody").addEventListener("dragover", (event) => {
+    if (!draggedRowId) return;
+    event.preventDefault();
+    const target = event.target.closest("tr[data-row-id]");
+    clearRowDragOver();
+    if (target && target.dataset.rowId !== draggedRowId) target.classList.add("drag-over");
+  });
+  $("#dataBody").addEventListener("drop", (event) => {
+    event.preventDefault();
+    const targetId = event.target.closest("tr")?.dataset.rowId;
+    clearRowDragOver();
+    if (!draggedRowId || !targetId || draggedRowId === targetId) {
+      draggedRowId = null;
+      return;
+    }
+    commit((state) => {
+      const from = state.rows.findIndex((row) => row.id === draggedRowId);
+      const to = state.rows.findIndex((row) => row.id === targetId);
+      if (from >= 0 && to >= 0) {
+        const [moved] = state.rows.splice(from, 1);
+        state.rows.splice(from < to ? to - 1 : to, 0, moved);
+      }
+    });
+    draggedRowId = null;
+  });
+  $("#dataBody").addEventListener("dragend", () => { draggedRowId = null; clearRowDragOver(); });
+
+  $("#clearSelectionButton").addEventListener("click", () => { clearRowSelection(); renderData(); schedulePdfPreview(); });
+  $("#bulkEditButton").addEventListener("click", openBulkEdit);
+  $("#customizeSelectedButton").addEventListener("click", openSelectedRowOptions);
+  $("#resetSelectedLayoutsButton").addEventListener("click", resetSelectedVisibility);
+  $("#bulkEditColumn").addEventListener("change", updateBulkEditPreview);
+  $("#bulkEditOperation").addEventListener("change", renderBulkEditFields);
+  $("#applyBulkEditButton").addEventListener("click", applyBulkEdit);
+  $("#templateList").addEventListener("click", async (event) => {
+    const action = event.target.closest("[data-template-action]")?.dataset.templateAction;
+    const item = event.target.closest("[data-template-id]");
+    if (!action || !item) return;
+    const record = loadSavedTemplates().find((template) => template.id === item.dataset.templateId);
+    if (!record) return;
+    if (action === "open") openTemplateRecord(record);
+    if (action === "delete" && await confirmAction("Delete template?", `Remove “${record.name}” from saved templates?`, "Delete template")) {
+      saveSavedTemplates(loadSavedTemplates().filter((template) => template.id !== record.id));
+      renderTemplateList();
+      toast("Template deleted");
+    }
+  });
+  $("#deleteRowsButton").addEventListener("click", async () => {
+    const count = ui.selectedRows.size;
+    if (!await confirmAction("Delete selected rows?", `${count} row${count === 1 ? "" : "s"} will be removed from this studio.`, "Delete")) return;
+    commit((state) => { state.rows = state.rows.filter((row) => !ui.selectedRows.has(row.id)); });
+    clearRowSelection();
+    renderAll();
+  });
+  $("#duplicateRowsButton").addEventListener("click", () => {
+    commit((state) => {
+      const copies = state.rows.filter((row) => ui.selectedRows.has(row.id)).map((row) => ({ ...clone(row), id: uid("row") }));
+      state.rows.push(...copies);
+    });
+    toast("Selected rows duplicated");
+  });
+  $("#hideRowsButton").addEventListener("click", () => {
+    const count = ui.selectedRows.size;
+    commit((state) => state.rows.forEach((row) => { if (ui.selectedRows.has(row.id)) row.hidden = true; }));
+    toast(`${count} slip${count === 1 ? "" : "s"} hidden`);
+  });
+  $("#showRowsButton").addEventListener("click", () => {
+    commit((state) => state.rows.forEach((row) => { if (ui.selectedRows.has(row.id)) row.hidden = false; }));
+    toast(`${ui.selectedRows.size} slip${ui.selectedRows.size === 1 ? "" : "s"} made printable`);
+  });
+
+  let draggedColumnId = null;
+  $("#columnList").addEventListener("dragstart", (event) => {
+    if (!event.target.closest(".drag-handle")) return event.preventDefault();
+    const row = event.target.closest(".column-row");
+    if (!row) return;
+    draggedColumnId = row.dataset.columnId;
+    row.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+  });
+  $("#columnList").addEventListener("dragover", (event) => { if (!draggedColumnId) return; event.preventDefault(); const row = event.target.closest(".column-row"); $$(".column-row.drag-over").forEach((item) => item.classList.remove("drag-over")); if (row && row.dataset.columnId !== draggedColumnId) row.classList.add("drag-over"); });
+  $("#columnList").addEventListener("drop", (event) => {
+    event.preventDefault();
+    const target = event.target.closest(".column-row")?.dataset.columnId;
+    if (!draggedColumnId || !target || draggedColumnId === target) return;
+    commit((state) => {
+      const from = state.columns.findIndex((column) => column.id === draggedColumnId);
+      const to = state.columns.findIndex((column) => column.id === target);
+      const [moved] = state.columns.splice(from, 1);
+      state.columns.splice(from < to ? to - 1 : to, 0, moved);
+    });
+  });
+  $("#columnList").addEventListener("dragend", () => { draggedColumnId = null; $$(".column-row").forEach((row) => row.classList.remove("dragging", "drag-over")); });
+  $("#columnList").addEventListener("change", async (event) => {
+    const row = event.target.closest(".column-row");
+    if (!row) return;
+    const columnId = row.dataset.columnId;
+    if (event.target.classList.contains("column-label-input")) {
+      const label = event.target.value.trim() || "Untitled field";
+      const column = documentState.columns.find((item) => item.id === columnId);
+      event.target.value = label;
+      if (column && column.label !== label) {
+        commit((state) => { state.columns.find((item) => item.id === columnId).label = label; }, { render: false });
+        $("#undoButton").disabled = false;
+        $("#redoButton").disabled = true;
+        renderData();
+        renderRules();
+        schedulePdfPreview();
+      }
+    }
+    if (event.target.classList.contains("column-group-input")) commit((state) => { state.columns.find((column) => column.id === columnId).group = event.target.value.trim(); });
+    if (event.target.classList.contains("column-format-input")) commit((state) => { state.columns.find((column) => column.id === columnId).style = event.target.value; });
+    if (event.target.classList.contains("column-type-input")) commit((state) => { state.columns.find((column) => column.id === columnId).type = event.target.value; });
+    if (event.target.classList.contains("column-transform-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueTransform = event.target.value; });
+    if (event.target.classList.contains("column-align-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueAlign = event.target.value; });
+    if (event.target.classList.contains("column-visibility-input")) commit((state) => { state.columns.find((column) => column.id === columnId).visibility = event.target.value; });
+  });
+  $("#columnList").addEventListener("change", (event) => {
+    if (!event.target.classList.contains("column-default-input")) return;
+    const columnId = event.target.closest(".column-row")?.dataset.columnId;
+    ui.defaultValueEdits.delete(columnId);
+    const column = documentState.columns.find((item) => item.id === columnId);
+    if (!column || column.defaultValue === event.target.value) return;
+    commit((state) => {
+      const next = state.columns.find((item) => item.id === columnId);
+      if (next) next.defaultValue = event.target.value;
+    });
+  });
+  $("#columnList").addEventListener("input", (event) => {
+    if (!event.target.classList.contains("column-default-input")) return;
+    const columnId = event.target.closest(".column-row")?.dataset.columnId;
+    const column = documentState.columns.find((item) => item.id === columnId);
+    if (!column || column.defaultValue === event.target.value) return;
+    if (!ui.defaultValueEdits.has(columnId)) {
+      pushHistory();
+      ui.defaultValueEdits.add(columnId);
+    }
+    column.defaultValue = event.target.value;
+    changed();
+  });
+  $("#columnList").addEventListener("focusout", (event) => {
+    if (!event.target.classList.contains("column-default-input")) return;
+    ui.defaultValueEdits.delete(event.target.closest(".column-row")?.dataset.columnId);
+  });
+  $("#columnList").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "clear-field-search") {
+      ui.fieldSearch = "";
+      renderColumns();
+      requestAnimationFrame(() => $("#fieldSearch").focus());
+      return;
+    }
+    const row = button.closest(".column-row");
+    if (!row) return;
+    const columnId = row.dataset.columnId;
+    if (button.dataset.action === "duplicate-column") duplicateField(columnId);
+    if (button.dataset.action === "delete-column") await deleteField(columnId);
+  });
+
+  $("#ruleList").addEventListener("change", (event) => {
+    if (event.target.classList.contains("rule-note-input")) return;
+    const card = event.target.closest(".rule-card");
+    if (!card) return;
+    const ruleId = card.dataset.ruleId;
+    const conditionRow = event.target.closest(".condition-row");
+    commit((state) => {
+      const rule = state.rules.find((item) => item.id === ruleId);
+      if (event.target.classList.contains("rule-enabled-input")) rule.enabled = event.target.checked;
+      if (event.target.classList.contains("rule-name-input")) rule.name = event.target.value.trim() || actionLabels[rule.action] || "Rule";
+      if (event.target.classList.contains("rule-action-input")) {
+        rule.action = event.target.value;
+        rule.name = actionLabels[rule.action];
+        rule.target = ["hide_slip", "set_note", "clear_note"].includes(rule.action) ? "" : state.columns[0]?.id || "";
+      }
+      if (event.target.classList.contains("rule-target-input")) rule.target = event.target.value;
+      if (event.target.classList.contains("rule-match-input")) rule.match = event.target.value;
+      if (event.target.classList.contains("rule-negate-input")) rule.negate = event.target.checked;
+      if (conditionRow) {
+        const condition = rule.conditions[Number(conditionRow.dataset.conditionIndex)];
+        if (event.target.classList.contains("condition-field")) condition.field = event.target.value;
+        if (event.target.classList.contains("condition-operator")) condition.operator = event.target.value;
+        if (event.target.classList.contains("condition-value")) condition.value = event.target.value;
+      }
+    });
+  });
+  $("#ruleList").addEventListener("input", (event) => {
+    if (!event.target.classList.contains("rule-note-input")) return;
+    const ruleId = event.target.closest(".rule-card")?.dataset.ruleId;
+    const rule = documentState.rules.find((item) => item.id === ruleId);
+    if (!rule || rule.noteText === event.target.value) return;
+    if (!ui.ruleNoteEdits.has(ruleId)) { pushHistory(); ui.ruleNoteEdits.add(ruleId); }
+    rule.noteText = event.target.value;
+    changed();
+    schedulePdfPreview();
+  });
+  $("#ruleList").addEventListener("focusout", (event) => {
+    if (event.target.classList.contains("rule-note-input")) ui.ruleNoteEdits.delete(event.target.closest(".rule-card")?.dataset.ruleId);
+  });
+  $("#ruleTestRowSelect").addEventListener("change", (event) => { ui.ruleTestRowId = event.target.value; renderRules(); });
+  $("#ruleList").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    if (button.dataset.action === "clear-rule-search") {
+      ui.ruleSearch = "";
+      renderRules();
+      requestAnimationFrame(() => $("#ruleSearch").focus());
+      return;
+    }
+    const card = button.closest(".rule-card");
+    if (!card) return;
+    const ruleId = card.dataset.ruleId;
+    if (button.dataset.action === "add-condition") commit((state) => state.rules.find((rule) => rule.id === ruleId).conditions.push({ field: state.columns[0]?.id || "", operator: "equals", value: "" }));
+    if (button.dataset.action === "delete-condition") {
+      const index = Number(button.closest(".condition-row").dataset.conditionIndex);
+      commit((state) => {
+        const rule = state.rules.find((item) => item.id === ruleId);
+        if (rule.conditions.length > 1) rule.conditions.splice(index, 1);
+      });
+    }
+    if (button.dataset.action === "duplicate-rule") commit((state) => { const source = state.rules.find((rule) => rule.id === ruleId); state.rules.splice(state.rules.indexOf(source) + 1, 0, { ...clone(source), id: uid("rule"), name: `${source.name} copy` }); });
+    if (button.dataset.action === "delete-rule") commit((state) => { state.rules = state.rules.filter((rule) => rule.id !== ruleId); });
+  });
+  let draggedRuleId = null;
+  $("#ruleList").addEventListener("dragstart", (event) => {
+    if (!event.target.closest(".rule-drag-handle")) return event.preventDefault();
+    const card = event.target.closest(".rule-card");
+    if (!card) return event.preventDefault();
+    draggedRuleId = card.dataset.ruleId;
+    card.classList.add("disabled");
+    event.dataTransfer.effectAllowed = "move";
+  });
+  $("#ruleList").addEventListener("dragover", (event) => { if (draggedRuleId) event.preventDefault(); });
+  $("#ruleList").addEventListener("drop", (event) => {
+    event.preventDefault();
+    const targetId = event.target.closest(".rule-card")?.dataset.ruleId;
+    if (!draggedRuleId || !targetId || draggedRuleId === targetId) return;
+    commit((state) => {
+      const from = state.rules.findIndex((rule) => rule.id === draggedRuleId);
+      const to = state.rules.findIndex((rule) => rule.id === targetId);
+      const [moved] = state.rules.splice(from, 1);
+      state.rules.splice(from < to ? to - 1 : to, 0, moved);
+    });
+    draggedRuleId = null;
+  });
+  $("#ruleList").addEventListener("dragend", () => { draggedRuleId = null; renderRules(); });
+  $("#rulesView").addEventListener("click", (event) => { if (event.target.closest('[data-action="add-rule"]')) addRule(); });
+  $("#disableRulesButton").addEventListener("click", () => {
+    const enable = !documentState.rules.some((rule) => rule.enabled !== false);
+    commit((state) => state.rules.forEach((rule) => { rule.enabled = enable; }));
+  });
+
+  $$(".layout-mode").forEach((button) => button.addEventListener("click", () => commit((state) => { state.layout.mode = button.dataset.mode; })));
+  $("#stackedColumnsInput").addEventListener("change", (event) => commit((state) => { state.layout.stackedColumns = Number(event.target.value) === 2 ? 2 : 1; }));
+  $("#stackedLabelWidthInput").addEventListener("change", (event) => commit((state) => { state.layout.labelWidth = Math.min(60, Math.max(18, Number(event.target.value) || 34)); }));
+  $("#stackedSplitInput").addEventListener("change", (event) => commit((state) => { state.layout.stackedSplit = Math.min(70, Math.max(30, Number(event.target.value) || 50)); }));
+  const layoutBindings = {
+    paperInput: ["paper", String], orientationInput: ["orientation", String], marginInput: ["margin", Number], gapInput: ["gap", Number], slipHeightInput: ["slipHeight", Number], accentInput: ["accent", String], inkInput: ["ink", String], paperColorInput: ["paperColor", String], borderColorInput: ["borderColor", String], labelSizeInput: ["labelSize", Number], valueSizeInput: ["valueSize", Number], fontInput: ["font", String], labelFontInput: ["labelFont", String], labelCaseInput: ["labelCase", String], noteFontInput: ["noteFont", String], noteSizeInput: ["noteSize", Number],
+  };
+  Object.entries(layoutBindings).forEach(([id, [key, cast]]) => {
+    $("#" + id).addEventListener(["slipHeightInput", "accentInput", "inkInput", "paperColorInput", "borderColorInput"].includes(id) ? "input" : "change", (event) => {
+      if (["slipHeightInput", "accentInput", "inkInput", "paperColorInput", "borderColorInput"].includes(id)) {
+        documentState.layout[key] = cast(event.target.value);
+        changed(); renderLayout(); schedulePdfPreview();
+      } else commit((state) => { state.layout[key] = cast(event.target.value); });
+    });
+  });
+  $("#filenameTimestampInput").addEventListener("change", (event) => commit((state) => { state.layout.filenameTimestamp = event.target.value; }));
+  $("#noteTextInput").addEventListener("input", (event) => {
+    if (documentState.layout.noteText === event.target.value) return;
+    if (!ui.editingDefaultNote) { pushHistory(); ui.editingDefaultNote = true; }
+    documentState.layout.noteText = event.target.value;
+    changed();
+    schedulePdfPreview();
+  });
+  $("#noteTextInput").addEventListener("blur", () => { ui.editingDefaultNote = false; });
+  $("#addNoteRuleButton").addEventListener("click", addNoteRule);
+  $("#paletteSelect").addEventListener("change", applySelectedColorPalette);
+  $("#savePaletteButton").addEventListener("click", saveCurrentColorPalette);
+  $("#deletePaletteButton").addEventListener("click", deleteSelectedColorPalette);
+  [["borderInput", "showBorder"], ["cutMarksInput", "cutMarks"], ["footerInput", "footer"], ["fieldLinesInput", "fieldLines"]].forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => commit((state) => { state.layout[key] = event.target.checked; })));
+  $("#resetLayoutButton").addEventListener("click", () => commit((state) => { state.layout = clone(defaultLayout); }));
+  $("#zoomOutButton").addEventListener("click", () => { ui.zoom = Math.max(50, ui.zoom - 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); schedulePdfPreview(true); });
+  $("#zoomInButton").addEventListener("click", () => { ui.zoom = Math.min(PREVIEW_MAX_ZOOM, ui.zoom + 25); saveStudioPreferences({ zoom: ui.zoom }); applyPreviewZoom(); schedulePdfPreview(true); });
+  $("#refreshPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
+  $("#retryPreviewButton").addEventListener("click", () => schedulePdfPreview(true));
+
+  $("#workbookInput").addEventListener("change", (event) => importWorkbook(event.target.files[0]));
+  $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault(); event.currentTarget.classList.add("drag-over"); });
+  $("#dropZone").addEventListener("dragleave", (event) => event.currentTarget.classList.remove("drag-over"));
+  $("#dropZone").addEventListener("drop", (event) => { event.preventDefault(); event.currentTarget.classList.remove("drag-over"); importWorkbook(event.dataTransfer.files[0]); });
+  $("#importSheetSelect").addEventListener("change", () => {
+    // Row numbers belong to the selected sheet. Keeping them while switching
+    // sheets is an easy way to silently import the wrong rows.
+    $("#importRowNumbers").value = "";
+    $("#importHiddenRowNumbers").value = "";
+    rememberImportSheet();
+    renderImportMapping();
+  });
+  $("#importMode").addEventListener("change", updateImportModeNotice);
+  $("#importColumnMode").addEventListener("change", updateImportModeNotice);
+  $("#importRowVisibility").addEventListener("change", updateImportModeNotice);
+  $("#importRowSelectionMode").addEventListener("change", () => { updateImportRowSelectionControls(); updateImportModeNotice(); });
+  $("#importRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
+  $("#importHiddenRowNumbers").addEventListener("input", () => { updateImportModeNotice(); });
+  $("#mappingSearch").addEventListener("input", (event) => {
+    ui.importMappingSearch = event.target.value;
+    filterImportMappingRows();
+  });
+  $("#includeAllColumnsButton").addEventListener("click", () => {
+    $$(".mapping-include", $("#mappingList")).forEach((input) => { input.checked = true; });
+    updateImportMappingControls();
+    updateImportWarning();
+  });
+  $("#clearAllColumnsButton").addEventListener("click", () => {
+    $$(".mapping-include", $("#mappingList")).forEach((input) => { input.checked = false; });
+    updateImportMappingControls();
+    updateImportWarning();
+  });
+  $("#mappingList").addEventListener("change", (event) => {
+    if (event.target.classList.contains("mapping-select") || event.target.classList.contains("mapping-include")) updateImportMappingControls();
+    updateImportWarning();
+  });
+  $("#mappingList").addEventListener("input", (event) => {
+    if (!event.target.classList.contains("mapping-new-name")) return;
+    updateImportWarning();
+  });
+  $("#confirmImportButton").addEventListener("click", confirmImport);
+  $("#importDialog").addEventListener("close", resetImportDialog);
+
+  $("#rowPrintableInput").addEventListener("change", (event) => {
+    commit((state) => {
+      const row = state.rows.find((item) => item.id === ui.rowOptionsId);
+      if (row) row.hidden = !event.target.checked;
+    });
+  });
+
+  $("#copyRowVisibilityButton").addEventListener("click", copyRowVisibilityToSelection);
+  $("#hiddenRowsList").addEventListener("change", updateHiddenRowSelection);
+  $("#selectAllHiddenRows").addEventListener("change", (event) => {
+    $$(".hidden-row-checkbox", $("#hiddenRowsList")).forEach((input) => { input.checked = event.target.checked; });
+    updateHiddenRowSelection();
+  });
+  $("#showHiddenSelectedButton").addEventListener("click", showSelectedHiddenRows);
+
+  $("#rowOverrideList").addEventListener("change", (event) => {
+    const columnId = event.target.dataset.columnId;
+    commit((state) => {
+      const overrides = state.rows.find((row) => row.id === ui.rowOptionsId).overrides;
+      if (event.target.value === "auto") delete overrides[columnId];
+      else overrides[columnId] = event.target.value === "show";
+    });
+  });
+
+  $("#commandInput").addEventListener("input", () => { ui.commandIndex = 0; renderCommands(); });
+  $("#commandInput").addEventListener("keydown", (event) => {
+    const actions = filteredCommands();
+    if (event.key === "ArrowDown") { event.preventDefault(); ui.commandIndex = (ui.commandIndex + 1) % Math.max(1, actions.length); renderCommands(); }
+    if (event.key === "ArrowUp") { event.preventDefault(); ui.commandIndex = (ui.commandIndex - 1 + Math.max(1, actions.length)) % Math.max(1, actions.length); renderCommands(); }
+    if (event.key === "Enter") { event.preventDefault(); runCommand(ui.commandIndex); }
+  });
+  $("#commandList").addEventListener("click", (event) => { const item = event.target.closest("[data-command-index]"); if (item) runCommand(Number(item.dataset.commandIndex)); });
+  $$(".modal").forEach((dialog) => dialog.addEventListener("click", (event) => { if (event.target === dialog && dialog.id !== "confirmDialog") dialog.close(); }));
+
+  document.addEventListener("keydown", (event) => {
+    const modifier = event.metaKey || event.ctrlKey;
+    const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
+    const editingText = typing || Boolean(document.activeElement?.isContentEditable);
+    const editingGridCell = Boolean(document.activeElement?.classList.contains("cell-input"));
+    if (modifier && event.key.toLowerCase() === "k") { event.preventDefault(); $("#commandDialog").open ? $("#commandDialog").close() : openCommands(); return; }
+    if (modifier && event.key.toLowerCase() === "z" && !editingText) { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
+    if (modifier && event.shiftKey && event.key.toLowerCase() === "e" && !editingText) { event.preventDefault(); exportCurrentScope(); return; }
+    if (modifier && !event.shiftKey && event.key.toLowerCase() === "s" && !editingText && !$("dialog[open]")) { event.preventDefault(); downloadWorkspace(); return; }
+    if (modifier && !event.shiftKey && event.key.toLowerCase() === "o" && !editingText && !$("dialog[open]")) { event.preventDefault(); $("#loadWorkspaceInput").click(); return; }
+    if (modifier && event.shiftKey && event.key.toLowerCase() === "t" && !editingText && !$("dialog[open]")) { event.preventDefault(); openTemplates(); return; }
+    if (modifier && event.key === "Enter" && (editingGridCell || !editingText) && !$("dialog[open]")) {
+      event.preventDefault();
+      if (editingGridCell) commitGridCellValue(document.activeElement);
+      addRow();
+      return;
+    }
+    if (modifier && event.shiftKey && event.key === "Backspace" && !editingText && !$("dialog[open]")) { event.preventDefault(); clearAllData(); return; }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "n") { event.preventDefault(); addRow(); }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "i") { event.preventDefault(); openImport(); }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "d") { event.preventDefault(); showView("data"); }
+    if (!modifier && !editingText && !$("dialog[open]") && event.key.toLowerCase() === "l") { event.preventDefault(); showView("layout"); }
+  });
+}
+
+window.addEventListener("pagehide", flushPersistence);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushPersistence(); });
+installEvents();
+setPreviewWidth(ui.previewWidth, false);
+renderAll();
+showView(ui.view);
+refreshServiceStatus();
+window.setInterval(() => {
+  if (serviceRestartPending || $("#appSettingsDialog").open) refreshServiceStatus();
+}, 2500);
+window.setInterval(refreshServiceStatus, 15000);

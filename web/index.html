@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Password Slip Studio</title>
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem("pss-theme") || "light"; } catch (_) {}
+  </script>
+  <meta name="theme-color" content="#eaf1f8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Password Slip Studio">
+  <link rel="icon" type="image/svg+xml" href="/icons/password-slip-studio.svg?v=1">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=1">
+  <link rel="mask-icon" href="/icons/safari-pinned-tab.svg?v=1" color="#145db8">
+  <link rel="manifest" href="/manifest.webmanifest?v=1">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">PS</span>
+      <span>Password Slip Studio</span>
+    </div>
+    <label class="title-control"><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status" role="status" aria-live="polite">Saved</span></label>
+    <div class="header-actions">
+      <span class="header-history">
+        <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
+        <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
+      </span>
+      <button id="updateAvailableButton" class="icon-button update-available-button" type="button" aria-label="Review available update" aria-controls="updateNotesDialog" title="Review update notes" hidden>↓</button>
+      <button id="checkUpdatesHeaderButton" class="icon-button update-check-button" type="button" aria-label="Check for updates" title="Check for updates">↻</button>
+      <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
+      <button id="openTemplatesHeaderButton" class="button secondary compact"><span class="command-glyph">◇</span> Templates</button>
+      <button id="exportPdfButton" class="button primary compact">Export PDF</button>
+      <button id="moreButton" class="icon-button" title="More actions" aria-label="More actions" aria-expanded="false">•••</button>
+      <div id="moreMenu" class="action-menu" hidden>
+        <button id="exportCsvButton"><span>↓</span> Export data as CSV</button>
+        <hr>
+        <button id="downloadWorkspaceButton"><span>↓</span> Save workspace</button>
+        <button id="loadWorkspaceButton"><span>↑</span> Open workspace</button>
+        <input id="loadWorkspaceInput" type="file" accept=".json,.password-slips,.password-slip-workspace" hidden>
+        <button id="openTemplatesButton"><span>◇</span> Templates</button>
+        <button id="shortcutsButton"><span>⌘</span> Keyboard shortcuts</button>
+        <button id="themeButton"><span>◐</span> Toggle theme</button>
+        <button id="settingsMenuButton"><span>⚙</span> App settings</button>
+        <hr>
+        <button id="clearDataButton"><span>⌫</span> Clear all data</button>
+        <button id="resetMenuButton"><span>↺</span> Reset everything</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="rail">
+      <nav class="rail-nav" aria-label="Studio sections">
+        <button class="nav-item active" data-view="data"><span class="nav-icon">▦</span><span>Data</span><kbd>D</kbd></button>
+        <button class="nav-item" data-view="columns"><span class="nav-icon">⫶</span><span>Fields</span><span id="columnCount" class="nav-count">4</span></button>
+        <button class="nav-item" data-view="rules"><span class="nav-icon">⌁</span><span>Rules</span><span id="ruleCount" class="nav-count">1</span></button>
+        <button class="nav-item" data-view="layout"><span class="nav-icon">▤</span><span>Layout</span><kbd>L</kbd></button>
+      </nav>
+
+    </aside>
+
+    <section class="editor-panel">
+      <div id="dataView" class="view active">
+        <div class="view-header">
+          <div>
+            <h1>Data</h1>
+            <p id="dataSummary">0 rows · 4 columns</p>
+          </div>
+          <div class="view-actions">
+            <label class="search-control"><span>⌕</span><input id="rowSearch" type="search" placeholder="Filter rows" aria-label="Filter rows"></label>
+            <button id="addRowButton" class="button secondary">＋ Add row</button>
+            <button id="dataImportButton" class="button primary">⇧ Import</button>
+            <button id="clearDataTabButton" class="button secondary danger">Clear all data</button>
+          </div>
+        </div>
+        <div id="selectionToolbar" class="selection-toolbar" hidden>
+          <strong id="selectionCount" role="status" aria-live="polite">0 selected</strong>
+          <button id="exportSelectedButton" class="button quiet compact">Export selected</button>
+          <button id="bulkEditButton" class="button quiet compact">Bulk edit</button>
+          <button id="customizeSelectedButton" class="button quiet compact">Customize visibility</button>
+          <button id="resetSelectedLayoutsButton" class="button quiet compact">Reset visibility</button>
+          <button id="duplicateRowsButton" class="button quiet compact">Duplicate</button>
+          <button id="hideRowsButton" class="button quiet compact">Hide slips</button>
+          <button id="showRowsButton" class="button quiet compact">Show slips</button>
+          <button id="deleteRowsButton" class="button danger quiet compact">Delete</button>
+          <button id="clearSelectionButton" class="button quiet compact push-right">Clear</button>
+        </div>
+        <div id="tableShell" class="table-shell">
+          <table class="data-table">
+            <colgroup id="dataColgroup"></colgroup>
+            <thead id="dataHead"></thead>
+            <tbody id="dataBody"></tbody>
+          </table>
+          <div id="dataEmpty" class="empty-state" hidden>
+            <div class="empty-icon">▦</div>
+            <h2>No rows</h2>
+            <div><button class="button primary" data-action="add-row">Add row</button> <button class="button secondary" data-action="import">Import sheet</button></div>
+          </div>
+        </div>
+        <div class="table-footer">
+          <button id="appendRowButton" class="button secondary compact">＋ New row</button>
+          <span id="visibleRowCount" role="status" aria-live="polite"></span>
+          <button id="manageHiddenButton" class="text-button hidden-manager-button" type="button" hidden>Manage hidden</button>
+          <div id="dataPagination" class="data-pagination" aria-label="Data pagination">
+            <label>Rows<select id="pageSizeInput" aria-label="Rows per page"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="250">250</option></select></label>
+            <button id="dataPrevButton" class="icon-button small" type="button" aria-label="Previous data page" title="Previous data page">‹</button>
+            <span id="dataPageLabel">Page 1 / 1</span>
+            <button id="dataNextButton" class="icon-button small" type="button" aria-label="Next data page" title="Next data page">›</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="columnsView" class="view">
+        <div class="view-header">
+          <div><h1>Fields</h1><p id="fieldSummary">Manage field names, types and visibility.</p></div>
+          <div class="view-actions"><label class="search-control"><span>⌕</span><input id="fieldSearch" type="search" placeholder="Filter fields" aria-label="Filter fields"></label><button id="addColumnButton" class="button primary">＋ Add field</button></div>
+        </div>
+        <div id="columnList" class="column-list"></div>
+      </div>
+
+      <div id="rulesView" class="view">
+        <div class="view-header">
+          <div><h1>Rules</h1><p id="ruleHeaderSummary">Rules run per slip. If show and hide both match a field, hide wins.</p></div>
+          <div class="view-actions"><label class="search-control"><span>⌕</span><input id="ruleSearch" type="search" placeholder="Filter rules" aria-label="Filter rules"></label><button id="addRuleButton" class="button primary">＋ Add rule</button></div>
+        </div>
+        <div class="rule-summary-bar">
+          <span id="ruleSummary">1 active rule</span>
+          <label class="rule-test-control"><span>Test row</span><select id="ruleTestRowSelect" aria-label="Test rules against a row"><option value="">No row selected</option></select></label>
+          <span id="ruleTestStatus" class="rule-test-status"></span>
+          <button id="disableRulesButton" class="text-button">Disable all</button>
+        </div>
+        <details class="slip-notes-settings">
+          <summary><span>Slip notes</span><small>Default text and type</small><span class="slip-notes-chevron" aria-hidden="true">⌄</span></summary>
+          <div class="slip-notes-content">
+            <label class="note-label">Default text<textarea id="noteTextInput" rows="3" maxlength="1200" placeholder="Optional note, instructions or disclaimer"></textarea></label>
+            <div class="form-grid two">
+              <label>Typeface<select id="noteFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Size <span class="unit">pt</span><input id="noteSizeInput" type="number" min="5" max="12" step="0.5"></label>
+            </div>
+            <div class="note-rule-row"><span class="field-help">The last matching note rule replaces or clears this text.</span><button id="addNoteRuleButton" class="button secondary compact" type="button">＋ Add note rule</button></div>
+          </div>
+        </details>
+        <div id="ruleList" class="rule-list"></div>
+        <div id="rulesEmpty" class="empty-state compact-empty" hidden>
+          <div class="empty-icon">⌁</div><h2>No rules</h2><button class="button primary" data-action="add-rule">Add rule</button>
+        </div>
+      </div>
+
+      <div id="layoutView" class="view">
+        <div class="view-header">
+          <div><h1>Layout</h1><p>Changes render in the PDF preview automatically.</p></div>
+          <button id="resetLayoutButton" class="button secondary">Reset layout</button>
+        </div>
+        <div class="settings-grid">
+          <section class="settings-section span-two">
+            <h2>Slip layout</h2>
+            <div id="layoutModes" class="layout-modes">
+              <button class="layout-mode active" data-mode="horizontal"><span class="mode-diagram horizontal-mode"><i></i><i></i><i></i></span><strong>Horizontal</strong><small>Blue label band, values below</small></button>
+              <button class="layout-mode" data-mode="stacked"><span class="mode-diagram stacked-mode"><i></i><i></i><i></i></span><strong>Stacked</strong><small>Handles many fields</small></button>
+            </div>
+            <label id="stackedColumnsControl" class="inline-setting" hidden>Stacked columns<select id="stackedColumnsInput"><option value="1">1 column</option><option value="2">2 columns</option></select></label>
+            <label id="stackedLabelWidthControl" class="inline-setting" hidden>Label column width <span><input id="stackedLabelWidthInput" type="number" min="18" max="60" step="1" aria-label="Stacked label column width"> %</span></label>
+            <label id="stackedSplitControl" class="inline-setting" hidden>First column width <span><input id="stackedSplitInput" type="number" min="30" max="70" step="1" aria-label="First stacked column width"> %</span></label>
+          </section>
+          <section class="settings-section span-two">
+            <h2>Appearance</h2>
+            <div class="form-grid two">
+              <label>Accent<input id="accentInput" type="color"></label>
+              <label>Text<input id="inkInput" type="color"></label>
+              <label>Paper colour<input id="paperColorInput" type="color"></label>
+              <label>Divider colour<input id="borderColorInput" type="color"></label>
+              <label>Labels <span class="unit">pt</span><input id="labelSizeInput" type="number" min="4" max="18" step="1"></label>
+              <label>Values <span class="unit">pt</span><input id="valueSizeInput" type="number" min="5" max="26" step="1"></label>
+              <label>Label typeface<select id="labelFontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Value typeface<select id="fontInput"><option value="Helvetica">Sans</option><option value="Times-Roman">Serif</option><option value="Courier">Mono</option></select></label>
+              <label>Label case<select id="labelCaseInput"><option value="original">Original</option><option value="upper">UPPERCASE</option><option value="title">Title Case</option></select></label>
+              <div class="palette-row span-two"><label>Palette<select id="paletteSelect" aria-label="Choose a saved colour palette"><option value="">Choose a saved palette</option></select></label><label>Name<input id="paletteNameInput" type="text" maxlength="80" placeholder="Name this palette" autocomplete="off"></label><button id="savePaletteButton" class="button secondary compact" type="button">Save palette</button><button id="deletePaletteButton" class="button quiet compact danger" type="button" disabled>Delete</button><small class="palette-help">Also included in workspaces and templates.</small></div>
+            </div>
+          </section>
+          <section class="settings-section">
+            <h2>Sheet</h2>
+            <div class="form-grid two">
+              <label>Paper<select id="paperInput"><option value="a4">A4</option><option value="letter">US Letter</option></select></label>
+              <label>Orientation<select id="orientationInput"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
+              <label>Margin <span class="unit">mm</span><input id="marginInput" type="number" min="2" max="40" step="1"></label>
+              <label>Gap <span class="unit">mm</span><input id="gapInput" type="number" min="0" max="20" step="1"></label>
+              <label class="span-two">Slip height <output id="slipHeightOutput"></output><input id="slipHeightInput" type="range" min="20" max="120" step="1"></label>
+              <div id="sheetCapacity" class="field-help span-two"></div>
+            </div>
+          </section>
+          <section class="settings-section span-two">
+            <h2>Marks</h2>
+            <div class="toggle-grid">
+              <label class="toggle-row"><input id="borderInput" type="checkbox"><span class="switch"></span><span><strong>Slip border</strong><small>Outline each finished slip</small></span></label>
+              <label class="toggle-row"><input id="cutMarksInput" type="checkbox"><span class="switch"></span><span><strong>Cut marks</strong><small>Show trim ticks at sheet edges</small></span></label>
+              <label class="toggle-row"><input id="footerInput" type="checkbox"><span class="switch"></span><span><strong>PDF footer</strong><small>Export date and page number</small></span></label>
+              <label class="toggle-row"><input id="fieldLinesInput" type="checkbox"><span class="switch"></span><span><strong>Field dividers</strong><small>Rules between field cells</small></span></label>
+            </div>
+          </section>
+          <section class="settings-section span-two">
+            <h2>PDF filename</h2>
+            <label class="output-name-control">Add export date and time<select id="filenameTimestampInput"><option value="none">None</option><option value="date">Date · YYYY-MM-DD</option><option value="datetime">Date and time · YYYY-MM-DD_HH-mm</option></select></label>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <div id="previewResizeHandle" class="preview-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize PDF preview" aria-valuemin="360" aria-valuemax="920" aria-valuenow="520" tabindex="0" title="Drag to resize preview"></div>
+    <aside class="preview-panel">
+      <div class="preview-header">
+        <div><h2>PDF preview</h2><span id="previewStats" role="status" aria-live="polite">No rows</span></div>
+        <div class="preview-actions"><button id="refreshPreviewButton" class="icon-button small" aria-label="Refresh preview" title="Render PDF now">↻</button><span class="preview-divider"></span><button id="zoomOutButton" class="icon-button small" aria-label="Zoom out">−</button><span id="zoomLabel">110%</span><button id="zoomInButton" class="icon-button small" aria-label="Zoom in">＋</button></div>
+      </div>
+      <div id="previewViewport" class="preview-viewport pdf-preview-viewport">
+        <div id="previewPlaceholder" class="pdf-preview-placeholder">Add or import rows to preview the PDF.</div>
+        <div id="pdfPreviewPages" class="pdf-preview-pages" aria-label="Rendered PDF pages" hidden></div>
+        <iframe id="pdfPreviewFrame" class="pdf-preview-frame" title="PDF preview" hidden></iframe>
+        <div id="previewError" class="preview-error" role="alert" hidden><strong>Preview unavailable</strong><span id="previewErrorMessage"></span><button id="retryPreviewButton" class="button secondary compact" type="button">Retry preview</button></div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="dataFieldMenu" class="data-field-menu" hidden>
+    <label>Field name<input id="dataFieldRenameInput" type="text" maxlength="120" aria-label="Rename field"></label>
+    <div class="data-field-menu-row"><button id="dataFieldMoveLeft" type="button">← Move left</button><button id="dataFieldMoveRight" type="button">Move right →</button></div>
+    <button id="dataFieldOptionsButton" type="button">More options…</button>
+    <button id="dataFieldDuplicateButton" type="button">Duplicate field</button>
+    <button id="dataFieldDeleteButton" class="danger-menu-item" type="button">Delete field</button>
+  </div>
+
+  <dialog id="fieldSheetDialog" class="modal field-sheet-dialog">
+    <section class="modal-card field-sheet-card">
+      <header class="modal-header"><h2>Field settings</h2><button id="closeFieldSheetButton" class="icon-button" aria-label="Close">×</button></header>
+      <div class="modal-body field-sheet-body">
+        <label>Name<input id="fieldSheetName" type="text" maxlength="120"></label>
+        <label>Type<select id="fieldSheetType"><option value="text">Text</option><option value="password">Password</option><option value="number">Number</option><option value="date">Date / time</option><option value="url">Link / URL</option></select></label>
+        <label>Default for new rows<input id="fieldSheetDefault" type="text"></label>
+        <label>Appearance<select id="fieldSheetStyle"><option value="standard">Standard</option><option value="strong">Bold</option><option value="mono">Monospace</option></select></label>
+        <label>Visibility<select id="fieldSheetVisibility"><option value="always">Always</option><option value="nonempty">Only with a value</option><option value="never">Hidden by default</option></select></label>
+        <label>Text transform<select id="fieldSheetTransform"><option value="as_entered">As entered</option><option value="upper">UPPERCASE</option><option value="lower">lowercase</option><option value="title">Title Case</option><option value="mask_last4">Mask · last 4</option></select></label>
+        <label>Value alignment<select id="fieldSheetAlign"><option value="default">Default</option><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
+        <label>Data column width <span class="unit">px</span><input id="fieldSheetGridWidth" type="number" min="120" max="600" step="10"></label>
+        <div class="field-sheet-order"><button id="fieldSheetMoveLeft" class="button secondary compact" type="button">← Move left</button><button id="fieldSheetMoveRight" class="button secondary compact" type="button">Move right →</button></div>
+      </div>
+      <footer class="modal-footer"><button id="fieldSheetDelete" class="button secondary danger" type="button">Delete field</button><button id="fieldSheetDone" class="button primary" type="button">Done</button></footer>
+    </section>
+  </dialog>
+
+  <dialog id="importDialog" class="modal">
+    <form method="dialog" class="modal-card import-card">
+      <header class="modal-header"><div><h2>Import sheet</h2><p id="importStepLabel">Choose a workbook</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div id="importChoose" class="modal-body import-step">
+        <label id="dropZone" class="drop-zone">
+          <input id="workbookInput" type="file" accept=".xlsx,.xlsm,.csv" hidden>
+          <span class="drop-icon">⇧</span><strong>Drop a workbook here</strong><small>or choose an XLSX, XLSM or CSV file</small><span class="button secondary">Choose file</span>
+        </label>
+      </div>
+      <div id="importMap" class="modal-body import-step" hidden>
+        <div class="import-options">
+          <label class="import-sheet-select">Sheet<select id="importSheetSelect"></select></label>
+          <section class="import-option-group">
+            <h3>Rows</h3>
+            <div class="import-option-grid">
+              <label>Existing rows<select id="importMode"><option value="replace">Replace all rows</option><option value="append">Add after existing rows</option></select></label>
+              <label>Spreadsheet rows<select id="importRowSelectionMode"><option value="all">All non-empty rows</option><option value="manual">Choose row numbers</option></select></label>
+              <label>Imported slips<select id="importRowVisibility"><option value="printable">Show on slips</option><option value="hidden">Keep hidden</option></select></label>
+              <label id="importRowNumbersWrap" class="span-two" hidden>Row numbers<input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Comma-separated numbers or ranges. Row 1 is the header.</small></label>
+              <label class="span-two">Hide specific rows<input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">Hidden rows stay available to rules and the studio.</small></label>
+            </div>
+          </section>
+          <section class="import-option-group">
+            <h3>Fields</h3>
+            <label>Existing fields<select id="importColumnMode"><option value="replace">Replace existing fields</option><option value="merge">Keep fields · map selected</option></select></label>
+          </section>
+        </div>
+        <p id="importModeNotice" class="import-mode-notice"></p>
+        <div class="mapping-toolbar"><strong>Spreadsheet fields</strong><span>Choose exactly which fields to import. Mappings are remembered.</span><label class="search-control import-mapping-search"><span>⌕</span><input id="mappingSearch" type="search" placeholder="Find a spreadsheet field" aria-label="Find a spreadsheet field"></label><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
+        <div class="mapping-head"><span>Include</span><span>Spreadsheet field</span><span>Import into</span><span>Display name</span><span>On slips</span><span>Sample</span></div>
+        <p id="mappingSummary" class="mapping-summary"></p>
+        <div id="mappingList" class="mapping-list"></div>
+        <p id="mappingSearchEmpty" class="mapping-search-empty" hidden>No spreadsheet fields match this filter.</p>
+        <p id="importWarning" class="inline-notice" hidden></p>
+      </div>
+      <p id="importError" class="import-error" role="alert" hidden></p>
+      <footer class="modal-footer"><span id="importMeta"></span><button id="cancelImportButton" class="button secondary" value="cancel">Cancel</button><button id="confirmImportButton" class="button primary" type="button" hidden>Import rows</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="rowOptionsDialog" class="modal">
+    <form method="dialog" class="modal-card small-card">
+      <header class="modal-header"><div><h2>Row options</h2><p id="rowOptionsName"></p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body">
+        <label class="toggle-row bordered"><input id="rowPrintableInput" type="checkbox"><span class="switch"></span><span><strong>Print this slip</strong><small>Hidden rows remain editable and available to rules</small></span></label>
+        <h3 class="section-label">Field visibility</h3>
+        <div id="rowOverrideList" class="override-list"></div>
+      </div>
+      <footer class="modal-footer"><span>Automatic uses the column and rule settings.</span><button id="copyRowVisibilityButton" class="button secondary compact" type="button" hidden>Apply to selected rows</button><button class="button primary" value="default">Done</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="hiddenRowsDialog" class="modal">
+    <form method="dialog" class="modal-card small-card">
+      <header class="modal-header"><div><h2>Hidden rows</h2><p id="hiddenRowsSummary">Hidden rows stay available to rules but are not printed.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body hidden-rows-body">
+        <label class="hidden-row-select-all"><input id="selectAllHiddenRows" type="checkbox" aria-label="Select all hidden rows"><span>Select all hidden rows</span></label>
+        <div id="hiddenRowsList" class="hidden-rows-list"></div>
+      </div>
+      <footer class="modal-footer"><span>Showing a row makes it printable again.</span><button id="showHiddenSelectedButton" class="button primary" type="button" disabled>Show selected</button><button class="button secondary" value="default">Done</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="bulkEditDialog" class="modal">
+    <form method="dialog" class="modal-card confirm-card bulk-edit-card">
+      <header class="modal-header"><div><h2>Bulk edit</h2><p id="bulkEditSummary"></p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body bulk-edit-body">
+        <label>Column<select id="bulkEditColumn"></select></label>
+        <label>Operation<select id="bulkEditOperation"><option value="set">Set value</option><option value="clear">Clear values</option><option value="replace">Find and replace</option><option value="prefix">Add prefix</option><option value="suffix">Add suffix</option><option value="upper">Convert to uppercase</option><option value="lower">Convert to lowercase</option><option value="title">Convert to Title Case</option><option value="trim">Trim whitespace</option></select></label>
+        <div id="bulkEditFields" class="bulk-edit-fields"></div>
+        <p id="bulkEditPreview" class="bulk-edit-preview"></p>
+      </div>
+      <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="applyBulkEditButton" class="button primary" type="button">Apply edit</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="templatesDialog" class="modal">
+    <form method="dialog" class="modal-card templates-card">
+      <header class="modal-header"><div><h2>Templates</h2><p>Reuse fields, rules and layout. Rows are optional.</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body templates-body">
+        <div class="template-save-panel">
+          <div class="template-save-fields">
+            <label>Template name<input id="templateNameInput" type="text" maxlength="120" placeholder="Template name" autocomplete="off"></label>
+            <label class="toggle-row bordered"><input id="templateIncludeDataInput" type="checkbox"><span class="switch"></span><span><strong>Include current data</strong><small>Keep the rows with this template</small></span></label>
+          </div>
+          <button id="saveTemplateButton" class="button primary" type="button">Save template</button>
+        </div>
+        <div class="template-file-row"><strong>Import template file</strong><span>Open a template you already have.</span><button id="openTemplateFileButton" class="button secondary" type="button">Choose file</button><input id="loadTemplateInput" type="file" accept=".json,.password-slip-template" hidden></div>
+        <div class="template-list-header"><h3>Saved templates</h3><span>Available in this app</span></div>
+        <div id="templateList" class="template-list"></div>
+      </div>
+      <footer class="modal-footer"><span>Saved templates stay available here.</span><button class="button secondary" value="cancel">Done</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="commandDialog" class="modal command-dialog">
+    <section class="modal-card command-card">
+      <label class="command-search"><span>⌕</span><input id="commandInput" type="search" placeholder="Type a command…" autocomplete="off"></label>
+      <div id="commandList" class="command-list" role="listbox"></div>
+      <footer class="command-footer"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Enter</kbd> run</span><span><kbd>Esc</kbd> close</span></footer>
+    </section>
+  </dialog>
+
+  <dialog id="shortcutsDialog" class="modal">
+    <form method="dialog" class="modal-card shortcuts-card">
+      <header class="modal-header"><div><h2>Keyboard shortcuts</h2><p>Mac shortcuts for the studio</p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
+      <div class="modal-body shortcuts-list">
+        <div><span>Commands</span><kbd>⌘K</kbd></div>
+        <div><span>New row</span><kbd>⌘↵</kbd></div>
+        <div><span>Save workspace</span><kbd>⌘S</kbd></div>
+        <div><span>Open workspace</span><kbd>⌘O</kbd></div>
+        <div><span>Templates</span><kbd>⇧⌘T</kbd></div>
+        <div><span>Export PDF</span><kbd>⇧⌘E</kbd></div>
+        <div><span>Clear all data</span><kbd>⇧⌘⌫</kbd></div>
+        <div><span>Undo / redo</span><kbd>⌘Z / ⇧⌘Z</kbd></div>
+        <div><span>Move down / up</span><kbd>Enter / ⇧Enter</kbd></div>
+        <div><span>Move across fields</span><kbd>Tab / ⇧Tab</kbd></div>
+      </div>
+      <footer class="modal-footer"><span>Esc closes dialogs</span><button class="button primary" value="default">Done</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="appSettingsDialog" class="modal">
+    <section class="modal-card app-settings-card">
+      <header class="modal-header"><div><h2>App settings</h2></div><button id="closeAppSettingsButton" class="icon-button" aria-label="Close">×</button></header>
+      <div class="modal-body app-settings-body">
+        <div class="service-setting"><div><strong>Run in background</strong><p>Studio stays available after the launcher closes.</p></div><span id="backgroundStatus" class="service-badge">Checking…</span></div>
+        <div class="service-setting"><div><strong>Start at login</strong><p>Open Studio automatically when you sign in to this Mac.</p></div><label class="service-switch"><input id="startAtLoginInput" type="checkbox" aria-label="Start at login"><span></span></label></div>
+        <div class="service-update-section">
+          <div class="service-update-heading"><strong>Updates</strong><span id="serviceVersion" class="service-version"></span></div>
+          <div class="service-update-controls"><label>Build channel<select id="updateChannelSelect" aria-label="Build channel"><option value="stable">Stable releases</option><option value="development">Development builds (development)</option></select></label><button id="checkUpdatesButton" class="button secondary compact">Check now</button><button id="installUpdateButton" class="button primary compact" hidden>Review update</button></div>
+          <p id="updateStatusText" class="service-message" role="status" aria-live="polite">Checking for updates…</p>
+        </div>
+      </div>
+      <footer class="modal-footer"><button id="quitStudioButton" class="button secondary danger">Quit Studio</button><button id="doneAppSettingsButton" class="button primary">Done</button></footer>
+    </section>
+  </dialog>
+
+  <dialog id="updateNotesDialog" class="modal update-notes-dialog" aria-labelledby="updateNotesTitle">
+    <section class="modal-card update-notes-card">
+      <header class="modal-header"><div><h2 id="updateNotesTitle">Studio update</h2><p id="updateNotesSummary"></p></div><button id="closeUpdateNotesButton" class="icon-button" type="button" aria-label="Later">×</button></header>
+      <div id="updateNotesContent" class="update-notes-content"></div>
+      <p id="updateNotesConstraint" class="update-notes-constraint" role="status" hidden></p>
+      <footer class="modal-footer"><span>Studio restarts to finish the update. Your workspace stays saved.</span><button id="laterUpdateButton" class="button secondary" type="button">Later</button><button id="confirmUpdateButton" class="button primary" type="button">Update &amp; restart</button></footer>
+    </section>
+  </dialog>
+
+  <dialog id="confirmDialog" class="modal">
+    <form method="dialog" class="modal-card confirm-card">
+      <header class="modal-header"><div><h2 id="confirmTitle">Confirm</h2><p id="confirmMessage"></p></div></header>
+      <footer class="modal-footer"><button class="button secondary" value="cancel">Cancel</button><button id="confirmActionButton" class="button danger" value="confirm">Confirm</button></footer>
+    </form>
+  </dialog>
+
+  <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
