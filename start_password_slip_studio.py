@@ -66,6 +66,16 @@ def runtime(url: str) -> dict | None:
     return result if result and result.get("name") == "Password Slip Studio" else None
 
 
+def ensure_runtime_checkout(existing: dict | None) -> dict | None:
+    """Refuse to treat a different checkout on the same port as this service."""
+    if not existing:
+        return None
+    running_root = str(existing.get("root") or "")
+    if running_root and Path(running_root).resolve() != ROOT.resolve():
+        raise RuntimeError(f"Port is already used by another Password Slip Studio checkout: {running_root}")
+    return existing
+
+
 def wait_for(url: str, running: bool, seconds: float) -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -76,6 +86,8 @@ def wait_for(url: str, running: bool, seconds: float) -> bool:
 
 
 def ensure_environment() -> Path:
+    if sys.version_info < (3, 9):
+        raise RuntimeError("Password Slip Studio requires Python 3.9 or newer. Install a current Python 3 release, then run the launcher again.")
     python = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not python.exists():
         say("Creating the project environment (first run only)…")
@@ -103,7 +115,7 @@ def service_log():
 
 def supervise(arguments: list[str]) -> int:
     url = service_url(arguments)
-    if runtime(url):
+    if ensure_runtime_checkout(runtime(url)):
         return 0
     control = control_file_for_port(target(arguments)[1])
     control.parent.mkdir(parents=True, exist_ok=True)
@@ -161,6 +173,7 @@ def start_background(arguments: list[str]) -> int:
         )
     if not wait_for(url, True, 30):
         raise RuntimeError(f"The service did not become ready. Check {LOG}.")
+    ensure_runtime_checkout(runtime(url))
     say(f"Running in the background at {url}")
     if "--no-open" not in arguments:
         webbrowser.open(url)
@@ -177,10 +190,8 @@ def main() -> int:
         url = service_url(args)
         if service:
             return supervise(args)
-        existing = runtime(url)
+        existing = ensure_runtime_checkout(runtime(url))
         if existing:
-            if existing.get("root") and existing["root"] != str(ROOT):
-                raise ValueError(f"Port {target(args)[1]} is used by another Studio checkout.")
             same_commit = existing.get("commit_id") == git_text("rev-parse", "HEAD")
             same_mode = bool(existing.get("background")) is not foreground
             if same_commit and same_mode:

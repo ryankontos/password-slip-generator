@@ -65,7 +65,10 @@ def parse_workbook(filename: str, content: bytes) -> dict[str, Any]:
             row_numbers: list[int] = []
             iterator = sheet.iter_rows(values_only=True)
             first = next(iterator, ())
-            headers = unique_headers(first[:MAX_IMPORT_COLUMNS])
+            raw_headers = first[:MAX_IMPORT_COLUMNS]
+            if not any(clean_cell(value).strip() for value in raw_headers):
+                continue
+            headers = unique_headers(raw_headers)
             for row_number, row in enumerate(iterator, start=2):
                 dimension = sheet.row_dimensions.get(row_number)
                 if dimension and dimension.hidden:
@@ -86,7 +89,7 @@ def parse_workbook(filename: str, content: bytes) -> dict[str, Any]:
     finally:
         workbook.close()
     if not sheets:
-        raise StudioError("The workbook has no visible sheets.")
+        raise StudioError("No visible worksheet has a header row. Put field names in the first row and try again.")
     return {"filename": filename, "sheets": sheets}
 
 
@@ -107,7 +110,10 @@ def _parse_csv(content: bytes) -> dict[str, Any]:
         dialect = csv.excel
     reader = csv.reader(io.StringIO(text), dialect)
     first = next(reader, [])
-    headers = unique_headers(first[:MAX_IMPORT_COLUMNS])
+    raw_headers = first[:MAX_IMPORT_COLUMNS]
+    if not any(clean_cell(value).strip() for value in raw_headers):
+        raise StudioError("The CSV is empty or has no header row. Put field names in the first row and try again.")
+    headers = unique_headers(raw_headers)
     rows = []
     row_numbers = []
     for row_number, row in enumerate(reader, start=2):

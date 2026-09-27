@@ -8,6 +8,14 @@
   <script>
     try { document.documentElement.dataset.theme = localStorage.getItem("pss-theme") || "light"; } catch (_) {}
   </script>
+  <meta name="theme-color" content="#eaf1f8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Password Slip Studio">
+  <link rel="icon" type="image/svg+xml" href="/icons/password-slip-studio.svg?v=1">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=1">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=1">
+  <link rel="mask-icon" href="/icons/safari-pinned-tab.svg?v=1" color="#145db8">
+  <link rel="manifest" href="/manifest.webmanifest?v=1">
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -16,7 +24,7 @@
       <span class="brand-mark">PS</span>
       <span>Password Slip Studio</span>
     </div>
-    <label class="title-control"><span class="title-file-icon" aria-hidden="true">PDF</span><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status" role="status" aria-live="polite">Saved</span></label>
+    <label class="title-control"><input id="documentName" type="text" maxlength="120" value="Untitled password slips" placeholder="PDF title" aria-label="PDF title"><span id="saveStatus" class="save-status" role="status" aria-live="polite">Saved</span></label>
     <div class="header-actions">
       <span class="header-history">
         <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
@@ -109,11 +117,8 @@
 
       <div id="columnsView" class="view">
         <div class="view-header">
-          <div><h1>Fields</h1><p id="fieldSummary">Choose what each slip contains and drag to set its order.</p></div>
+          <div><h1>Fields</h1><p id="fieldSummary">Manage field names, types and visibility.</p></div>
           <div class="view-actions"><label class="search-control"><span>⌕</span><input id="fieldSearch" type="search" placeholder="Filter fields" aria-label="Filter fields"></label><button id="addColumnButton" class="button primary">＋ Add field</button></div>
-        </div>
-          <div class="column-toolbar">
-          <span>Field</span><span>Appearance</span><span>Visibility</span><span></span>
         </div>
         <div id="columnList" class="column-list"></div>
       </div>
@@ -257,22 +262,31 @@
       </div>
       <div id="importMap" class="modal-body import-step" hidden>
         <div class="import-options">
-          <label>Sheet<select id="importSheetSelect"></select></label>
-          <label>Data handling<select id="importMode"><option value="replace">Replace all existing rows</option><option value="append">Append to existing rows</option></select></label>
-          <label>Which rows<select id="importRowSelectionMode"><option value="all">All non-empty rows</option><option value="manual">Specific row numbers</option></select></label>
-          <label>Field handling<select id="importColumnMode"><option value="replace">Replace existing fields</option><option value="merge">Keep fields · map selected</option></select></label>
-          <label>Imported slips<select id="importRowVisibility"><option value="printable">Printable</option><option value="hidden">Hidden · keep in studio only</option></select></label>
-          <label id="importRowNumbersWrap" class="span-two" hidden>Spreadsheet row numbers <input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Use commas and ranges. Row 1 is the header; hidden rows stay excluded.</small></label>
-          <label class="span-two">Hide selected spreadsheet rows <input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">These rows remain available to rules, but their slips are not printed.</small></label>
+          <label class="import-sheet-select">Sheet<select id="importSheetSelect"></select></label>
+          <section class="import-option-group">
+            <h3>Rows</h3>
+            <div class="import-option-grid">
+              <label>Existing rows<select id="importMode"><option value="replace">Replace all rows</option><option value="append">Add after existing rows</option></select></label>
+              <label>Spreadsheet rows<select id="importRowSelectionMode"><option value="all">All non-empty rows</option><option value="manual">Choose row numbers</option></select></label>
+              <label>Imported slips<select id="importRowVisibility"><option value="printable">Show on slips</option><option value="hidden">Keep hidden</option></select></label>
+              <label id="importRowNumbersWrap" class="span-two" hidden>Row numbers<input id="importRowNumbers" type="text" inputmode="text" placeholder="e.g. 2, 5, 10-15" autocomplete="off"><small class="field-help">Comma-separated numbers or ranges. Row 1 is the header.</small></label>
+              <label class="span-two">Hide specific rows<input id="importHiddenRowNumbers" type="text" inputmode="text" placeholder="e.g. 3, 8, 20-25" autocomplete="off"><small class="field-help">Hidden rows stay available to rules and the studio.</small></label>
+            </div>
+          </section>
+          <section class="import-option-group">
+            <h3>Fields</h3>
+            <label>Existing fields<select id="importColumnMode"><option value="replace">Replace existing fields</option><option value="merge">Keep fields · map selected</option></select></label>
+          </section>
         </div>
         <p id="importModeNotice" class="import-mode-notice"></p>
-        <div class="mapping-toolbar"><strong>Spreadsheet fields</strong><span>Recognised fields are selected automatically.</span><label class="search-control import-mapping-search"><span>⌕</span><input id="mappingSearch" type="search" placeholder="Find a spreadsheet field" aria-label="Find a spreadsheet field"></label><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
-        <div class="mapping-head"><span>Include</span><span>Spreadsheet field</span><span>Import into</span><span>Display name</span><span>Sample</span></div>
+        <div class="mapping-toolbar"><strong>Spreadsheet fields</strong><span>Choose exactly which fields to import. Mappings are remembered.</span><label class="search-control import-mapping-search"><span>⌕</span><input id="mappingSearch" type="search" placeholder="Find a spreadsheet field" aria-label="Find a spreadsheet field"></label><div><button id="includeAllColumnsButton" class="text-button" type="button">Include all</button><button id="clearAllColumnsButton" class="text-button" type="button">Clear all</button></div></div>
+        <div class="mapping-head"><span>Include</span><span>Spreadsheet field</span><span>Import into</span><span>Display name</span><span>On slips</span><span>Sample</span></div>
         <p id="mappingSummary" class="mapping-summary"></p>
         <div id="mappingList" class="mapping-list"></div>
         <p id="mappingSearchEmpty" class="mapping-search-empty" hidden>No spreadsheet fields match this filter.</p>
         <p id="importWarning" class="inline-notice" hidden></p>
       </div>
+      <p id="importError" class="import-error" role="alert" hidden></p>
       <footer class="modal-footer"><span id="importMeta"></span><button id="cancelImportButton" class="button secondary" value="cancel">Cancel</button><button id="confirmImportButton" class="button primary" type="button" hidden>Import rows</button></footer>
     </form>
   </dialog>

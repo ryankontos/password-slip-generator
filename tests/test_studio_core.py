@@ -11,7 +11,7 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from studio_core import MM, _display_value, _footer_baseline, _value_align, condition_matches, included_rows, note_for_row, note_reserve_height, parse_workbook, pdf_layout, render_pdf, visible_columns, wrap_note  # noqa: E402
+from studio_core import MM, StudioError, _display_value, _footer_baseline, _value_align, condition_matches, included_rows, note_for_row, note_reserve_height, parse_workbook, pdf_layout, render_pdf, visible_columns, wrap_note  # noqa: E402
 
 
 def sample_state() -> dict:
@@ -38,6 +38,12 @@ class WorkbookImportTests(unittest.TestCase):
         self.assertEqual(result["sheets"][0]["rows"][0][2], "Maple!482")
         self.assertEqual(result["sheets"][0]["rowNumbers"], [2, 4])
 
+    def test_csv_without_headers_has_a_clear_import_error(self) -> None:
+        for content in (b"", b",,\nAva,one,two\n"):
+            with self.subTest(content=content):
+                with self.assertRaisesRegex(StudioError, "no header row"):
+                    parse_workbook("empty.csv", content)
+
     def test_excel_import_ignores_hidden_rows_and_sheets(self) -> None:
         workbook = Workbook()
         sheet = workbook.active
@@ -54,6 +60,25 @@ class WorkbookImportTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in result["sheets"]], ["People"])
         self.assertEqual(result["sheets"][0]["rows"], [["Ava", "one"]])
         self.assertEqual(result["sheets"][0]["rowNumbers"], [2])
+
+    def test_excel_import_skips_blank_sheets_and_explains_missing_headers(self) -> None:
+        workbook = Workbook()
+        workbook.active.title = "Blank"
+        people = workbook.create_sheet("People")
+        people.append(["Name", "Password"])
+        people.append(["Ava", "one"])
+        stream = io.BytesIO()
+        workbook.save(stream)
+        result = parse_workbook("people.xlsx", stream.getvalue())
+        self.assertEqual([sheet["name"] for sheet in result["sheets"]], ["People"])
+
+        blank = Workbook()
+        blank.active.append([None, None])
+        blank.active.append(["Ava", "one"])
+        stream = io.BytesIO()
+        blank.save(stream)
+        with self.assertRaisesRegex(StudioError, "header row"):
+            parse_workbook("blank.xlsx", stream.getvalue())
 
 
 class RuleTests(unittest.TestCase):

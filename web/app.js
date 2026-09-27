@@ -186,6 +186,7 @@ function saveImportMappings(sheet, mappings) {
       include: Boolean(mapping.include),
       target: String(mapping.target || "__create__"),
       newName: String(mapping.newName || ""),
+      visibility: ["always", "nonempty", "never"].includes(mapping.visibility) ? mapping.visibility : "always",
     })),
     savedAt: new Date().toISOString(),
   };
@@ -566,6 +567,10 @@ function renderData() {
   const rows = allRows.slice(ui.dataPage * ui.pageSize, (ui.dataPage + 1) * ui.pageSize);
   const hidden = documentState.rows.filter((row) => row.hidden).length;
   const visibleTotal = documentState.rows.length - hidden;
+  $("#clearDataButton").hidden = documentState.rows.length === 0;
+  $("#clearDataTabButton").hidden = documentState.rows.length === 0;
+  $("#appendRowButton").hidden = allRows.length === 0;
+  $("#dataPagination").hidden = allRows.length === 0;
   $("#rowSearch").value = ui.search;
   $("#dataSummary").textContent = `${documentState.rows.length} row${documentState.rows.length === 1 ? "" : "s"} · ${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
   const gridWidth = (column) => Math.min(600, Math.max(120, Number(column.gridWidth) || 180));
@@ -592,7 +597,7 @@ function renderData() {
     } else if (documentState.rows.length && hidden === documentState.rows.length) {
       empty.innerHTML = `<div class="empty-icon">▦</div><h2>No visible rows</h2><p>All ${hidden} stored row${hidden === 1 ? " is" : "s are"} hidden from the data list and PDF.</p>`;
     } else {
-      empty.innerHTML = `<div class="empty-icon">▦</div><h2>No rows</h2><div><button class="button primary" data-action="add-row" type="button">Add row</button> <button class="button secondary" data-action="import" type="button">Import sheet</button></div>`;
+      empty.innerHTML = `<div class="empty-icon">▦</div><h2>No rows</h2>`;
     }
   }
   const rowText = ui.search ? `${allRows.length} of ${visibleTotal} rows` : `${allRows.length} rows`;
@@ -869,12 +874,20 @@ function renderColumns() {
   const query = ui.fieldSearch.trim().toLowerCase();
   const columns = documentState.columns.filter((column) => !query || `${column.label} ${column.id} ${column.group || ""}`.toLowerCase().includes(query));
   $("#fieldSearch").value = ui.fieldSearch;
-  $("#fieldSummary").textContent = query ? `${columns.length} of ${documentState.columns.length} fields` : `${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"} · drag to set order`;
+  $("#fieldSummary").textContent = query ? `${columns.length} of ${documentState.columns.length} fields` : `${documentState.columns.length} field${documentState.columns.length === 1 ? "" : "s"}`;
   $("#columnList").innerHTML = columns.length ? columns.map((column) => `<article class="column-row" data-column-id="${column.id}">
-    <div class="column-field"><button class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)}">⠿</button><div class="column-name-group"><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field label"><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select><input class="column-default-input" type="text" value="${escapeHtml(column.defaultValue)}" placeholder="Default on new row" aria-label="${escapeHtml(column.label)} default value" autocomplete="off"></div></div>
-    <div class="column-appearance"><select class="column-format-input" aria-label="${escapeHtml(column.label)} format"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select><details class="field-options"><summary>More options</summary><div><label>Text<select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select></label><label>Alignment<select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></label></div></details></div>
-    <select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select>
-    <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field">×</button></div>
+    <div class="column-row-top">
+      <button class="drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag ${escapeHtml(column.label)} to reorder">⠿</button>
+      <label class="column-control column-name-control"><span>Name</span><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field name"></label>
+      <label class="column-control column-type-control"><span>Type</span><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select></label>
+      <label class="column-control column-visibility-control"><span>Show on slip</span><select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select></label>
+      <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field" aria-label="Duplicate ${escapeHtml(column.label)} field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field" aria-label="Delete ${escapeHtml(column.label)} field">×</button></div>
+    </div>
+    <div class="column-row-bottom">
+      <label class="column-control column-default-control"><span>Default when adding a row</span><input class="column-default-input" type="text" value="${escapeHtml(column.defaultValue)}" placeholder="None" aria-label="${escapeHtml(column.label)} default value" autocomplete="off"></label>
+      <label class="column-control column-format-control"><span>Value style</span><select class="column-format-input" aria-label="${escapeHtml(column.label)} value style"><option value="standard" ${column.style === "standard" ? "selected" : ""}>Standard</option><option value="strong" ${column.style === "strong" ? "selected" : ""}>Bold</option><option value="mono" ${column.style === "mono" ? "selected" : ""}>Monospace</option></select></label>
+      <details class="field-options"><summary>More options</summary><div><label>Text<select class="column-transform-input" aria-label="${escapeHtml(column.label)} value transform"><option value="as_entered" ${column.valueTransform === "as_entered" ? "selected" : ""}>As entered</option><option value="upper" ${column.valueTransform === "upper" ? "selected" : ""}>UPPERCASE</option><option value="lower" ${column.valueTransform === "lower" ? "selected" : ""}>lowercase</option><option value="title" ${column.valueTransform === "title" ? "selected" : ""}>Title Case</option><option value="mask_last4" ${column.valueTransform === "mask_last4" ? "selected" : ""}>Mask · last 4</option></select></label><label>Alignment<select class="column-align-input" aria-label="${escapeHtml(column.label)} value alignment"><option value="default" ${column.valueAlign === "default" ? "selected" : ""}>Default</option><option value="left" ${column.valueAlign === "left" ? "selected" : ""}>Left</option><option value="center" ${column.valueAlign === "center" ? "selected" : ""}>Centre</option><option value="right" ${column.valueAlign === "right" ? "selected" : ""}>Right</option></select></label></div></details>
+    </div>
   </article>`).join("") : `<div class="empty-state compact-empty"><div class="empty-icon">⌕</div><h2>No matching fields</h2><button class="button quiet compact" type="button" data-action="clear-field-search">Clear filter</button></div>`;
 }
 
@@ -1672,7 +1685,16 @@ function resetImportDialog() {
   $("#importColumnMode").value = "replace";
   $("#mappingSearch").value = "";
   $("#mappingSearchEmpty").hidden = true;
+  $("#importError").hidden = true;
+  $("#importError").textContent = "";
   updateImportModeNotice();
+}
+
+function showImportError(message) {
+  const error = String(message || "The import could not be completed.");
+  $("#importError").textContent = error;
+  $("#importError").hidden = false;
+  toast(error, "error");
 }
 
 function openImport() {
@@ -1682,17 +1704,21 @@ function openImport() {
 
 async function importWorkbook(file) {
   if (!file) return;
+  $("#importError").hidden = true;
+  $("#importError").textContent = "";
   $("#importMeta").textContent = `Reading ${file.name}…`;
   try {
     const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
+      reader.onerror = () => reject(new Error("The selected file could not be read. Try saving a fresh copy and importing it again."));
       reader.readAsDataURL(file);
     });
     const content = String(dataUrl).split(",", 2)[1];
     const response = await fetch("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, content }) });
-    const payload = await response.json();
+    let payload;
+    try { payload = await response.json(); }
+    catch (_) { throw new Error("Studio returned an unreadable response while importing the sheet. Retry, then restart Studio if it continues."); }
     if (!response.ok) throw new Error(payload.error || "The workbook could not be imported.");
     if (!Array.isArray(payload.sheets) || !payload.sheets.length) throw new Error("The workbook has no readable, visible worksheets.");
     ui.importData = payload;
@@ -1707,8 +1733,11 @@ async function importWorkbook(file) {
     $("#importStepLabel").textContent = "Choose rows and columns";
     renderImportMapping();
   } catch (error) {
-    $("#importMeta").textContent = error.message || "The workbook could not be imported.";
-    toast(error.message || "The workbook could not be imported.", "error");
+    const message = error instanceof TypeError
+      ? "Studio could not reach its local import service. Check that Studio is still running, then retry."
+      : error.message || "The workbook could not be imported.";
+    $("#importMeta").textContent = message;
+    showImportError(message);
   } finally {
     // Selecting the same workbook again should still fire the file input.
     $("#workbookInput").value = "";
@@ -1811,6 +1840,7 @@ function updateImportMappingControls() {
     const include = row.querySelector(".mapping-include")?.checked;
     const select = row.querySelector(".mapping-select");
     const newName = row.querySelector(".mapping-new-name");
+    const visibility = row.querySelector(".mapping-visibility");
     if (!select || !newName) return;
     if (overwrite && include && select.value !== "__create__") {
       row.dataset.mergeTarget = select.value;
@@ -1822,6 +1852,7 @@ function updateImportMappingControls() {
     }
     select.disabled = !include || overwrite;
     newName.disabled = !include || select.value !== "__create__";
+    if (visibility) visibility.disabled = !include;
     row.classList.toggle("mapping-included", Boolean(include));
   });
 }
@@ -1835,6 +1866,7 @@ function currentImportMappings() {
       header: row.dataset.sourceHeader || "",
       include,
       newName: row.querySelector(".mapping-new-name")?.value.trim() || "",
+      visibility: row.querySelector(".mapping-visibility")?.value || "always",
     };
   });
 }
@@ -1859,7 +1891,8 @@ function updateMappingSummary() {
   const duplicateNames = [...new Set(nameKeys.filter((name, index, list) => list.indexOf(name) !== index))];
   const existingNames = new Set(documentState.columns.flatMap((column) => [column.label, column.id]).map(normaliseImportName).filter(Boolean));
   const duplicateExistingNames = [...new Set(names.filter((name) => existingNames.has(normaliseImportName(name))))];
-  const duplicateCount = duplicateTargets.length + duplicateNames.length + duplicateExistingNames.length;
+  const duplicateExistingCount = $("#importColumnMode").value === "replace" ? 0 : duplicateExistingNames.length;
+  const duplicateCount = duplicateTargets.length + duplicateNames.length + duplicateExistingCount;
   $("#mappingSummary").textContent = `${mapped.length} included · ${existing} existing field${existing === 1 ? "" : "s"} · ${created} new field${created === 1 ? "" : "s"} · ${skipped} skipped${duplicateCount ? ` · ${duplicateCount} duplicate name${duplicateCount === 1 ? "" : "s"}` : ""}`;
   return { duplicateTargets, duplicateNames, duplicateExistingNames };
 }
@@ -1883,27 +1916,41 @@ function filterImportMappingRows() {
 
 function updateImportWarning() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
+  if (!sheet) {
+    $("#importWarning").hidden = true;
+    $("#importWarning").textContent = "";
+    $("#importError").hidden = true;
+    $("#importError").textContent = "";
+    $("#confirmImportButton").disabled = false;
+    return;
+  }
   const duplicates = updateMappingSummary();
   const mappings = currentImportMappings();
   const selection = selectedImportRows(sheet);
   const hiddenSelection = hiddenImportRows(sheet, selection.entries);
   const warnings = [];
+  const errors = [];
   if (sheet?.truncated) warnings.push("This sheet was limited to the first 20,000 non-empty rows.");
   if ($("#importRowSelectionMode").value === "manual") {
-    if (selection.invalid.length) warnings.push(`Invalid row number${selection.invalid.length === 1 ? "" : "s"}: ${selection.invalid.join(", ")}. Use numbers and ranges such as 2, 5, 10-15.`);
-    if (selection.missing.length) warnings.push(`${selection.missing.length} requested row${selection.missing.length === 1 ? " is" : "s are"} not available and will be skipped (hidden rows are excluded).`);
-    if (!selection.entries.length && !selection.invalid.length && !selection.missing.length) warnings.push("Enter at least one spreadsheet row number.");
+    if (selection.invalid.length) errors.push(`Invalid spreadsheet row number${selection.invalid.length === 1 ? "" : "s"}: ${selection.invalid.join(", ")}. Use numbers and ranges such as 2, 5, 10-15.`);
+    if (selection.missing.length) errors.push(`${selection.missing.length} requested row${selection.missing.length === 1 ? " is" : "s are"} not available in this sheet.`);
+    if (!selection.entries.length && !selection.invalid.length && !selection.missing.length) errors.push("Enter at least one spreadsheet row number.");
   }
-  if (hiddenSelection.invalid.length) warnings.push(`Invalid hidden row number${hiddenSelection.invalid.length === 1 ? "" : "s"}: ${hiddenSelection.invalid.join(", ")}.`);
-  if (hiddenSelection.missing.length) warnings.push(`${hiddenSelection.missing.length} hidden row selection${hiddenSelection.missing.length === 1 ? " is" : "s are"} not available.`);
-  if (hiddenSelection.unselected.length) warnings.push(`${hiddenSelection.unselected.length} hidden row selection${hiddenSelection.unselected.length === 1 ? " is" : "s are"} outside the rows being imported.`);
-  if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) warnings.push("Select at least one source column to import.");
-  if (duplicates.duplicateTargets.length) warnings.push("Two or more sheet columns map to the same studio field. Remap one of them before importing.");
-  if (duplicates.duplicateNames.length) warnings.push("Two or more new columns use the same name. Give each new column a unique name.");
-  if ($("#importColumnMode").value !== "replace" && duplicates.duplicateExistingNames.length) warnings.push("A new field name matches an existing field. Map it to that field or choose a different display name.");
+  if (!selection.entries.length && $("#importRowSelectionMode").value !== "manual") errors.push("This sheet has no non-empty rows to import.");
+  if (hiddenSelection.invalid.length) errors.push(`Invalid hidden row number${hiddenSelection.invalid.length === 1 ? "" : "s"}: ${hiddenSelection.invalid.join(", ")}.`);
+  if (hiddenSelection.missing.length) errors.push(`${hiddenSelection.missing.length} hidden row selection${hiddenSelection.missing.length === 1 ? " is" : "s are"} not available in this sheet.`);
+  if (hiddenSelection.unselected.length) errors.push(`${hiddenSelection.unselected.length} hidden row selection${hiddenSelection.unselected.length === 1 ? " is" : "s are"} outside the selected rows.`);
+  if (!mappings.some((mapping) => mapping.include && mapping.target !== "__skip__")) errors.push("Select at least one spreadsheet field to import.");
+  if (duplicates.duplicateTargets.length) errors.push("More than one spreadsheet field maps to the same existing field. Choose a different destination.");
+  if (duplicates.duplicateNames.length) errors.push("New field names must be unique. Rename the duplicates.");
+  if ($("#importColumnMode").value !== "replace" && duplicates.duplicateExistingNames.length) errors.push("A new field name matches an existing field. Map it to that field or choose another name.");
+  if ($("#importColumnMode").value === "replace" && mappings.some((mapping) => mapping.include && mapping.target !== "__create__")) errors.push("Replace mode creates new fields. Choose Keep fields to map into existing fields.");
   if ($("#importColumnMode").value === "replace") warnings.push("Overwrite mode will remove the current columns and rules when you import.");
   $("#importWarning").hidden = !warnings.length;
   $("#importWarning").textContent = warnings.join(" ");
+  $("#importError").hidden = !errors.length;
+  $("#importError").textContent = errors.join(" ");
+  $("#confirmImportButton").disabled = errors.length > 0;
 }
 
 function renderImportMapping() {
@@ -1919,10 +1966,12 @@ function renderImportMapping() {
     const guessed = guessedMapping(header);
     const savedTarget = saved?.target && (saved.target === "__create__" || saved.target === "__skip__" || documentState.columns.some((column) => column.id === saved.target)) ? saved.target : null;
     const target = savedTarget && savedTarget !== "__skip__" ? savedTarget : guessed;
-    const include = saved ? Boolean(saved.include) : target !== "__create__";
-    const matchedLabel = documentState.columns.find((column) => column.id === target)?.label;
+    const include = saved ? Boolean(saved.include) : false;
+    const matchedColumn = documentState.columns.find((column) => column.id === target);
+    const matchedLabel = matchedColumn?.label;
     const newName = saved?.newName || (target === "__create__" ? header : (matchedLabel || header));
-    return `<div class="mapping-row" data-source-index="${index}" data-source-header="${escapeHtml(header)}"><input class="mapping-include" type="checkbox" aria-label="Include ${escapeHtml(header)}" ${include ? "checked" : ""}><span class="mapping-source">${escapeHtml(header)}</span><select class="mapping-select" aria-label="How to import ${escapeHtml(header)}">${importTargetOptions(target)}</select><input class="mapping-new-name" type="text" value="${escapeHtml(newName)}" placeholder="New column name" aria-label="New name for ${escapeHtml(header)}"><span class="mapping-sample">${escapeHtml(selectedRows.find((entry) => entry.values[index])?.values[index] || sheet.rows.find((row) => row[index])?.[index] || "—")}</span></div>`;
+    const visibility = ["always", "nonempty", "never"].includes(saved?.visibility) ? saved.visibility : (matchedColumn?.visibility || "always");
+    return `<div class="mapping-row" data-source-index="${index}" data-source-header="${escapeHtml(header)}"><input class="mapping-include" type="checkbox" aria-label="Include ${escapeHtml(header)}" ${include ? "checked" : ""}><span class="mapping-source">${escapeHtml(header)}</span><select class="mapping-select" aria-label="How to import ${escapeHtml(header)}">${importTargetOptions(target)}</select><input class="mapping-new-name" type="text" value="${escapeHtml(newName)}" placeholder="New field name" aria-label="New name for ${escapeHtml(header)}"><select class="mapping-visibility" aria-label="${escapeHtml(header)} print visibility"><option value="always" ${visibility === "always" ? "selected" : ""}>Always show</option><option value="nonempty" ${visibility === "nonempty" ? "selected" : ""}>With a value</option><option value="never" ${visibility === "never" ? "selected" : ""}>Hidden</option></select><span class="mapping-sample">${escapeHtml(selectedRows.find((entry) => entry.values[index])?.values[index] || sheet.rows.find((row) => row[index])?.[index] || "—")}</span></div>`;
   }).join("");
   $("#importMeta").textContent = `${ui.importData.filename} · ${sheet.rows.length} non-empty rows · ${selectedRows.length} selected`;
   updateImportMappingControls();
@@ -1955,7 +2004,7 @@ function updateImportModeNotice() {
       ? `${individuallyHidden} selected row${individuallyHidden === 1 ? "" : "s"} will be hidden; the rest will be printable unless a hide-slip rule matches.`
       : "Imported rows will be printable unless a hide-slip rule matches.";
   const columnNotice = overwriteColumns
-    ? "Fields: checked spreadsheet fields will replace the current fields. Recognised names stay selected and keep their display names."
+    ? "Fields: selected spreadsheet fields replace the current fields. Matched fields keep their existing display names."
     : "Fields: checked spreadsheet fields will be mapped or added; unchecked fields stay out of the studio.";
   $("#importModeNotice").textContent = `${rowNotice} ${visibilityNotice} ${columnNotice}`;
   $("#confirmImportButton").textContent = replace ? "Replace rows" : "Import rows";
@@ -1965,14 +2014,14 @@ function updateImportModeNotice() {
 
 async function confirmImport() {
   const sheet = ui.importData?.sheets[Number($("#importSheetSelect").value) || 0];
-  if (!sheet) return;
+  if (!sheet) { showImportError("Choose a worksheet before importing."); return; }
   const selection = selectedImportRows(sheet);
   if (selection.invalid.length) {
-    toast("Fix the invalid spreadsheet row numbers before importing.", "error");
+    showImportError(`Invalid spreadsheet row number${selection.invalid.length === 1 ? "" : "s"}: ${selection.invalid.join(", ")}. Use numbers and ranges such as 2, 5, 10-15.`);
     return;
   }
   if (!selection.entries.length) {
-    toast("Select at least one spreadsheet row to import.", "error");
+    showImportError("No spreadsheet rows are selected. Choose row numbers or switch to all non-empty rows.");
     return;
   }
   const replaceRows = $("#importMode").value === "replace";
@@ -1980,33 +2029,29 @@ async function confirmImport() {
   const importHidden = $("#importRowVisibility").value === "hidden";
   const hiddenSelection = hiddenImportRows(sheet, selection.entries);
   if (hiddenSelection.invalid.length || hiddenSelection.missing.length || hiddenSelection.unselected.length) {
-    toast("Fix the hidden spreadsheet row numbers before importing.", "error");
+    showImportError("Hidden row numbers must exist in the selected sheet and be part of the rows being imported.");
     return;
   }
   const mappings = currentImportMappings().filter((mapping) => mapping.include && mapping.target !== "__skip__");
   if (!mappings.length) {
-    toast("Check at least one sheet column to import.", "error");
+    showImportError("Select at least one spreadsheet field to import.");
     return;
   }
   const duplicateIssues = updateMappingSummary();
   if (duplicateIssues.duplicateTargets.length || duplicateIssues.duplicateNames.length || (!overwriteColumns && duplicateIssues.duplicateExistingNames.length)) {
-    toast("Resolve duplicate field mappings or new names before importing.", "error");
+    showImportError("Resolve duplicate destinations or field names before importing.");
     return;
   }
   if (overwriteColumns && mappings.some((mapping) => mapping.target !== "__create__")) {
-    toast("Overwrite mode creates a new column for each checked source column.", "error");
+    showImportError("Replace existing fields creates new fields. Choose Keep fields to map into existing fields.");
     return;
   }
   const destructiveChanges = [];
   if (replaceRows && documentState.rows.length) destructiveChanges.push(`${documentState.rows.length} existing row${documentState.rows.length === 1 ? "" : "s"}`);
   if (overwriteColumns && documentState.columns.length) destructiveChanges.push(`${documentState.columns.length} existing field${documentState.columns.length === 1 ? "" : "s"} and any rules that use them`);
   if (destructiveChanges.length && !await confirmAction("Replace existing studio data?", `This import will remove ${destructiveChanges.join(" and ")}. The selected spreadsheet rows will be imported instead.`, "Replace and import")) return;
-  rememberCurrentImportMappings(sheet);
-  // Importing changes the working set. Do not carry an old row selection or
-  // later-page position into the new dataset and accidentally narrow preview/export.
-  clearRowSelection();
-  ui.dataPage = 0;
-  commit((state) => {
+  const state = clone(documentState);
+  try {
     const targetIds = new Map();
     const nextColumns = overwriteColumns ? [] : state.columns;
     const sourceRows = selection.entries.map((entry) => entry.values);
@@ -2015,11 +2060,14 @@ async function confirmImport() {
         const label = mapping.newName || mapping.header;
         const id = uniqueColumnId(label, nextColumns);
         const type = inferImportedColumnType(mapping.header, sourceRows.map((row) => row[mapping.sourceIndex]));
-        nextColumns.push({ id, label, sourceNames: [mapping.header], group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", defaultValue: "", visibility: "always" });
+        nextColumns.push({ id, label, sourceNames: [mapping.header], group: "", type, style: type === "password" ? "mono" : "standard", valueAlign: "default", defaultValue: "", visibility: mapping.visibility });
         targetIds.set(mapping.sourceIndex, id);
       } else {
         const targetColumn = nextColumns.find((column) => column.id === mapping.target);
-        if (targetColumn) targetColumn.sourceNames = [...new Set([...(targetColumn.sourceNames || []), mapping.header])];
+        if (targetColumn) {
+          targetColumn.sourceNames = [...new Set([...(targetColumn.sourceNames || []), mapping.header])];
+          targetColumn.visibility = mapping.visibility;
+        }
         targetIds.set(mapping.sourceIndex, mapping.target);
       }
     });
@@ -2040,7 +2088,27 @@ async function confirmImport() {
     });
     if (replaceRows) state.rows = imported;
     else state.rows.push(...imported);
-  });
+  } catch (error) {
+    showImportError(`Import failed before any changes were applied. ${error?.message || "Check the selected fields and try again."}`);
+    return;
+  }
+  // Validate the complete draft before replacing the document so a malformed
+  // mapping cannot leave the existing workspace half-imported.
+  let importedDocument;
+  try { importedDocument = normaliseDocument(state); }
+  catch (error) {
+    showImportError(`Import failed before any changes were applied. ${error?.message || "The imported fields are not valid."}`);
+    return;
+  }
+  rememberCurrentImportMappings(sheet);
+  pushHistory();
+  documentState = importedDocument;
+  // Importing changes the working set. Do not carry an old row selection or
+  // later-page position into the new dataset and accidentally narrow preview/export.
+  clearRowSelection();
+  ui.dataPage = 0;
+  changed();
+  renderAll();
   $("#importDialog").close();
   showView("data");
   const hiddenCount = importHidden ? selection.entries.length : hiddenSelection.numbers.size;
@@ -2671,7 +2739,17 @@ function installEvents() {
     }
     if (event.target.classList.contains("cell-input")) {
       const columnId = event.target.dataset.columnId;
-      commit((state) => { state.rows.find((row) => row.id === rowId).values[columnId] = event.target.value; });
+      const row = documentState.rows.find((item) => item.id === rowId);
+      const value = event.target.value;
+      if (!row || String(row.values[columnId] ?? "") === value) return;
+      commit((state) => { state.rows.find((item) => item.id === rowId).values[columnId] = value; }, { render: false });
+      const reason = rowHiddenReason(row);
+      const renderedRow = event.target.closest("tr[data-row-id]");
+      renderedRow?.classList.toggle("excluded", Boolean(reason));
+      if (renderedRow) renderedRow.title = reason;
+      $("#undoButton").disabled = false;
+      $("#redoButton").disabled = true;
+      schedulePdfPreview();
     }
   });
   $("#dataBody").addEventListener("input", (event) => {
@@ -2811,7 +2889,19 @@ function installEvents() {
     const row = event.target.closest(".column-row");
     if (!row) return;
     const columnId = row.dataset.columnId;
-    if (event.target.classList.contains("column-label-input")) commit((state) => { state.columns.find((column) => column.id === columnId).label = event.target.value.trim() || "Untitled column"; });
+    if (event.target.classList.contains("column-label-input")) {
+      const label = event.target.value.trim() || "Untitled field";
+      const column = documentState.columns.find((item) => item.id === columnId);
+      event.target.value = label;
+      if (column && column.label !== label) {
+        commit((state) => { state.columns.find((item) => item.id === columnId).label = label; }, { render: false });
+        $("#undoButton").disabled = false;
+        $("#redoButton").disabled = true;
+        renderData();
+        renderRules();
+        schedulePdfPreview();
+      }
+    }
     if (event.target.classList.contains("column-group-input")) commit((state) => { state.columns.find((column) => column.id === columnId).group = event.target.value.trim(); });
     if (event.target.classList.contains("column-format-input")) commit((state) => { state.columns.find((column) => column.id === columnId).style = event.target.value; });
     if (event.target.classList.contains("column-type-input")) commit((state) => { state.columns.find((column) => column.id === columnId).type = event.target.value; });
