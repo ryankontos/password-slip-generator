@@ -74,6 +74,27 @@ class StudioSessionStore:
     def _summary(record: dict[str, Any]) -> dict[str, Any]:
         workspace = record.get("workspace") if isinstance(record.get("workspace"), dict) else {}
         document = workspace.get("document") if isinstance(workspace.get("document"), dict) else workspace
+        columns = document.get("columns") if isinstance(document.get("columns"), list) else []
+        rows = document.get("rows") if isinstance(document.get("rows"), list) else []
+        safe_columns = [
+            column for column in columns
+            if isinstance(column, dict)
+            and column.get("type") != "password"
+            and column.get("visibility") != "never"
+        ]
+        preview_parts: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict) or row.get("hidden"):
+                continue
+            values = row.get("values") if isinstance(row.get("values"), dict) else {}
+            for column in safe_columns:
+                value = str(values.get(str(column.get("id") or ""), "")).strip()
+                if value and value not in preview_parts:
+                    preview_parts.append(value[:50])
+                if len(preview_parts) == 2:
+                    break
+            if preview_parts:
+                break
         return {
             "id": record["id"],
             "name": record.get("name") or "Untitled password slips",
@@ -83,6 +104,7 @@ class StudioSessionStore:
             "rows": len(document.get("rows") or []),
             "fields": len(document.get("columns") or []),
             "recovered": bool(record.get("recovered")),
+            "preview": " · ".join(preview_parts)[:110],
         }
 
     def list(self) -> list[dict[str, Any]]:

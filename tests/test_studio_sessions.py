@@ -24,6 +24,20 @@ class StudioSessionStoreTests(unittest.TestCase):
         self.assertEqual(saved["revision"], 2)
         self.assertEqual(self.store.get(created["id"])["name"], "Updated")
 
+    def test_summary_preview_uses_visible_non_password_values(self):
+        payload = workspace("People")
+        payload["document"]["columns"] = [
+            {"id": "name", "label": "Name", "type": "text", "visibility": "always"},
+            {"id": "secret", "label": "Password", "type": "password", "visibility": "always"},
+            {"id": "hidden", "label": "Notes", "type": "text", "visibility": "never"},
+        ]
+        payload["document"]["rows"] = [
+            {"id": "hidden-row", "hidden": True, "values": {"name": "Do not show", "secret": "secret", "hidden": "private"}},
+            {"id": "row-1", "hidden": False, "values": {"name": "Cayla Atra", "secret": "Str33t", "hidden": "internal"}},
+        ]
+        self.store.create(payload)
+        self.assertEqual(self.store.list()[0]["preview"], "Cayla Atra")
+
     def test_conflict_creates_recoverable_session(self):
         created = self.store.create(workspace())
         current = self.store.save(created["id"], 1, workspace("Current"))

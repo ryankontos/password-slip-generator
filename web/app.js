@@ -289,6 +289,7 @@ const ui = {
   sessionSaving: false,
   sessionSaveQueued: false,
   sessionSavePromise: null,
+  recentSessions: [],
 };
 
 let pdfRendererPromise = null;
@@ -438,6 +439,14 @@ function changed() {
 function flushPersistence() {
   clearTimeout(ui.saveTimer);
   if (ui.dirty) persistDocumentNow();
+}
+
+function protectSessionOnExit() {
+  const needsServerSave = ui.dirty || ui.sessionSaveQueued || ui.sessionSaving;
+  flushPersistence();
+  if (!needsServerSave || !ui.sessionReady || !ui.sessionId || !navigator.sendBeacon) return;
+  const payload = JSON.stringify({ session_id: ui.sessionId, revision: ui.sessionRevision, workspace: currentSessionWorkspace() });
+  navigator.sendBeacon("/api/sessions/save", new Blob([payload], { type: "application/json" }));
 }
 
 function currentSessionWorkspace() {
@@ -1757,8 +1766,8 @@ async function renderRecentSessions() {
   list.innerHTML = `<div class="template-empty">Loading recent sessions…</div>`;
   try {
     const result = await sessionRequest();
-    const sessions = Array.isArray(result.sessions) ? result.sessions : [];
-    list.innerHTML = sessions.length ? sessions.map((session) => `<article class="session-item ${session.id === ui.sessionId ? "active" : ""}" data-session-id="${escapeHtml(session.id)}"><div class="session-item-info"><div class="session-item-title"><strong>${escapeHtml(session.name)}</strong>${session.id === ui.sessionId ? `<span class="session-badge">Current</span>` : ""}${session.recovered ? `<span class="session-badge recovered">Recovered</span>` : ""}</div><small>${escapeHtml(formatSessionTime(session.updated_at))} · ${session.rows} row${session.rows === 1 ? "" : "s"} · ${session.fields} field${session.fields === 1 ? "" : "s"}</small></div><button class="button secondary compact" type="button" data-session-action="open" ${session.id === ui.sessionId ? "disabled" : ""}>${session.id === ui.sessionId ? "Open" : "Resume"}</button></article>`).join("") : `<div class="template-empty">Your autosaved sessions will appear here.</div>`;
+    ui.recentSessions = Array.isArray(result.sessions) ? result.sessions : [];
+    renderRecentSessionList();
   } catch (requestError) {
     list.innerHTML = "";
     error.hidden = false;
@@ -1766,7 +1775,15 @@ async function renderRecentSessions() {
   }
 }
 
+function renderRecentSessionList() {
+  const list = $("#sessionsList");
+  const query = $("#sessionSearch").value.trim().toLowerCase();
+  const sessions = ui.recentSessions.filter((session) => !query || `${session.name} ${session.preview || ""}`.toLowerCase().includes(query));
+  list.innerHTML = sessions.length ? sessions.map((session) => `<article class="session-item ${session.id === ui.sessionId ? "active" : ""}" data-session-id="${escapeHtml(session.id)}"><div class="session-item-info"><div class="session-item-title"><strong>${escapeHtml(session.name)}</strong>${session.id === ui.sessionId ? `<span class="session-badge">Current</span>` : ""}${session.recovered ? `<span class="session-badge recovered">Recovered</span>` : ""}</div>${session.preview ? `<div class="session-item-preview">${escapeHtml(session.preview)}</div>` : ""}<small>${escapeHtml(formatSessionTime(session.updated_at))} · ${session.rows} row${session.rows === 1 ? "" : "s"} · ${session.fields} field${session.fields === 1 ? "" : "s"}</small></div>${session.id === ui.sessionId ? "" : `<button class="button secondary compact" type="button" data-session-action="open">Resume</button>`}</article>`).join("") : `<div class="template-empty">${query ? "No sessions match that search." : "Your autosaved sessions will appear here."}</div>`;
+}
+
 async function openRecentSessions() {
+  $("#sessionSearch").value = "";
   $("#sessionsDialog").showModal();
   await renderRecentSessions();
 }
@@ -2871,6 +2888,7 @@ function installEvents() {
   $("#closeSessionsButton").addEventListener("click", () => $("#sessionsDialog").close());
   $("#doneSessionsButton").addEventListener("click", () => $("#sessionsDialog").close());
   $("#newSessionButton").addEventListener("click", newBlankSession);
+  $("#sessionSearch").addEventListener("input", renderRecentSessionList);
   $("#sessionsList").addEventListener("click", (event) => {
     const button = event.target.closest('[data-session-action="open"]');
     const item = button?.closest("[data-session-id]");
@@ -3427,8 +3445,8 @@ function installEvents() {
   });
 }
 
-window.addEventListener("pagehide", flushPersistence);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushPersistence(); });
+window.addEventListener("pagehide", protectSessionOnExit);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") protectSessionOnExit(); });
 installEvents();
 setPreviewWidth(ui.previewWidth, false);
 renderAll();
