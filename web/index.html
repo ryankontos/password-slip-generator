@@ -30,8 +30,7 @@
         <button id="undoButton" class="icon-button" title="Undo (⌘Z)" aria-label="Undo" disabled>↶</button>
         <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
       </span>
-      <button id="updateAvailableButton" class="icon-button update-available-button" type="button" aria-label="Review available update" aria-controls="updateNotesDialog" title="Review update notes" hidden>↓</button>
-      <button id="checkUpdatesHeaderButton" class="icon-button update-check-button" type="button" aria-label="Check for updates" title="Check for updates">↻</button>
+      <button id="updateAvailableButton" class="button secondary compact update-available-button" type="button" aria-controls="updateNotesDialog" title="Review update notes" hidden>Update available</button>
       <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
       <button id="openTemplatesHeaderButton" class="button secondary compact"><span class="command-glyph">◇</span> Templates</button>
       <button id="exportPdfButton" class="button primary compact">Export PDF</button>
@@ -217,7 +216,7 @@
         <div class="preview-actions"><button id="refreshPreviewButton" class="icon-button small" aria-label="Refresh preview" title="Render PDF now">↻</button><span class="preview-divider"></span><button id="zoomOutButton" class="icon-button small" aria-label="Zoom out">−</button><span id="zoomLabel">110%</span><button id="zoomInButton" class="icon-button small" aria-label="Zoom in">＋</button></div>
       </div>
       <div id="previewViewport" class="preview-viewport pdf-preview-viewport">
-        <div id="previewPlaceholder" class="pdf-preview-placeholder">Add or import rows to preview the PDF.</div>
+        <div id="previewPlaceholder" class="pdf-preview-placeholder"><span>Add or import rows to preview the PDF.</span></div>
         <div id="pdfPreviewPages" class="pdf-preview-pages" aria-label="Rendered PDF pages" hidden></div>
         <iframe id="pdfPreviewFrame" class="pdf-preview-frame" title="PDF preview" hidden></iframe>
         <div id="previewError" class="preview-error" role="alert" hidden><strong>Preview unavailable</strong><span id="previewErrorMessage"></span><button id="retryPreviewButton" class="button secondary compact" type="button">Retry preview</button></div>

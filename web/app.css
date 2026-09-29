@@ -87,12 +87,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .app-header .icon-button:hover { color: var(--ink); background: var(--surface-hover); }
 .app-header .button.secondary { color: var(--ink); background: var(--surface); border-color: var(--line-strong); }
 .app-header .button.secondary:hover { background: var(--surface-hover); }
-.app-header .update-check-button { font-size: 19px; }
 .app-header .update-available-button { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 800; }
 .app-header .update-available-button:hover { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
-.app-header .update-check-button[aria-busy="true"] { animation: update-check-spin .8s linear infinite; color: var(--accent); }
-@keyframes update-check-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .app-header .update-check-button[aria-busy="true"] { animation: none; } }
 
 .workspace { height: calc(100vh - 68px); min-width: 0; display: grid; grid-template-columns: 180px minmax(430px, 1fr) 8px minmax(320px, min(var(--preview-width), calc(100vw - 618px))); }
 .rail { min-width: 0; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
@@ -362,13 +358,18 @@ kbd { min-width: 18px; padding: 1px 5px; border: 1px solid var(--line-strong); b
 .preview-actions { display: flex; align-items: center; gap: 4px; }
 .preview-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
 .preview-actions #zoomLabel { width: 42px; text-align: center; font-variant-numeric: tabular-nums; }
-.preview-viewport { min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; position: relative; padding: 0; background: #73777d; }
+.preview-viewport { min-width: 0; min-height: 0; flex: 1 1 auto; overflow: hidden; position: relative; padding: 0; background: #e4e7eb; }
+:root[data-theme="dark"] .preview-viewport { background: #111418; }
 .pdf-preview-pages { position: absolute; inset: 0; min-width: 0; min-height: 0; box-sizing: border-box; overflow: auto; display: grid; align-content: start; justify-items: center; gap: 16px; padding: 16px; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-x pan-y; background: #73777d; }
 .pdf-preview-page { display: grid; place-items: center; flex: 0 0 auto; background: #fff; box-shadow: 0 3px 14px rgb(0 0 0 / 32%); color: var(--muted); font-size: 11px; }
 .pdf-preview-page[data-rendered="error"] { color: var(--danger); }
 .pdf-preview-page canvas { display: block; max-width: none; background: #fff; }
 .pdf-preview-frame { width: 100%; height: 100%; border: 0; background: #73777d; }
-.pdf-preview-placeholder { height: 100%; display: grid; place-items: center; padding: 28px; color: var(--muted); text-align: center; }
+.pdf-preview-placeholder { height: 100%; display: grid; place-content: center; justify-items: center; gap: 16px; padding: 28px; color: #505862; text-align: center; }
+.pdf-preview-placeholder::before { content: "PDF"; width: 118px; height: 152px; display: grid; place-items: center; border: 1px solid #c4cad1; border-radius: 3px; background: #fff; color: #a2a9b1; box-shadow: 0 4px 14px rgb(20 26 34 / 13%); font-size: 13px; font-weight: 800; letter-spacing: .08em; }
+.pdf-preview-placeholder span { max-width: 260px; font-size: 12px; line-height: 1.45; }
+:root[data-theme="dark"] .pdf-preview-placeholder { color: #b7bec7; }
+:root[data-theme="dark"] .pdf-preview-placeholder::before { border-color: #40464e; background: #252a30; color: #7e8791; box-shadow: 0 4px 18px rgb(0 0 0 / 30%); }
 .preview-error { position: absolute; z-index: 3; top: 12px; left: 12px; right: 12px; display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 7px 9px; border: 1px solid #d89a3a; border-radius: 6px; background: color-mix(in srgb, var(--surface) 94%, #f2b34b); color: var(--ink); box-shadow: var(--shadow-soft); font-size: 11px; }
 .preview-error strong { color: #9a5a00; white-space: nowrap; }
 .preview-error span { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }

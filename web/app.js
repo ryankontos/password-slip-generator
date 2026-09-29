@@ -675,10 +675,25 @@ function renderSelectionToolbar() {
   $("#selectionCount").classList.toggle("warning-text", printableCount < count);
   const bulkEditButton = $("#bulkEditButton");
   if (bulkEditButton) bulkEditButton.disabled = count === 0;
+  const exportSelectedButton = $("#exportSelectedButton");
+  if (exportSelectedButton) exportSelectedButton.disabled = printableCount === 0;
   const customizeButton = $("#customizeSelectedButton");
   if (customizeButton) customizeButton.disabled = count === 0;
   const resetButton = $("#resetSelectedLayoutsButton");
   if (resetButton) resetButton.disabled = count === 0;
+  updateExportAvailability(printableCount);
+}
+
+function updateExportAvailability(printableCount = printScopeRows(previewDocumentSource()).length) {
+  const available = printableCount > 0 && documentState.columns.length > 0;
+  const exportButton = $("#exportPdfButton");
+  exportButton.disabled = !available;
+  exportButton.title = available
+    ? `Export ${printableCount} printable slip${printableCount === 1 ? "" : "s"}`
+    : "Add a printable row before exporting";
+  const refreshButton = $("#refreshPreviewButton");
+  refreshButton.disabled = !available;
+  refreshButton.title = available ? "Render PDF now" : "Add a printable row to preview the PDF";
 }
 
 function openSelectedRowOptions() {
@@ -881,7 +896,7 @@ function renderColumns() {
       <label class="column-control column-name-control"><span>Name</span><input class="column-label-input" value="${escapeHtml(column.label)}" aria-label="Field name"></label>
       <label class="column-control column-type-control"><span>Type</span><select class="column-type-input" aria-label="${escapeHtml(column.label)} type"><option value="text" ${column.type === "text" ? "selected" : ""}>Text</option><option value="password" ${column.type === "password" ? "selected" : ""}>Password</option><option value="number" ${column.type === "number" ? "selected" : ""}>Number</option><option value="date" ${column.type === "date" ? "selected" : ""}>Date / time</option><option value="url" ${column.type === "url" ? "selected" : ""}>Link / URL</option></select></label>
       <label class="column-control column-visibility-control"><span>Show on slip</span><select class="column-visibility-input" aria-label="${escapeHtml(column.label)} visibility"><option value="always" ${column.visibility === "always" ? "selected" : ""}>Always</option><option value="nonempty" ${column.visibility === "nonempty" ? "selected" : ""}>Only with a value</option><option value="never" ${column.visibility === "never" ? "selected" : ""}>Hidden by default</option></select></label>
-      <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field" aria-label="Duplicate ${escapeHtml(column.label)} field">⧉</button><button class="icon-button small" data-action="delete-column" title="Delete field" aria-label="Delete ${escapeHtml(column.label)} field">×</button></div>
+      <div class="column-actions"><button class="icon-button small" data-action="duplicate-column" title="Duplicate field" aria-label="Duplicate ${escapeHtml(column.label)} field">⧉</button><button class="icon-button small" data-action="delete-column" title="${documentState.columns.length === 1 ? "At least one field is required" : "Delete field"}" aria-label="Delete ${escapeHtml(column.label)} field" ${documentState.columns.length === 1 ? "disabled" : ""}>×</button></div>
     </div>
     <div class="column-row-bottom">
       <label class="column-control column-default-control"><span>Default when adding a row</span><input class="column-default-input" type="text" value="${escapeHtml(column.defaultValue)}" placeholder="None" aria-label="${escapeHtml(column.label)} default value" autocomplete="off"></label>
@@ -1041,8 +1056,14 @@ function clearPdfPreview(message = "Add or import rows to preview the PDF.", isE
   const pages = $("#pdfPreviewPages");
   pages.hidden = true;
   pages.replaceChildren();
-  $("#previewPlaceholder").hidden = false;
-  $("#previewPlaceholder").textContent = message;
+  const placeholder = $("#previewPlaceholder");
+  placeholder.hidden = false;
+  let messageElement = placeholder.querySelector("span");
+  if (!messageElement) {
+    messageElement = document.createElement("span");
+    placeholder.replaceChildren(messageElement);
+  }
+  messageElement.textContent = message;
   if (isError) setPreviewError(message);
   else clearPreviewError();
 }
@@ -2256,11 +2277,6 @@ function renderServiceStatus(status) {
   updateButton.title = status.working_tree_clean === false
     ? "Review update notes · local changes must be committed or moved before updating"
     : "Review update notes and install";
-  const checkHeaderButton = $("#checkUpdatesHeaderButton");
-  checkHeaderButton.disabled = busy;
-  checkHeaderButton.setAttribute("aria-busy", String(Boolean(status.checking)));
-  checkHeaderButton.setAttribute("aria-label", status.checking ? "Checking for updates" : "Check for updates");
-  checkHeaderButton.title = status.checking ? "Checking for updates…" : status.update_error || "Check for updates";
   const channel = $("#updateChannelSelect");
   channel.value = status.update_channel || "stable";
   channel.disabled = Boolean(status.updating || status.checking);
@@ -2643,7 +2659,6 @@ function installEvents() {
   $("#checkUpdatesButton").addEventListener("click", checkStudioUpdates);
   $("#installUpdateButton").addEventListener("click", openUpdateNotesDialog);
   $("#updateAvailableButton").addEventListener("click", openUpdateNotesDialog);
-  $("#checkUpdatesHeaderButton").addEventListener("click", checkStudioUpdates);
   $("#closeUpdateNotesButton").addEventListener("click", () => $("#updateNotesDialog").close());
   $("#laterUpdateButton").addEventListener("click", () => $("#updateNotesDialog").close());
   $("#confirmUpdateButton").addEventListener("click", installStudioUpdate);
@@ -2749,6 +2764,7 @@ function installEvents() {
       if (renderedRow) renderedRow.title = reason;
       $("#undoButton").disabled = false;
       $("#redoButton").disabled = true;
+      updateExportAvailability();
       schedulePdfPreview();
     }
   });
