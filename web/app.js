@@ -10,6 +10,7 @@ const PREVIEW_MAX_WIDTH = 920;
 const PREVIEW_MAX_ZOOM = 600;
 const clampPreviewWidth = (value) => Math.min(PREVIEW_MAX_WIDTH, Math.max(PREVIEW_MIN_WIDTH, Number(value) || 520));
 const DOCUMENT_STORAGE_KEY = "password-slip-studio-document";
+const SESSION_ID_STORAGE_KEY = "password-slip-studio-session-id";
 const PREFERENCES_STORAGE_KEY = "password-slip-studio-preferences";
 const IMPORT_PREFERENCES_STORAGE_KEY = "password-slip-studio-import-preferences";
 const PREFERENCE_DEFAULTS = Object.freeze({ view: "data", pageSize: 50, zoom: 110, previewWidth: 520, lastImportSheetName: "", theme: "light" });
@@ -282,6 +283,12 @@ const ui = {
   selectionAnchor: "",
   dataFieldMenuId: "",
   fieldSheetId: "",
+  sessionId: "",
+  sessionRevision: 0,
+  sessionReady: false,
+  sessionSaving: false,
+  sessionSaveQueued: false,
+  sessionSavePromise: null,
 };
 
 let pdfRendererPromise = null;
@@ -399,7 +406,8 @@ function persistDocumentNow() {
   try {
     localStorage.setItem(DOCUMENT_STORAGE_KEY, snapshot());
     ui.dirty = false;
-    $("#saveStatus").textContent = "Saved";
+    $("#saveStatus").textContent = ui.sessionReady ? "Saving…" : "Saved in browser";
+    queueSessionAutosave();
     return true;
   } catch (_) {
     $("#saveStatus").textContent = "Storage unavailable";
@@ -430,6 +438,161 @@ function changed() {
 function flushPersistence() {
   clearTimeout(ui.saveTimer);
   if (ui.dirty) persistDocumentNow();
+}
+
+function currentSessionWorkspace() {
+  return {
+    format: "password-slip-studio-workspace",
+    version: 2,
+    savedAt: new Date().toISOString(),
+    document: clone(documentState),
+    palettes: loadColorPalettes(),
+    preferences: currentWorkspacePreferences(),
+    importPreferences: importPreferencesSnapshot(),
+  };
+}
+
+async function sessionRequest(path = "", payload) {
+  const response = await fetch(`/api/sessions${path}`, {
+    method: payload === undefined ? "GET" : "POST",
+    headers: payload === undefined ? {} : { "Content-Type": "application/json" },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+    cache: "no-store",
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.error || "Sessions are temporarily unavailable.");
+    error.payload = result;
+    error.status = response.status;
+    throw error;
+  }
+  return result;
+}
+
+function rememberSession(record) {
+  ui.sessionId = record.id;
+  ui.sessionRevision = Number(record.revision) || 0;
+  ui.sessionReady = true;
+  try { localStorage.setItem(SESSION_ID_STORAGE_KEY, ui.sessionId); } catch (_) {}
+}
+
+function applySessionWorkspace(record, { notify = false } = {}) {
+  const workspace = record?.workspace;
+  const incoming = workspace?.document;
+  if (!incoming || !Array.isArray(incoming.columns) || !Array.isArray(incoming.rows)) throw new Error("This saved session is not valid.");
+  documentState = normaliseDocument(incoming);
+  if (Array.isArray(workspace.palettes)) saveColorPalettes(workspace.palettes);
+  if (workspace.importPreferences) restoreImportPreferences(workspace.importPreferences);
+  applyWorkspacePreferences(workspace.preferences, true);
+  resetWorkspaceUi();
+  rememberSession(record);
+  try { localStorage.setItem(DOCUMENT_STORAGE_KEY, snapshot()); } catch (_) {}
+  ui.dirty = false;
+  ui.history = [];
+  ui.future = [];
+  renderAll();
+  showView(ui.view);
+  $("#saveStatus").textContent = "Saved";
+  if (notify) toast(`Opened “${documentState.name}”`);
+}
+
+function hasMeaningfulLocalDocument() {
+  try { return snapshot() !== JSON.stringify(normaliseDocument(starterDocument())); }
+  catch (_) { return documentState.rows.length > 0; }
+}
+
+async function startNewServerSession({ notify = false } = {}) {
+  ui.sessionReady = false;
+  ui.sessionSaveQueued = false;
+  $("#saveStatus").textContent = "Saving…";
+  try {
+    const record = await sessionRequest("/new", { workspace: currentSessionWorkspace() });
+    rememberSession(record);
+    ui.dirty = false;
+    $("#saveStatus").textContent = "Saved";
+    if (notify) toast("New session started · previous work is in Recent");
+    return record;
+  } catch (_) {
+    $("#saveStatus").textContent = "Saved in browser";
+    return null;
+  }
+}
+
+async function initializeSessionStorage() {
+  try {
+    const result = await sessionRequest();
+    const sessions = Array.isArray(result.sessions) ? result.sessions : [];
+    let savedId = "";
+    try { savedId = localStorage.getItem(SESSION_ID_STORAGE_KEY) || ""; } catch (_) {}
+    const saved = sessions.find((item) => item.id === savedId);
+    if (!sessions.length || (!saved && hasMeaningfulLocalDocument())) {
+      await startNewServerSession();
+      return;
+    }
+    const selected = saved || sessions[0];
+    const record = await sessionRequest(`/${encodeURIComponent(selected.id)}`);
+    applySessionWorkspace(record);
+  } catch (_) {
+    ui.sessionReady = false;
+    $("#saveStatus").textContent = "Saved in browser";
+  }
+}
+
+function queueSessionAutosave() {
+  if (!ui.sessionReady || !ui.sessionId) return;
+  ui.sessionSaveQueued = true;
+  if (!ui.sessionSavePromise) {
+    ui.sessionSavePromise = drainSessionAutosave().finally(() => {
+      ui.sessionSavePromise = null;
+      if (ui.sessionSaveQueued && ui.sessionReady) queueSessionAutosave();
+    });
+  }
+}
+
+async function drainSessionAutosave() {
+  ui.sessionSaving = true;
+  while (ui.sessionSaveQueued && ui.sessionReady) {
+    ui.sessionSaveQueued = false;
+    const workspace = currentSessionWorkspace();
+    try {
+      const record = await sessionRequest("/save", { session_id: ui.sessionId, revision: ui.sessionRevision, workspace });
+      rememberSession(record);
+      $("#saveStatus").textContent = ui.sessionSaveQueued || ui.dirty ? "Saving…" : "Saved";
+    } catch (error) {
+      const recovery = error.payload?.recovery;
+      if (error.status === 409 && recovery) {
+        rememberSession(recovery);
+        $("#saveStatus").textContent = "Recovered";
+        toast("Another browser changed this session. Your edits were saved as a recovered session.", "info");
+      } else {
+        ui.sessionReady = false;
+        $("#saveStatus").textContent = "Saved in browser";
+      }
+      break;
+    }
+  }
+  ui.sessionSaving = false;
+}
+
+async function waitForSessionAutosave() {
+  if (ui.sessionSavePromise) await ui.sessionSavePromise;
+}
+
+function isEditingDocumentValue(element) {
+  return Boolean(element?.matches?.(".cell-input, .column-label-input, .rule-name-input, .condition-value"));
+}
+
+async function pollCurrentSession() {
+  if (!ui.sessionReady || !ui.sessionId || ui.dirty || ui.sessionSaving || ui.sessionSaveQueued) return;
+  const focused = document.activeElement;
+  if (isEditingDocumentValue(focused) || $("dialog[open]")) return;
+  try {
+    const record = await sessionRequest(`/${encodeURIComponent(ui.sessionId)}`);
+    if (Number(record.revision) > ui.sessionRevision) {
+      applySessionWorkspace(record);
+      toast("Updated from another tab");
+    }
+  } catch (_) {}
 }
 
 function restore(serialised) {
@@ -1540,15 +1703,7 @@ function applyWorkspacePreferences(preferences, restoreView = false) {
 }
 
 function downloadWorkspace() {
-  const workspace = {
-    format: "password-slip-studio-workspace",
-    version: 2,
-    savedAt: new Date().toISOString(),
-    document: documentState,
-    palettes: loadColorPalettes(),
-    preferences: currentWorkspacePreferences(),
-    importPreferences: importPreferencesSnapshot(),
-  };
+  const workspace = currentSessionWorkspace();
   const blob = new Blob([JSON.stringify(workspace, null, 2)], { type: "application/json" });
   downloadBlob(blob, `${safeFilename(documentState.name)}.password-slip-workspace`);
   toast("Workspace saved");
@@ -1567,7 +1722,10 @@ function studioFilePayload(parsed) {
   };
 }
 
-function applyOpenedDocument(incoming, palettes, message, preferences = null, importPreferences = null, restoreView = false) {
+async function applyOpenedDocument(incoming, palettes, message, preferences = null, importPreferences = null, restoreView = false) {
+  flushPersistence();
+  await waitForSessionAutosave();
+  ui.sessionReady = false;
   pushHistory();
   documentState = normaliseDocument(incoming);
   if (Array.isArray(palettes)) saveColorPalettes(palettes);
@@ -1583,6 +1741,63 @@ function applyOpenedDocument(incoming, palettes, message, preferences = null, im
   renderAll();
   showView(restoreView ? ui.view : "data");
   toast(message);
+  await startNewServerSession();
+}
+
+function formatSessionTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Saved recently";
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+async function renderRecentSessions() {
+  const list = $("#sessionsList");
+  const error = $("#sessionsError");
+  error.hidden = true;
+  list.innerHTML = `<div class="template-empty">Loading recent sessions…</div>`;
+  try {
+    const result = await sessionRequest();
+    const sessions = Array.isArray(result.sessions) ? result.sessions : [];
+    list.innerHTML = sessions.length ? sessions.map((session) => `<article class="session-item ${session.id === ui.sessionId ? "active" : ""}" data-session-id="${escapeHtml(session.id)}"><div class="session-item-info"><div class="session-item-title"><strong>${escapeHtml(session.name)}</strong>${session.id === ui.sessionId ? `<span class="session-badge">Current</span>` : ""}${session.recovered ? `<span class="session-badge recovered">Recovered</span>` : ""}</div><small>${escapeHtml(formatSessionTime(session.updated_at))} · ${session.rows} row${session.rows === 1 ? "" : "s"} · ${session.fields} field${session.fields === 1 ? "" : "s"}</small></div><button class="button secondary compact" type="button" data-session-action="open" ${session.id === ui.sessionId ? "disabled" : ""}>${session.id === ui.sessionId ? "Open" : "Resume"}</button></article>`).join("") : `<div class="template-empty">Your autosaved sessions will appear here.</div>`;
+  } catch (requestError) {
+    list.innerHTML = "";
+    error.hidden = false;
+    error.textContent = requestError.message;
+  }
+}
+
+async function openRecentSessions() {
+  $("#sessionsDialog").showModal();
+  await renderRecentSessions();
+}
+
+async function resumeSession(sessionId) {
+  if (!sessionId || sessionId === ui.sessionId) return;
+  flushPersistence();
+  await waitForSessionAutosave();
+  try {
+    const record = await sessionRequest(`/${encodeURIComponent(sessionId)}`);
+    applySessionWorkspace(record, { notify: true });
+    $("#sessionsDialog").close();
+  } catch (error) {
+    $("#sessionsError").hidden = false;
+    $("#sessionsError").textContent = error.message;
+  }
+}
+
+async function newBlankSession() {
+  flushPersistence();
+  await waitForSessionAutosave();
+  ui.sessionReady = false;
+  documentState = starterDocument();
+  ui.history = [];
+  ui.future = [];
+  resetWorkspaceUi();
+  changed();
+  renderAll();
+  showView("data");
+  $("#sessionsDialog").close();
+  await startNewServerSession({ notify: true });
 }
 
 async function loadWorkspaceFile(file) {
@@ -1591,7 +1806,7 @@ async function loadWorkspaceFile(file) {
     const parsed = JSON.parse(await file.text());
     const payload = studioFilePayload(parsed);
     if (payload.format === "password-slip-studio-template") throw new Error("This is a template. Open it from Templates.");
-    applyOpenedDocument(payload.document, payload.palettes, "Workspace opened", payload.preferences, payload.importPreferences, true);
+    await applyOpenedDocument(payload.document, payload.palettes, "Workspace opened", payload.preferences, payload.importPreferences, true);
   } catch (error) {
     toast(error.message || "The workspace could not be opened.", "error");
   } finally {
@@ -1654,13 +1869,13 @@ function saveTemplateFromDialog() {
   toast(stored ? `Template “${name}” saved` : "Could not save the template. Storage may be full.", stored ? "" : "error");
 }
 
-function openTemplateRecord(record) {
+async function openTemplateRecord(record) {
   if (!record?.document) return;
   const templateDocument = clone(record.document);
   // The include-data choice is part of the template contract. Honour it even
   // for older or hand-edited template files that still contain a rows array.
   if (record.includeData === false) templateDocument.rows = [];
-  applyOpenedDocument(templateDocument, record.palettes, `Template “${record.name || templateDocument.name || "Untitled"}” opened`, record.preferences, record.importPreferences, false);
+  await applyOpenedDocument(templateDocument, record.palettes, `Template “${record.name || templateDocument.name || "Untitled"}” opened`, record.preferences, record.importPreferences, false);
   $("#templatesDialog").close();
 }
 
@@ -1681,7 +1896,7 @@ async function loadTemplateFile(file) {
       importPreferences: payload.importPreferences || {},
     };
     storeTemplateRecord(record);
-    openTemplateRecord(record);
+    await openTemplateRecord(record);
   } catch (error) {
     toast(error.message || "The template could not be opened.", "error");
   } finally {
@@ -2157,7 +2372,10 @@ async function clearAllData() {
 }
 
 async function resetEverything() {
-  if (!await confirmAction("Reset everything?", "Remove all rows, fields, rules, saved palettes, templates and remembered import settings? This cannot be undone.", "Reset everything")) return;
+  if (!await confirmAction("Reset everything?", "Start a blank session and remove saved palettes, templates and remembered import settings? Your current work will remain available in Recent.", "Reset everything")) return;
+  flushPersistence();
+  await waitForSessionAutosave();
+  ui.sessionReady = false;
   documentState = starterDocument();
   ui.history = [];
   ui.future = [];
@@ -2178,6 +2396,7 @@ async function resetEverything() {
   renderAll();
   showView("data");
   toast("Studio reset");
+  await startNewServerSession();
 }
 
 function commandActions() {
@@ -2197,6 +2416,7 @@ function commandActions() {
     { icon: "◇", label: "Save workspace", detail: "File · ⌘S", run: downloadWorkspace },
     { icon: "◇", label: "Open workspace", detail: "File · ⌘O", run: () => $("#loadWorkspaceInput").click() },
     { icon: "◇", label: "Templates", detail: "Saved setups and template files · ⇧⌘T", run: openTemplates },
+    { icon: "◷", label: "Recent sessions", detail: "Resume autosaved work", run: openRecentSessions },
     { icon: "⌘", label: "Keyboard shortcuts", detail: "Mac", run: openShortcuts },
     { icon: "⌫", label: "Clear all data", detail: "Keep fields and layout · ⇧⌘⌫", run: clearAllData },
     { icon: "↺", label: "Reset everything", detail: "Start fresh", run: resetEverything },
@@ -2646,6 +2866,16 @@ function installEvents() {
   $("#loadWorkspaceInput").addEventListener("change", (event) => loadWorkspaceFile(event.target.files[0]));
   $("#openTemplatesButton").addEventListener("click", openTemplates);
   $("#openTemplatesHeaderButton").addEventListener("click", openTemplates);
+  $("#openSessionsButton").addEventListener("click", openRecentSessions);
+  $("#openSessionsHeaderButton").addEventListener("click", openRecentSessions);
+  $("#closeSessionsButton").addEventListener("click", () => $("#sessionsDialog").close());
+  $("#doneSessionsButton").addEventListener("click", () => $("#sessionsDialog").close());
+  $("#newSessionButton").addEventListener("click", newBlankSession);
+  $("#sessionsList").addEventListener("click", (event) => {
+    const button = event.target.closest('[data-session-action="open"]');
+    const item = button?.closest("[data-session-id]");
+    if (item) void resumeSession(item.dataset.sessionId);
+  });
   $("#shortcutsButton").addEventListener("click", openShortcuts);
   $("#saveTemplateButton").addEventListener("click", saveTemplateFromDialog);
   $("#openTemplateFileButton").addEventListener("click", () => $("#loadTemplateInput").click());
@@ -2848,7 +3078,7 @@ function installEvents() {
     if (!action || !item) return;
     const record = loadSavedTemplates().find((template) => template.id === item.dataset.templateId);
     if (!record) return;
-    if (action === "open") openTemplateRecord(record);
+    if (action === "open") await openTemplateRecord(record);
     if (action === "delete" && await confirmAction("Delete template?", `Remove “${record.name}” from saved templates?`, "Delete template")) {
       saveSavedTemplates(loadSavedTemplates().filter((template) => template.id !== record.id));
       renderTemplateList();
@@ -3204,7 +3434,9 @@ setPreviewWidth(ui.previewWidth, false);
 renderAll();
 showView(ui.view);
 refreshServiceStatus();
+void initializeSessionStorage();
 window.setInterval(() => {
   if (serviceRestartPending || $("#appSettingsDialog").open) refreshServiceStatus();
 }, 2500);
 window.setInterval(refreshServiceStatus, 15000);
+window.setInterval(pollCurrentSession, 4000);

@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from studio_core import StudioError, parse_workbook, render_pdf
+from studio_sessions import SessionConflictError, SessionNotFoundError, StudioSessionStore
 from studio_service import ROOT, StudioService, git_text
 
 
@@ -87,6 +88,16 @@ class StudioHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/service":
             self._json(self.server.service.status())
             return
+        if parsed.path == "/api/sessions":
+            self._json({"sessions": self.server.sessions.list()})
+            return
+        session_match = re.fullmatch(r"/api/sessions/([a-f0-9]{32})", parsed.path)
+        if session_match:
+            try:
+                self._json(self.server.sessions.get(session_match.group(1)))
+            except SessionNotFoundError:
+                self._json({"error": "That saved session is no longer available."}, 404)
+            return
         path = "/index.html" if parsed.path == "/" else parsed.path
         if not SAFE_PATH.match(path) or ".." in path:
             self._json({"error": "Not found."}, 404)
@@ -122,6 +133,25 @@ class StudioHandler(BaseHTTPRequestHandler):
                 pdf = render_pdf(document)
                 name = re.sub(r"[^A-Za-z0-9._ -]+", "", str(document.get("name") or "password-slips")).strip() or "password-slips"
                 self._send(pdf, "application/pdf", disposition=f'attachment; filename="{name}.pdf"')
+                return
+            if path == "/api/sessions/new":
+                workspace = payload.get("workspace")
+                if not isinstance(workspace, dict):
+                    raise StudioError("The session workspace was missing.")
+                self._json(self.server.sessions.create(workspace), 201)
+                return
+            if path == "/api/sessions/save":
+                workspace = payload.get("workspace")
+                session_id = str(payload.get("session_id") or "")
+                revision = payload.get("revision")
+                if not re.fullmatch(r"[a-f0-9]{32}", session_id) or not isinstance(revision, int) or not isinstance(workspace, dict):
+                    raise StudioError("The autosave request was incomplete.")
+                try:
+                    self._json(self.server.sessions.save(session_id, revision, workspace))
+                except SessionNotFoundError:
+                    self._json({"error": "That saved session is no longer available."}, 404)
+                except SessionConflictError as exc:
+                    self._json({"error": str(exc), "conflict": True, "current": exc.current, "recovery": exc.recovery}, 409)
                 return
             if path == "/api/shutdown":
                 self._json({"ok": True})
@@ -163,6 +193,7 @@ class StudioServer(ThreadingHTTPServer):
         self.restart_requested = False
         self.commit_id = git_text("rev-parse", "HEAD")
         self.service = StudioService(self)
+        self.sessions = StudioSessionStore(ROOT / "runtime" / "studio-sessions.json")
 
 
 def main() -> int:

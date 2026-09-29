@@ -1,6 +1,6 @@
 # Password Slip Studio
 
-Password Slip Studio is a local browser tool for turning spreadsheet rows into printable password slips. It keeps the working document in the browser and can save portable workspace and template files.
+Password Slip Studio is a local browser tool for turning spreadsheet rows into printable password slips. It autosaves revisioned sessions to the local Studio service so work can be resumed from another tab or browser, while retaining a browser copy as an offline fallback. Portable workspace and template files are also supported.
 
 ## Start
 
@@ -12,7 +12,7 @@ From a terminal:
 python3 start_password_slip_studio.py
 ```
 
-The studio opens at `http://127.0.0.1:8768` and keeps running in the background after the launcher closes. Pass `--no-open` to start it without opening a browser, `--foreground` to keep it attached to the terminal, or `--port 8878` to use another local port. Use App settings (⚙) to quit Studio.
+The studio opens at `http://127.0.0.1:8768` and keeps running in the background after the launcher closes. Pass `--no-open` to start it without opening a browser, `--foreground` to keep it attached to the terminal, or `--port 8878` to use another local port. Use App settings (⚙) to quit Studio. Autosaved sessions are stored atomically with a backup in the ignored `runtime/` directory.
 
 App settings also lets you start Studio at macOS login and check for updates. The update monitor checks the selected update channel every minute. Stable releases track `master`; Development builds track `development` when that branch is published. Available updates show their release notes before installing; an update only switches or fast-forwards a clean checkout, then restarts the background service. It never overwrites local edits. The local service log and settings are in the ignored `runtime/` directory. Browser workspace data remains in the browser.
 
@@ -40,6 +40,7 @@ python3 src/password_slips.py
 - Stacked slips can set the label-column width and, in two-column mode, the first column's share of the slip. Optional small text below slips has its own typeface and size; the last matching note rule can replace or clear it per slip. PDF pages reserve the height of the longest note beneath every slip. Export filenames can append the date or a local date-and-time stamp (`YYYY-MM-DD_HH-mm`).
 - The preview is generated from the same server-rendered PDF used for export. It updates while editing and after selection changes, renders large documents page-by-page as you scroll, can be zoomed from 50% to 600%, and the divider beside it can be dragged or adjusted with the keyboard.
 - Name the document in the header; the title becomes the PDF filename. Save named colour palettes, workspaces, and templates. These are persisted locally and workspace/template files include document settings, palettes, preferences, and reusable import mappings.
+- Changes autosave to a shared Recent session. Use Recent in the header to resume work from any browser on this Mac or start a blank session without losing the previous one. Open tabs detect newer revisions automatically; simultaneous edits are preserved as a separate recovered session instead of silently overwriting either copy.
 - Use `⌘K` for commands. Other shortcuts are listed in the Keyboard shortcuts dialog. `⌘Z` and `⇧⌘Z` keep native text-field undo available while editing.
 
 ## Development
