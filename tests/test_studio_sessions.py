@@ -52,6 +52,24 @@ class StudioSessionStoreTests(unittest.TestCase):
         with self.assertRaises(SessionNotFoundError):
             self.store.get("missing")
 
+    def test_latest_session_wins_when_timestamps_match(self):
+        self.store._now = lambda: "2026-10-01T01:00:00+00:00"
+        first = self.store.create(workspace("First"))
+        second = self.store.create(workspace("Second"))
+        self.assertEqual(self.store.list()[0]["id"], second["id"])
+        self.store.save(first["id"], first["revision"], workspace("First updated"))
+        self.assertEqual(self.store.list()[0]["id"], first["id"])
+
+    def test_repeated_exit_save_does_not_create_a_false_conflict(self):
+        initial = {**workspace(), "savedAt": "2026-09-29T04:00:00Z"}
+        created = self.store.create(initial)
+        edited = {**workspace("Updated"), "savedAt": "2026-09-29T04:01:00Z"}
+        saved = self.store.save(created["id"], 1, edited)
+        repeated = {**edited, "savedAt": "2026-09-29T04:01:01Z"}
+        result = self.store.save(created["id"], 1, repeated)
+        self.assertEqual(result["revision"], saved["revision"])
+        self.assertEqual(len(self.store.list()), 1)
+
     def test_corrupt_primary_falls_back_to_backup(self):
         first = self.store.create(workspace("First"))
         self.store.save(first["id"], first["revision"], workspace("Second"))

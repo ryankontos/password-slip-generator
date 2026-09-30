@@ -7,3 +7,6 @@ runtime/
 .DS_Store
 settings/settings.json
 settings/layout_settings.json
+node_modules/
+test-results/
+playwright-report/

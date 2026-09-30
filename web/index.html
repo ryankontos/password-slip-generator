@@ -31,19 +31,17 @@
         <button id="redoButton" class="icon-button" title="Redo (⇧⌘Z)" aria-label="Redo" disabled>↷</button>
       </span>
       <button id="updateAvailableButton" class="button secondary compact update-available-button" type="button" aria-controls="updateNotesDialog" title="Review update notes" hidden>Update available</button>
-      <button id="commandButton" class="button secondary compact" title="Commands (⌘K)"><span class="command-glyph">⌘</span> Commands</button>
       <button id="openSessionsHeaderButton" class="button secondary compact">Recent</button>
-      <button id="openTemplatesHeaderButton" class="button secondary compact"><span class="command-glyph">◇</span> Templates</button>
+      <button id="openTemplatesHeaderButton" class="button secondary compact">Templates</button>
       <button id="exportPdfButton" class="button primary compact">Export PDF</button>
-      <button id="moreButton" class="icon-button" title="More actions" aria-label="More actions" aria-expanded="false">•••</button>
-      <div id="moreMenu" class="action-menu" hidden>
+      <button id="moreButton" class="icon-button" title="More actions" aria-label="More actions" aria-expanded="false" popovertarget="moreMenu">•••</button>
+      <div id="moreMenu" class="action-menu" popover="auto">
+        <button id="commandButton"><span>⌘K</span> Commands</button>
         <button id="exportCsvButton"><span>↓</span> Export data as CSV</button>
         <hr>
         <button id="downloadWorkspaceButton"><span>↓</span> Save workspace</button>
         <button id="loadWorkspaceButton"><span>↑</span> Open workspace</button>
         <input id="loadWorkspaceInput" type="file" accept=".json,.password-slips,.password-slip-workspace" hidden>
-        <button id="openSessionsButton"><span>◷</span> Recent sessions</button>
-        <button id="openTemplatesButton"><span>◇</span> Templates</button>
         <button id="shortcutsButton"><span>⌘</span> Keyboard shortcuts</button>
         <button id="themeButton"><span>◐</span> Toggle theme</button>
         <button id="settingsMenuButton"><span>⚙</span> App settings</button>
@@ -57,10 +55,10 @@
   <main class="workspace">
     <aside class="rail">
       <nav class="rail-nav" aria-label="Studio sections">
-        <button class="nav-item active" data-view="data"><span class="nav-icon">▦</span><span>Data</span><kbd>D</kbd></button>
-        <button class="nav-item" data-view="columns"><span class="nav-icon">⫶</span><span>Fields</span><span id="columnCount" class="nav-count">4</span></button>
-        <button class="nav-item" data-view="rules"><span class="nav-icon">⌁</span><span>Rules</span><span id="ruleCount" class="nav-count">1</span></button>
-        <button class="nav-item" data-view="layout"><span class="nav-icon">▤</span><span>Layout</span><kbd>L</kbd></button>
+        <button class="nav-item active" data-view="data"><span>Data</span></button>
+        <button class="nav-item" data-view="columns"><span>Fields</span><span id="columnCount" class="nav-count">4</span></button>
+        <button class="nav-item" data-view="rules"><span>Rules</span><span id="ruleCount" class="nav-count">0</span></button>
+        <button class="nav-item" data-view="layout"><span>Layout</span></button>
       </nav>
 
     </aside>
@@ -81,15 +79,17 @@
         </div>
         <div id="selectionToolbar" class="selection-toolbar" hidden>
           <strong id="selectionCount" role="status" aria-live="polite">0 selected</strong>
-          <button id="exportSelectedButton" class="button quiet compact">Export selected</button>
           <button id="bulkEditButton" class="button quiet compact">Bulk edit</button>
-          <button id="customizeSelectedButton" class="button quiet compact">Customize visibility</button>
-          <button id="resetSelectedLayoutsButton" class="button quiet compact">Reset visibility</button>
-          <button id="duplicateRowsButton" class="button quiet compact">Duplicate</button>
-          <button id="hideRowsButton" class="button quiet compact">Hide slips</button>
-          <button id="showRowsButton" class="button quiet compact">Show slips</button>
+          <button id="rowActionsButton" class="button quiet compact" type="button" popovertarget="selectedRowActions">Row actions ▾</button>
           <button id="deleteRowsButton" class="button danger quiet compact">Delete</button>
-          <button id="clearSelectionButton" class="button quiet compact push-right">Clear</button>
+          <button id="clearSelectionButton" class="button quiet compact push-right">Deselect</button>
+          <div id="selectedRowActions" class="row-actions-menu" popover="auto" aria-label="Selected row actions">
+            <button id="duplicateRowsButton" type="button">Duplicate rows</button>
+            <button id="hideRowsButton" type="button">Hide slips</button>
+            <hr>
+            <button id="customizeSelectedButton" type="button">Field visibility…</button>
+            <button id="resetSelectedLayoutsButton" type="button">Reset field visibility</button>
+          </div>
         </div>
         <div id="tableShell" class="table-shell">
           <table class="data-table">
@@ -419,6 +419,7 @@
   </dialog>
 
   <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+  <script src="/vendor/sortable.min.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

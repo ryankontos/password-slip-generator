@@ -35,7 +35,7 @@ class StudioSessionStore:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(timezone.utc).isoformat(timespec="seconds")
+        return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
     @staticmethod
     def _name(workspace: dict[str, Any], fallback: str = "Untitled password slips") -> str:
@@ -137,7 +137,7 @@ class StudioSessionStore:
                 "recovered": recovered,
                 "workspace": deepcopy(workspace),
             }
-            payload["sessions"].append(record)
+            payload["sessions"].insert(0, record)
             payload["sessions"] = sorted(payload["sessions"], key=lambda item: str(item.get("updated_at") or ""), reverse=True)[: self.limit]
             self._write(payload)
             return deepcopy(record)
@@ -150,9 +150,13 @@ class StudioSessionStore:
             record = next((item for item in payload["sessions"] if item.get("id") == session_id), None)
             if not record:
                 raise SessionNotFoundError(session_id)
+            # A close-tab beacon may repeat an autosave after it succeeds.
+            # The export timestamp is metadata, not an edit to the workspace.
+            current_content = {key: value for key, value in record.get("workspace", {}).items() if key != "savedAt"}
+            incoming_content = {key: value for key, value in workspace.items() if key != "savedAt"}
+            if current_content == incoming_content:
+                return deepcopy(record)
             if int(record.get("revision", 0)) != int(revision):
-                if record.get("workspace") == workspace:
-                    return deepcopy(record)
                 recovery = self.create(workspace, recovered=True)
                 raise SessionConflictError(deepcopy(record), recovery)
             record["workspace"] = deepcopy(workspace)
@@ -160,6 +164,8 @@ class StudioSessionStore:
             record["updated_at"] = self._now()
             record["revision"] = int(record.get("revision", 0)) + 1
             record["recovered"] = False
+            # Keep the latest save first even for older, second-resolution dates.
+            payload["sessions"] = [record, *[item for item in payload["sessions"] if item["id"] != record["id"]]]
             payload["sessions"] = sorted(payload["sessions"], key=lambda item: str(item.get("updated_at") or ""), reverse=True)[: self.limit]
             self._write(payload)
             return deepcopy(record)
