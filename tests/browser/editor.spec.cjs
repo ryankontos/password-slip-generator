@@ -1,6 +1,11 @@
 const { test, expect } = require("@playwright/test");
 
+const pageErrors = new WeakMap();
+
 test.beforeEach(async ({ page }) => {
+  const errors = [];
+  pageErrors.set(page, errors);
+  page.on("pageerror", error => errors.push(error.message));
   await page.goto("/");
   await page.waitForFunction(() => ui.sessionReady);
   await expect(page.locator("#saveStatus")).toHaveText("Saved");
@@ -13,6 +18,10 @@ test.beforeEach(async ({ page }) => {
     renderAll();
     showView("data");
   });
+});
+
+test.afterEach(async ({ page }) => {
+  expect(pageErrors.get(page), "Unexpected browser errors").toEqual([]);
 });
 
 test("Enter never creates rows, while final-cell Tab adds exactly one", async ({ page }) => {
@@ -115,6 +124,89 @@ test("rule controls remain checkbox sized and editable", async ({ page }) => {
   await active.uncheck();
   await expect(active).not.toBeChecked();
   await expect(page.locator(".rule-card")).toHaveClass(/disabled/);
+});
+
+test("rule controls fit when the preview leaves a narrow editor", async ({ page }) => {
+  await page.setViewportSize({width: 1100, height: 850});
+  await page.evaluate(() => setPreviewWidth(920));
+  await page.locator('[data-view="rules"]').click();
+  await page.locator("#addRuleButton").click();
+  const overflowing = await page.locator(".rule-card").evaluate(card => {
+    const bounds = card.getBoundingClientRect();
+    return [...card.querySelectorAll("input,select,button,label")].filter(el => {
+      const rect = el.getBoundingClientRect();
+      return rect.width && (rect.right > bounds.right + 1 || rect.left < bounds.left - 1);
+    }).map(el => el.className);
+  });
+  expect(overflowing).toEqual([]);
+  await page.screenshot({path: "test-results/rule-editor-narrow.png"});
+});
+
+test("renaming a rule then clicking Add condition acts on the first click", async ({ page }) => {
+  await page.locator('[data-view="rules"]').click();
+  await page.locator("#addRuleButton").click();
+  await page.locator(".rule-name-input").fill("Rename without losing the next click");
+  await expect(page.locator(".condition-delete")).toBeDisabled();
+  await page.locator('[data-action="add-condition"]').click();
+  await expect(page.locator(".condition-row")).toHaveCount(2);
+  await expect(page.locator(".rule-name-input")).toHaveValue("Rename without losing the next click");
+  await expect(page.locator(".condition-delete").first()).toBeEnabled();
+});
+
+test("live rule editing updates its match count, saves before blur, and preserves name and target", async ({ page }) => {
+  await page.locator("#addRowButton").click();
+  await page.locator('#dataBody input[data-column-id="name"]').fill("Person");
+  await page.locator('[data-view="rules"]').click();
+  await page.locator("#addRuleButton").click();
+  await page.locator(".rule-target-input").selectOption("password");
+  await page.locator(".condition-operator").selectOption("equals");
+  await page.locator(".condition-value").fill("Person");
+  await expect(page.locator(".rule-match-count")).toHaveText("1 matching");
+  await expect(page.locator("#saveStatus")).toHaveText("Saved");
+  await page.reload();
+  await page.waitForFunction(() => ui.sessionReady);
+  await expect(page.locator(".condition-value")).toHaveValue("Person");
+  await page.locator(".rule-name-input").fill("My visibility rule");
+  await page.locator(".rule-action-input").selectOption("show_field");
+  await expect(page.locator(".rule-name-input")).toHaveValue("My visibility rule");
+  await expect(page.locator(".rule-target-input")).toHaveValue("password");
+});
+
+test("field names save while typing and defaults can be edited without losing the next click", async ({ page }) => {
+  await page.locator('[data-view="columns"]').click();
+  const name = page.locator('.column-row[data-column-id="name"] .column-label-input');
+  await name.fill("Full name");
+  await expect(page.locator("#saveStatus")).toHaveText("Saved");
+  await page.reload();
+  await page.waitForFunction(() => ui.sessionReady);
+  await expect(name).toHaveValue("Full name");
+  await page.locator('.column-row[data-column-id="name"] .column-default-input').fill("New starter");
+  await page.locator('.column-row[data-column-id="name"] [data-action="duplicate-column"]').click();
+  await expect(page.locator(".column-row")).toHaveCount(5);
+  await page.locator('[data-view="data"]').click();
+  await page.locator("#addRowButton").click();
+  await expect(page.locator('#dataBody input[data-column-id="name"]')).toHaveValue("New starter");
+});
+
+test("field actions use an Escape-dismissable menu and the settings sheet keeps pending edits", async ({ page }) => {
+  await page.locator('[data-column-id="name"] .data-field-menu-trigger').click();
+  await expect(page.locator("#dataFieldMenu")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#dataFieldMenu")).not.toBeVisible();
+  await expect(page.locator('[data-column-id="name"] .data-field-menu-trigger')).toBeFocused();
+  await page.locator('[data-column-id="name"] .data-field-menu-trigger').click();
+  await page.locator("#dataFieldRenameInput").fill("Full name");
+  await page.locator("#dataFieldOptionsButton").click();
+  await expect(page.locator("#fieldSheetDialog")).toBeVisible();
+  await expect(page.locator("#fieldSheetName")).toHaveValue("Full name");
+  await page.locator("#fieldSheetDefault").fill("Default name");
+  await page.locator("#fieldSheetDone").click();
+  await page.locator("#addRowButton").click();
+  await expect(page.locator('#dataBody input[data-column-id="name"]')).toHaveValue("Default name");
+  await page.locator('[data-column-id="name"] .data-field-menu-trigger').click();
+  await page.locator("#dataFieldRenameInput").fill("   ");
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-column-id="name"] .data-field-title')).toHaveText("Untitled field");
 });
 
 test("adding a row on the next page reveals it and resets selection", async ({ page }) => {

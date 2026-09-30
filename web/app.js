@@ -277,8 +277,6 @@ const ui = {
   previewRevision: 0,
   previewCleanup: null,
   lastImportSheetName: initialPreferences.lastImportSheetName,
-  defaultValueEdits: new Set(),
-  ruleNoteEdits: new Set(),
   editingDefaultNote: false,
   gridEdit: null,
   selectionAnchor: "",
@@ -604,7 +602,7 @@ async function waitForSessionAutosave() {
 }
 
 function isEditingDocumentValue(element) {
-  return Boolean(element?.matches?.(".cell-input, .column-label-input, .rule-name-input, .condition-value"));
+  return Boolean(element?.matches?.(".cell-input, .column-row input, .column-row select, .rule-card input, .rule-card textarea, .rule-card select, #documentName, #noteTextInput, #dataFieldRenameInput"));
 }
 
 async function pollCurrentSession() {
@@ -626,8 +624,6 @@ async function pollCurrentSession() {
 function restore(serialised) {
   documentState = normaliseDocument(JSON.parse(serialised));
   clearRowSelection();
-  ui.defaultValueEdits.clear();
-  ui.ruleNoteEdits.clear();
   ui.editingDefaultNote = false;
   renderAll();
   changed();
@@ -1104,13 +1100,15 @@ async function deleteField(columnId) {
 }
 
 function closeDataFieldMenu() {
-  $("#dataFieldMenu").hidden = true;
+  const menu = $("#dataFieldMenu");
+  if (menu.matches(":popover-open")) menu.hidePopover();
   ui.dataFieldMenuId = "";
 }
 
 function openDataFieldMenu(columnId, anchor) {
   const column = documentState.columns.find((item) => item.id === columnId);
   if (!column) return;
+  if (ui.dataFieldMenuId === columnId && $("#dataFieldMenu").matches(":popover-open")) { closeDataFieldMenu(); return; }
   ui.dataFieldMenuId = columnId;
   const menu = $("#dataFieldMenu");
   $("#dataFieldRenameInput").value = column.label;
@@ -1118,11 +1116,11 @@ function openDataFieldMenu(columnId, anchor) {
   $("#dataFieldMoveLeft").disabled = index === 0;
   $("#dataFieldMoveRight").disabled = index === documentState.columns.length - 1;
   $("#dataFieldDeleteButton").disabled = documentState.columns.length === 1;
-  menu.hidden = false;
+  if (!menu.matches(":popover-open")) menu.showPopover();
   const rect = anchor.getBoundingClientRect();
   menu.style.left = `${Math.max(8, Math.min(window.innerWidth - 236, rect.left))}px`;
   menu.style.top = `${Math.max(8, Math.min(window.innerHeight - menu.offsetHeight - 8, rect.bottom + 4))}px`;
-  requestAnimationFrame(() => $("#dataFieldRenameInput").select());
+  $("#dataFieldRenameInput").select();
 }
 
 function renderFieldSheet() {
@@ -1148,7 +1146,7 @@ function openFieldSheet(columnId) {
   ui.fieldSheetId = columnId;
   renderFieldSheet();
   $("#fieldSheetDialog").showModal();
-  requestAnimationFrame(() => $("#fieldSheetName").focus());
+  $("#fieldSheetName").focus();
 }
 
 function renderColumns() {
@@ -1212,7 +1210,8 @@ function renderRules() {
     return `${rule.name || ""} ${rule.action || ""} ${actionLabels[rule.action] || ""} ${target} ${rule.noteText || ""} ${conditionText}`.toLowerCase().includes(query);
   });
   $("#ruleSearch").value = ui.ruleSearch;
-  $("#ruleHeaderSummary").textContent = query ? `${visibleRules.length} of ${documentState.rules.length} rules` : "Rules run per slip. If show and hide both match a field, hide wins.";
+  $("#ruleHeaderSummary").textContent = query ? `${visibleRules.length} of ${documentState.rules.length} rules` : "";
+  $("#ruleHeaderSummary").hidden = !query;
   const testSelect = $("#ruleTestRowSelect");
   const testRows = documentState.rows;
   const testRow = testRows.find((row) => row.id === ui.ruleTestRowId);
@@ -1235,12 +1234,12 @@ function renderRules() {
   $("#ruleList").innerHTML = visibleRules.length ? visibleRules.map((rule, index) => { const matching = documentState.rows.filter((row) => ruleMatches(rule, row.values)).length; const testMatch = selectedTestRow && rule.enabled !== false ? ruleMatches(rule, selectedTestRow.values) : null; const testLabel = selectedTestRow ? (rule.enabled === false ? "Disabled" : testMatch ? "Matches test row" : "No match") : ""; return `<article class="rule-card ${rule.enabled === false ? "disabled" : ""}" data-rule-id="${rule.id}">
     <header class="rule-header"><button class="drag-handle rule-drag-handle" title="Drag to reorder rule" aria-label="Drag rule ${index + 1}">⠿</button><span class="rule-number">${index + 1}</span><input class="rule-name-input" value="${escapeHtml(rule.name || actionLabels[rule.action] || "Rule")}" aria-label="Rule name"><span class="rule-match-count">${matching} matching</span>${testLabel ? `<span class="rule-test-chip ${testMatch ? "pass" : "fail"}">${escapeHtml(testLabel)}</span>` : ""}<label class="rule-enabled"><input class="rule-enabled-input" type="checkbox" ${rule.enabled !== false ? "checked" : ""}> Active</label><button class="icon-button small" data-action="duplicate-rule" title="Duplicate rule">⧉</button><button class="icon-button small" data-action="delete-rule" title="Delete rule">×</button></header>
     <div class="rule-body">
-      <div class="rule-action-row"><span>Then</span><select class="rule-action-input" aria-label="Rule action">${actionOptions(rule.action)}</select>${rule.action === "hide_slip" ? `<span class="rule-target-label">Entire slip</span>` : ["set_note", "clear_note"].includes(rule.action) ? `<span class="rule-target-label">Text below slip</span>` : `<select class="rule-target-input" aria-label="Field affected by rule">${columnOptions(rule.target)}</select>`}</div>
-      ${rule.action === "set_note" ? `<label class="rule-note-control">Text to show<textarea class="rule-note-input" maxlength="1200" rows="3" aria-label="Text below slip for this rule">${escapeHtml(rule.noteText || "")}</textarea></label>` : ""}
       <div class="conditions">
-        ${(rule.conditions || []).map((condition, conditionIndex) => `<div class="condition-row" data-condition-index="${conditionIndex}"><span class="condition-join">${conditionIndex ? (rule.match === "any" ? "OR" : "AND") : "If"}</span><select class="condition-field" aria-label="Condition field">${columnOptions(condition.field)}</select><select class="condition-operator" aria-label="Condition operator">${operatorOptions(condition.operator)}</select><input class="condition-value" aria-label="Condition value" value="${escapeHtml(condition.value || "")}" placeholder="Value" ${["empty", "not_empty"].includes(condition.operator) ? "hidden" : ""}><button class="condition-delete" data-action="delete-condition" title="Remove condition">×</button></div>`).join("")}
+        ${(rule.conditions || []).map((condition, conditionIndex) => `<div class="condition-row" data-condition-index="${conditionIndex}"><span class="condition-join">${conditionIndex ? (rule.match === "any" ? "OR" : "AND") : "If"}</span><select class="condition-field" aria-label="Condition field">${columnOptions(condition.field)}</select><select class="condition-operator" aria-label="Condition operator">${operatorOptions(condition.operator)}</select><input class="condition-value" aria-label="Condition value" value="${escapeHtml(condition.value || "")}" placeholder="Value" ${["empty", "not_empty"].includes(condition.operator) ? "hidden" : ""}><button class="condition-delete" data-action="delete-condition" title="${rule.conditions.length === 1 ? "At least one condition is required" : "Remove condition"}" aria-label="Remove condition ${conditionIndex + 1}" ${rule.conditions.length === 1 ? "disabled" : ""}>×</button></div>`).join("")}
         <div class="condition-footer"><button class="text-button" data-action="add-condition">＋ Add condition</button><label class="match-control">Match<select class="rule-match-input"><option value="all" ${rule.match !== "any" ? "selected" : ""}>all conditions</option><option value="any" ${rule.match === "any" ? "selected" : ""}>any condition</option></select></label><label class="negate-control" title="Apply this rule when the conditions do not match"><input class="rule-negate-input" type="checkbox" ${rule.negate ? "checked" : ""}> Invert result</label></div>
       </div>
+      <div class="rule-action-row"><span>Then</span><select class="rule-action-input" aria-label="Rule action">${actionOptions(rule.action)}</select>${rule.action === "hide_slip" ? `<span class="rule-target-label">Entire slip</span>` : ["set_note", "clear_note"].includes(rule.action) ? `<span class="rule-target-label">Text below slip</span>` : `<select class="rule-target-input" aria-label="Field affected by rule">${columnOptions(rule.target)}</select>`}</div>
+      ${rule.action === "set_note" ? `<label class="rule-note-control">Text to show<textarea class="rule-note-input" maxlength="1200" rows="3" aria-label="Text below slip for this rule">${escapeHtml(rule.noteText || "")}</textarea></label>` : ""}
     </div>
   </article>`; }).join("") : query && documentState.rules.length ? `<div class="empty-state compact-empty"><div class="empty-icon">⌕</div><h2>No matching rules</h2><button class="button quiet compact" type="button" data-action="clear-rule-search">Clear filter</button></div>` : "";
   $("#rulesEmpty").hidden = Boolean(documentState.rules.length);
@@ -1537,7 +1536,7 @@ function addColumn(label = "New field") {
     state.rows.forEach((row) => { row.values[id] = ""; });
   });
   showView("columns");
-  requestAnimationFrame(() => $(`[data-column-id="${id}"] .column-label-input`)?.select());
+  $(`[data-column-id="${id}"] .column-label-input`)?.select();
 }
 
 function uniqueColumnId(label, existing = documentState.columns) {
@@ -1563,7 +1562,7 @@ function addNoteRule() {
   const rule = { id: uid("rule"), name: "Set text below slip", enabled: true, action: "set_note", target: "", noteText: "", match: "all", conditions: [{ field: first, operator: "not_empty", value: "" }] };
   commit((state) => state.rules.push(rule));
   showView("rules");
-  requestAnimationFrame(() => $("#ruleList .rule-card:last-child .rule-note-input")?.focus());
+  $("#ruleList .rule-card:last-child .rule-note-input")?.focus();
 }
 
 function openRowOptions(rowId) {
@@ -1833,7 +1832,6 @@ async function applyOpenedDocument(incoming, palettes, message, preferences = nu
   if (importPreferences) restoreImportPreferences(importPreferences);
   applyWorkspacePreferences(preferences, restoreView);
   clearRowSelection();
-  ui.defaultValueEdits.clear();
   ui.search = "";
   ui.fieldSearch = "";
   ui.ruleSearch = "";
@@ -2462,7 +2460,6 @@ async function confirmImport() {
 
 function resetWorkspaceUi() {
   clearRowSelection();
-  ui.defaultValueEdits.clear();
   ui.search = "";
   ui.fieldSearch = "";
   ui.ruleSearch = "";
@@ -2861,21 +2858,17 @@ function installDataFieldControls() {
       openDataFieldMenu(columnId, button);
     }
   });
-  $("#dataFieldMenu").addEventListener("click", (event) => event.stopPropagation());
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest("#dataFieldMenu, .data-field-menu-trigger")) closeDataFieldMenu();
-  });
-  $("#dataFieldRenameInput").addEventListener("change", (event) => {
-    const columnId = ui.dataFieldMenuId;
-    if (!columnId) return;
-    const label = event.target.value.trim() || "Untitled field";
-    if (documentState.columns.find((column) => column.id === columnId)?.label !== label) {
-      commit((state) => { state.columns.find((column) => column.id === columnId).label = label; });
-    }
+  $("#dataFieldMenu").addEventListener("beforetoggle", (event) => {
+    if (event.newState !== "closed") return;
+    $("#dataFieldRenameInput").dispatchEvent(new Event("change", {bubbles: true}));
+    ui.dataFieldMenuId = "";
   });
   $("#dataFieldRenameInput").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); event.target.blur(); closeDataFieldMenu(); }
-    if (event.key === "Escape") closeDataFieldMenu();
+    if (!["Enter", "Escape"].includes(event.key)) return;
+    event.preventDefault();
+    const columnId = ui.dataFieldMenuId;
+    closeDataFieldMenu();
+    $(`[data-column-id="${columnId}"] .data-field-menu-trigger`)?.focus();
   });
   $("#dataFieldMoveLeft").addEventListener("click", () => moveField(ui.dataFieldMenuId, -1));
   $("#dataFieldMoveRight").addEventListener("click", () => moveField(ui.dataFieldMenuId, 1));
@@ -2893,6 +2886,7 @@ function installDataFieldControls() {
     fieldSheetTransform: "valueTransform", fieldSheetAlign: "valueAlign", fieldSheetGridWidth: "gridWidth",
   };
   Object.entries(sheetKeys).forEach(([id, key]) => $("#" + id).addEventListener("change", (event) => {
+    if (["fieldSheetName", "fieldSheetDefault"].includes(id)) return;
     const columnId = ui.fieldSheetId;
     const value = id === "fieldSheetName" ? event.target.value.trim() || "Untitled field" :
       id === "fieldSheetGridWidth" ? Math.min(600, Math.max(120, Number(event.target.value) || 180)) : event.target.value;
@@ -2946,8 +2940,77 @@ function installDataFieldControls() {
   });
 }
 
+// Keep the edited DOM in place: replacing it on blur can discard the click
+// that moved focus to a neighbouring button. One focused edit is one undo step.
+function installLiveTextEditors(root, selector, resolveBinding) {
+  const editing = new WeakSet();
+  const update = (input, finalize = false) => {
+    const binding = resolveBinding(input);
+    if (!binding?.object) return;
+    const value = finalize && binding.normalize ? binding.normalize(input.value) : input.value;
+    if (finalize) input.value = value;
+    if (binding.object[binding.key] === value) return;
+    if (!editing.has(input)) { pushHistory(); editing.add(input); }
+    binding.object[binding.key] = value;
+    changed();
+    binding.refresh?.();
+    $("#undoButton").disabled = !ui.history.length;
+    $("#redoButton").disabled = true;
+    schedulePdfPreview();
+  };
+  root.addEventListener("input", (event) => { if (event.target.matches(selector)) update(event.target); });
+  root.addEventListener("change", (event) => { if (event.target.matches(selector)) update(event.target, true); });
+  root.addEventListener("focusout", (event) => {
+    if (!event.target.matches(selector)) return;
+    update(event.target, true);
+    editing.delete(event.target);
+  });
+}
+
+function refreshRuleIndicators() {
+  const selected = documentState.rows.find((row) => row.id === ui.ruleTestRowId);
+  $$(".rule-card").forEach((card) => {
+    const rule = documentState.rules.find((item) => item.id === card.dataset.ruleId);
+    if (!rule) return;
+    $(".rule-match-count", card).textContent = `${documentState.rows.filter((row) => ruleMatches(rule, row.values)).length} matching`;
+    const chip = $(".rule-test-chip", card);
+    if (!chip || !selected) return;
+    const matches = rule.enabled !== false && ruleMatches(rule, selected.values);
+    chip.textContent = rule.enabled === false ? "Disabled" : matches ? "Matches test row" : "No match";
+    chip.classList.toggle("pass", matches);
+    chip.classList.toggle("fail", !matches);
+  });
+  if (selected) $("#ruleTestStatus").textContent = rowHiddenReason(selected) || "Printable · rule matches are shown on each card";
+  updateExportAvailability();
+}
+
+function installEditorTextControls() {
+  const fieldBinding = (input, columnId, key) => {
+    const object = documentState.columns.find((column) => column.id === columnId);
+    if (!object) return null;
+    return { object, key, normalize: key === "label" ? value => value.trim() || "Untitled field" : null,
+      refresh: () => {
+        if (key === "label") { renderData(); renderRules(); }
+        if (!input.closest("#columnList")) renderColumns();
+      } };
+  };
+  installLiveTextEditors($("#columnList"), ".column-label-input,.column-default-input", input =>
+    fieldBinding(input, input.closest(".column-row")?.dataset.columnId, input.matches(".column-label-input") ? "label" : "defaultValue"));
+  installLiveTextEditors($("#fieldSheetDialog"), "#fieldSheetName,#fieldSheetDefault", input =>
+    fieldBinding(input, ui.fieldSheetId, input.id === "fieldSheetName" ? "label" : "defaultValue"));
+  installLiveTextEditors($("#dataFieldMenu"), "#dataFieldRenameInput", input => fieldBinding(input, ui.dataFieldMenuId, "label"));
+  installLiveTextEditors($("#ruleList"), ".rule-name-input,.condition-value,.rule-note-input", input => {
+    const rule = documentState.rules.find((item) => item.id === input.closest(".rule-card")?.dataset.ruleId);
+    if (!rule) return null;
+    if (input.matches(".condition-value")) return { object: rule.conditions[Number(input.closest(".condition-row").dataset.conditionIndex)], key: "value", refresh: refreshRuleIndicators };
+    if (input.matches(".rule-note-input")) return { object: rule, key: "noteText" };
+    return { object: rule, key: "name", normalize: value => value.trim() || actionLabels[rule.action] || "Rule" };
+  });
+}
+
 function installEvents() {
   installDataFieldControls();
+  installEditorTextControls();
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
   ["#addRowButton", "#appendRowButton"].forEach((selector) => $(selector).addEventListener("click", addRow));
   $("#dataImportButton").addEventListener("click", openImport);
@@ -3178,52 +3241,13 @@ function installEvents() {
     const row = event.target.closest(".column-row");
     if (!row) return;
     const columnId = row.dataset.columnId;
-    if (event.target.classList.contains("column-label-input")) {
-      const label = event.target.value.trim() || "Untitled field";
-      const column = documentState.columns.find((item) => item.id === columnId);
-      event.target.value = label;
-      if (column && column.label !== label) {
-        commit((state) => { state.columns.find((item) => item.id === columnId).label = label; }, { render: false });
-        $("#undoButton").disabled = false;
-        $("#redoButton").disabled = true;
-        renderData();
-        renderRules();
-        schedulePdfPreview();
-      }
-    }
+    if (event.target.matches(".column-label-input,.column-default-input")) return;
     if (event.target.classList.contains("column-group-input")) commit((state) => { state.columns.find((column) => column.id === columnId).group = event.target.value.trim(); });
     if (event.target.classList.contains("column-format-input")) commit((state) => { state.columns.find((column) => column.id === columnId).style = event.target.value; });
     if (event.target.classList.contains("column-type-input")) commit((state) => { state.columns.find((column) => column.id === columnId).type = event.target.value; });
     if (event.target.classList.contains("column-transform-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueTransform = event.target.value; });
     if (event.target.classList.contains("column-align-input")) commit((state) => { state.columns.find((column) => column.id === columnId).valueAlign = event.target.value; });
     if (event.target.classList.contains("column-visibility-input")) commit((state) => { state.columns.find((column) => column.id === columnId).visibility = event.target.value; });
-  });
-  $("#columnList").addEventListener("change", (event) => {
-    if (!event.target.classList.contains("column-default-input")) return;
-    const columnId = event.target.closest(".column-row")?.dataset.columnId;
-    ui.defaultValueEdits.delete(columnId);
-    const column = documentState.columns.find((item) => item.id === columnId);
-    if (!column || column.defaultValue === event.target.value) return;
-    commit((state) => {
-      const next = state.columns.find((item) => item.id === columnId);
-      if (next) next.defaultValue = event.target.value;
-    });
-  });
-  $("#columnList").addEventListener("input", (event) => {
-    if (!event.target.classList.contains("column-default-input")) return;
-    const columnId = event.target.closest(".column-row")?.dataset.columnId;
-    const column = documentState.columns.find((item) => item.id === columnId);
-    if (!column || column.defaultValue === event.target.value) return;
-    if (!ui.defaultValueEdits.has(columnId)) {
-      pushHistory();
-      ui.defaultValueEdits.add(columnId);
-    }
-    column.defaultValue = event.target.value;
-    changed();
-  });
-  $("#columnList").addEventListener("focusout", (event) => {
-    if (!event.target.classList.contains("column-default-input")) return;
-    ui.defaultValueEdits.delete(event.target.closest(".column-row")?.dataset.columnId);
   });
   $("#columnList").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-action]");
@@ -3242,7 +3266,7 @@ function installEvents() {
   });
 
   $("#ruleList").addEventListener("change", (event) => {
-    if (event.target.classList.contains("rule-note-input")) return;
+    if (event.target.matches(".rule-note-input,.rule-name-input,.condition-value")) return;
     const card = event.target.closest(".rule-card");
     if (!card) return;
     const ruleId = card.dataset.ruleId;
@@ -3250,11 +3274,12 @@ function installEvents() {
     commit((state) => {
       const rule = state.rules.find((item) => item.id === ruleId);
       if (event.target.classList.contains("rule-enabled-input")) rule.enabled = event.target.checked;
-      if (event.target.classList.contains("rule-name-input")) rule.name = event.target.value.trim() || actionLabels[rule.action] || "Rule";
       if (event.target.classList.contains("rule-action-input")) {
+        const wasAutomaticName = !rule.name || rule.name === actionLabels[rule.action];
         rule.action = event.target.value;
-        rule.name = actionLabels[rule.action];
-        rule.target = ["hide_slip", "set_note", "clear_note"].includes(rule.action) ? "" : state.columns[0]?.id || "";
+        if (wasAutomaticName) rule.name = actionLabels[rule.action];
+        rule.target = ["hide_slip", "set_note", "clear_note"].includes(rule.action) ? "" :
+          (state.columns.some(column => column.id === rule.target) ? rule.target : state.columns[0]?.id || "");
       }
       if (event.target.classList.contains("rule-target-input")) rule.target = event.target.value;
       if (event.target.classList.contains("rule-match-input")) rule.match = event.target.value;
@@ -3263,22 +3288,8 @@ function installEvents() {
         const condition = rule.conditions[Number(conditionRow.dataset.conditionIndex)];
         if (event.target.classList.contains("condition-field")) condition.field = event.target.value;
         if (event.target.classList.contains("condition-operator")) condition.operator = event.target.value;
-        if (event.target.classList.contains("condition-value")) condition.value = event.target.value;
       }
     });
-  });
-  $("#ruleList").addEventListener("input", (event) => {
-    if (!event.target.classList.contains("rule-note-input")) return;
-    const ruleId = event.target.closest(".rule-card")?.dataset.ruleId;
-    const rule = documentState.rules.find((item) => item.id === ruleId);
-    if (!rule || rule.noteText === event.target.value) return;
-    if (!ui.ruleNoteEdits.has(ruleId)) { pushHistory(); ui.ruleNoteEdits.add(ruleId); }
-    rule.noteText = event.target.value;
-    changed();
-    schedulePdfPreview();
-  });
-  $("#ruleList").addEventListener("focusout", (event) => {
-    if (event.target.classList.contains("rule-note-input")) ui.ruleNoteEdits.delete(event.target.closest(".rule-card")?.dataset.ruleId);
   });
   $("#ruleTestRowSelect").addEventListener("change", (event) => { ui.ruleTestRowId = event.target.value; renderRules(); });
   $("#ruleList").addEventListener("click", (event) => {

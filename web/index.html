@@ -226,8 +226,8 @@
     </aside>
   </main>
 
-  <div id="dataFieldMenu" class="data-field-menu" hidden>
-    <label>Field name<input id="dataFieldRenameInput" type="text" maxlength="120" aria-label="Rename field"></label>
+  <div id="dataFieldMenu" class="data-field-menu" popover="auto" aria-label="Field actions">
+    <label>Field name<input id="dataFieldRenameInput" type="text" maxlength="120" aria-label="Rename field" autocomplete="off"></label>
     <div class="data-field-menu-row"><button id="dataFieldMoveLeft" type="button">← Move left</button><button id="dataFieldMoveRight" type="button">Move right →</button></div>
     <button id="dataFieldOptionsButton" type="button">More options…</button>
     <button id="dataFieldDuplicateButton" type="button">Duplicate field</button>
@@ -300,7 +300,7 @@
         <h3 class="section-label">Field visibility</h3>
         <div id="rowOverrideList" class="override-list"></div>
       </div>
-      <footer class="modal-footer"><span>Automatic uses the column and rule settings.</span><button id="copyRowVisibilityButton" class="button secondary compact" type="button" hidden>Apply to selected rows</button><button class="button primary" value="default">Done</button></footer>
+      <footer class="modal-footer"><span>Automatic uses field settings and rules.</span><button id="copyRowVisibilityButton" class="button secondary compact" type="button" hidden>Apply to selected rows</button><button class="button primary" value="default">Done</button></footer>
     </form>
   </dialog>
 

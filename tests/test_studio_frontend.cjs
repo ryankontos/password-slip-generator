@@ -155,3 +155,25 @@ test("canceling a reused confirmation dialog cannot repeat a previous approval",
   closed();
   assert.equal(await result, false);
 });
+
+test("shared text editors autosave while focused, normalize on blur, and group undo", () => {
+  const app = editor();
+  const handlers = new Map();
+  app.context.root = {addEventListener: (event, handler) => handlers.set(event, handler)};
+  app.context.textInput = {value: " First edit ", matches: () => true};
+  app.run(`installLiveTextEditors(root, "input", () => ({object: documentState.columns[0], key: "label", normalize: value => value.trim() || "Untitled field"}))`);
+  handlers.get("input")({target: app.context.textInput});
+  app.context.textInput.value = " Final edit ";
+  handlers.get("input")({target: app.context.textInput});
+  app.run("flushPersistence()");
+  assert.equal(JSON.parse(app.storage.get("password-slip-studio-document")).columns[0].label, " Final edit ");
+  handlers.get("change")({target: app.context.textInput});
+  handlers.get("focusout")({target: app.context.textInput});
+  assert.equal(app.context.textInput.value, "Final edit");
+  assert.equal(app.run("ui.history.length"), 1);
+  app.context.textInput.value = "Another edit";
+  handlers.get("input")({target: app.context.textInput});
+  assert.equal(app.run("ui.history.length"), 2);
+  app.run("undo()");
+  assert.equal(app.run("documentState.columns[0].label"), "Final edit");
+});
