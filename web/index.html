@@ -197,10 +197,10 @@
           <section class="settings-section span-two">
             <h2>Marks</h2>
             <div class="toggle-grid">
-              <label class="toggle-row"><input id="borderInput" type="checkbox"><span class="switch"></span><span><strong>Slip border</strong><small>Outline each finished slip</small></span></label>
-              <label class="toggle-row"><input id="cutMarksInput" type="checkbox"><span class="switch"></span><span><strong>Cut marks</strong><small>Show trim ticks at sheet edges</small></span></label>
-              <label class="toggle-row"><input id="footerInput" type="checkbox"><span class="switch"></span><span><strong>PDF footer</strong><small>Export date and page number</small></span></label>
-              <label class="toggle-row"><input id="fieldLinesInput" type="checkbox"><span class="switch"></span><span><strong>Field dividers</strong><small>Rules between field cells</small></span></label>
+              <label class="toggle-row"><input id="borderInput" type="checkbox"><span><strong>Slip border</strong><small>Outline each finished slip</small></span></label>
+              <label class="toggle-row"><input id="cutMarksInput" type="checkbox"><span><strong>Cut marks</strong><small>Show trim ticks at sheet edges</small></span></label>
+              <label class="toggle-row"><input id="footerInput" type="checkbox"><span><strong>PDF footer</strong><small>Export date and page number</small></span></label>
+              <label class="toggle-row"><input id="fieldLinesInput" type="checkbox"><span><strong>Field dividers</strong><small>Rules between field cells</small></span></label>
             </div>
           </section>
           <section class="settings-section span-two">
@@ -296,7 +296,7 @@
     <form method="dialog" class="modal-card small-card">
       <header class="modal-header"><div><h2>Row options</h2><p id="rowOptionsName"></p></div><button class="icon-button" value="cancel" aria-label="Close">×</button></header>
       <div class="modal-body">
-        <label class="toggle-row bordered"><input id="rowPrintableInput" type="checkbox"><span class="switch"></span><span><strong>Print this slip</strong><small>Hidden rows remain editable and available to rules</small></span></label>
+        <label class="toggle-row bordered"><input id="rowPrintableInput" type="checkbox"><span><strong>Print this slip</strong><small>Hidden rows remain editable and available to rules</small></span></label>
         <h3 class="section-label">Field visibility</h3>
         <div id="rowOverrideList" class="override-list"></div>
       </div>
@@ -335,15 +335,15 @@
         <div class="template-save-panel">
           <div class="template-save-fields">
             <label>Template name<input id="templateNameInput" type="text" maxlength="120" placeholder="Template name" autocomplete="off"></label>
-            <label class="toggle-row bordered"><input id="templateIncludeDataInput" type="checkbox"><span class="switch"></span><span><strong>Include current data</strong><small>Keep the rows with this template</small></span></label>
+            <label class="toggle-row bordered"><input id="templateIncludeDataInput" type="checkbox"><span><strong>Include current data</strong><small>Keep the rows with this template</small></span></label>
           </div>
           <button id="saveTemplateButton" class="button primary" type="button">Save template</button>
         </div>
         <div class="template-file-row"><strong>Import template file</strong><span>Open a template you already have.</span><button id="openTemplateFileButton" class="button secondary" type="button">Choose file</button><input id="loadTemplateInput" type="file" accept=".json,.password-slip-template" hidden></div>
-        <div class="template-list-header"><h3>Saved templates</h3><span>Available in this app</span></div>
+        <div class="template-list-header"><h3>Saved templates</h3><span>Shared across browsers</span></div>
         <div id="templateList" class="template-list"></div>
       </div>
-      <footer class="modal-footer"><span>Saved templates stay available here.</span><button class="button secondary" value="cancel">Done</button></footer>
+      <footer class="modal-footer"><span>Templates are saved on this Mac.</span><button class="button secondary" value="cancel">Done</button></footer>
     </form>
   </dialog>
 

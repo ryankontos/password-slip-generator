@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/");
   await page.waitForFunction(() => ui.sessionReady);
+  await page.waitForFunction(() => librarySync.ready && !librarySync.initializing && !librarySync.saving);
   await expect(page.locator("#saveStatus")).toHaveText("Saved");
   await page.evaluate(async () => {
     flushPersistence();
@@ -22,6 +23,170 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async ({ page }) => {
   expect(pageErrors.get(page), "Unexpected browser errors").toEqual([]);
+});
+
+test("templates and palettes are shared across browsers without being replaced by older sessions", async ({ page, browser }) => {
+  const oldSession = await page.evaluate(() => ui.sessionId);
+  await page.locator("#addRowButton").click();
+  await page.locator('#dataBody input[data-column-id="name"]').fill("Saved data");
+  await page.locator("#openTemplatesHeaderButton").click();
+  await page.locator("#templateNameInput").fill("Shared fields only");
+  await page.locator("#saveTemplateButton").click();
+  await expect(page.locator(".template-item").filter({ hasText: "Shared fields only" })).toContainText("No data included");
+  await expect(page.locator("#saveTemplateButton")).toBeEnabled();
+  await page.locator("#templateNameInput").fill("Shared with data");
+  await page.locator("#templateIncludeDataInput").check();
+  await page.locator("#saveTemplateButton").click();
+  await expect(page.locator("#saveTemplateButton")).toBeEnabled();
+  await page.screenshot({ path: "test-results/templates-shared-library.png" });
+  await page.keyboard.press("Escape");
+  await page.locator('[data-view="layout"]').click();
+  await page.locator("#accentInput").fill("#123456");
+  await page.locator("#paletteNameInput").fill("Shared colours");
+  await page.locator("#savePaletteButton").click();
+  await expect.poll(() => page.evaluate(() => librarySync.pending.length)).toBe(0);
+  const other = await browser.newContext();
+  try {
+    const resumed = await other.newPage();
+    await resumed.goto("/");
+    await resumed.waitForFunction(() => librarySync.ready && !librarySync.saving);
+    await resumed.locator("#openTemplatesHeaderButton").click();
+    const fields = resumed.locator(".template-item").filter({ hasText: "Shared fields only" });
+    await expect(fields).toBeVisible();
+    await fields.getByRole("button", { name: "Open", exact: true }).click();
+    await expect(resumed.locator("#dataBody tr")).toHaveCount(0);
+    await resumed.locator("#openTemplatesHeaderButton").click();
+    await resumed.locator(".template-item").filter({ hasText: "Shared with data" }).getByRole("button", { name: "Open", exact: true }).click();
+    await expect(resumed.locator('#dataBody input[data-column-id="name"]')).toHaveValue("Saved data");
+    await resumed.locator('[data-view="layout"]').click();
+    await expect(resumed.locator("#paletteSelect option").filter({ hasText: "Shared colours" })).toHaveCount(1);
+    await resumed.evaluate(async id => applySessionWorkspace(await sessionRequest("/" + id)), oldSession);
+    expect(await resumed.evaluate(() => loadColorPalettes().some(item => item.name === "Shared colours"))).toBe(true);
+  } finally { await other.close(); }
+});
+
+test("older browser templates migrate once and deleted templates do not reappear", async ({ page, browser }) => {
+  const legacy = await browser.newContext();
+  await legacy.addInitScript(() => {
+    if (localStorage.getItem("migration-fixture")) return;
+    localStorage.setItem("migration-fixture", "1");
+    localStorage.setItem("pss-saved-templates", JSON.stringify([{ id: "legacy-template", name: "Legacy setup", savedAt: "2026-01-01", includeData: false,
+      document: { name: "Legacy setup", columns: [{ id: "legacy", label: "Legacy field", type: "text" }], rows: [] } }]));
+  });
+  try {
+    const migrated = await legacy.newPage();
+    await migrated.goto("/");
+    await migrated.waitForFunction(() => librarySync.ready && !librarySync.saving);
+    await page.evaluate(() => pollSharedLibrary());
+    await page.locator("#openTemplatesHeaderButton").click();
+    await page.locator(".template-item").filter({ hasText: "Legacy setup" }).getByRole("button", { name: "Delete", exact: true }).click();
+    await page.locator("#confirmDialog").getByRole("button", { name: "Delete template", exact: true }).click();
+    await expect(page.locator(".template-item").filter({ hasText: "Legacy setup" })).toHaveCount(0);
+    await migrated.reload();
+    await migrated.waitForFunction(() => librarySync.ready && !librarySync.saving);
+    expect(await migrated.evaluate(() => loadSavedTemplates().some(item => item.id === "legacy-template"))).toBe(false);
+  } finally { await legacy.close(); }
+});
+
+test("a template save survives a service outage, reload, and reconnection", async ({ page, browser }) => {
+  await page.route("**/api/library", route => route.abort());
+  await page.locator("#openTemplatesHeaderButton").click();
+  await page.locator("#templateNameInput").fill("Reconnect setup");
+  await page.locator("#saveTemplateButton").click();
+  await expect(page.locator(".template-item").filter({ hasText: "Reconnect setup" })).toContainText("Waiting to sync");
+  await expect(page.locator("#saveTemplateButton")).toBeEnabled();
+  await page.reload();
+  await page.waitForFunction(() => ui.sessionReady);
+  expect(await page.evaluate(() => librarySync.pending.some(item => item.record?.name === "Reconnect setup"))).toBe(true);
+  await page.unroute("**/api/library");
+  await page.evaluate(() => pollSharedLibrary());
+  await expect.poll(() => page.evaluate(() => librarySync.pending.length)).toBe(0);
+  const other = await browser.newContext();
+  try {
+    const resumed = await other.newPage();
+    await resumed.goto("/");
+    await resumed.waitForFunction(() => librarySync.ready && !librarySync.saving);
+    await resumed.locator("#openTemplatesHeaderButton").click();
+    await expect(resumed.locator(".template-item").filter({ hasText: "Reconnect setup" })).toBeVisible();
+  } finally { await other.close(); }
+});
+
+test("replacing a template from a stale browser keeps both configurations", async ({ page, browser }) => {
+  await page.locator("#openTemplatesHeaderButton").click();
+  await page.locator("#templateNameInput").fill("Conflicting setup");
+  await page.locator("#saveTemplateButton").click();
+  await expect(page.locator("#saveTemplateButton")).toBeEnabled();
+  await page.keyboard.press("Escape");
+  const other = await browser.newContext();
+  try {
+    const stale = await other.newPage();
+    await stale.goto("/");
+    await stale.waitForFunction(() => librarySync.ready && !librarySync.saving);
+    const olderLibrary = await stale.evaluate(() => librarySync.snapshot);
+    await stale.route("**/api/library", route => route.request().method() === "GET" ? route.fulfill({ json: olderLibrary }) : route.continue());
+    for (const [editor, name] of [[page, "Current field"], [stale, "My field"]]) {
+      await editor.locator('[data-view="columns"]').click();
+      await editor.locator('[data-column-id="name"] .column-label-input').fill(name);
+      await editor.locator("#openTemplatesHeaderButton").click();
+      await editor.locator("#templateNameInput").fill("Conflicting setup");
+      await editor.locator("#saveTemplateButton").click();
+      await editor.locator("#confirmDialog").getByRole("button", { name: "Replace template", exact: true }).click();
+      await expect(editor.locator("#saveTemplateButton")).toBeEnabled();
+    }
+    const records = await stale.evaluate(() => loadSavedTemplates().filter(item => item.name.startsWith("Conflicting setup")));
+    expect(records).toHaveLength(2);
+    expect(records.map(item => item.document.columns[0].label).sort()).toEqual(["Current field", "My field"]);
+    await expect(stale.locator(".template-item").filter({ hasText: "Conflicting setup (copy)" })).toBeVisible();
+  } finally { await other.close(); }
+});
+
+test("separate tabs can queue saves during an outage without losing either", async ({ page }) => {
+  const peer = await page.context().newPage();
+  try {
+    await peer.goto("/");
+    await peer.waitForFunction(() => librarySync.ready && !librarySync.saving);
+    for (const [editor, name] of [[page, "Offline tab one"], [peer, "Offline tab two"]]) {
+      await editor.route("**/api/library", route => route.abort());
+      await editor.locator("#openTemplatesHeaderButton").click();
+      await editor.locator("#templateNameInput").fill(name);
+      await editor.locator("#saveTemplateButton").click();
+      await expect(editor.locator("#saveTemplateButton")).toBeEnabled();
+    }
+    await page.unroute("**/api/library");
+    await peer.unroute("**/api/library");
+    await page.evaluate(() => pollSharedLibrary());
+    await peer.evaluate(() => pollSharedLibrary());
+    const names = await page.evaluate(() => loadSavedTemplates().map(item => item.name));
+    expect(names).toContain("Offline tab one");
+    expect(names).toContain("Offline tab two");
+    await page.reload();
+    await page.waitForFunction(() => librarySync.ready && !librarySync.saving);
+    expect(await page.evaluate(() => librarySync.pending.length)).toBe(0);
+  } finally { await peer.close(); }
+});
+
+test("reset clears the shared library while keeping prior work in Recent", async ({ page }) => {
+  const before = await page.evaluate(() => ui.sessionId);
+  await page.locator("#openTemplatesHeaderButton").click();
+  await page.locator("#templateNameInput").fill("Reset this setup");
+  await page.locator("#saveTemplateButton").click();
+  await expect(page.locator("#saveTemplateButton")).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await page.locator("#moreButton").click();
+  await page.locator("#resetMenuButton").click();
+  await page.locator("#confirmDialog").getByRole("button", { name: "Reset everything", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => ui.sessionId)).not.toBe(before);
+  const library = await page.request.get("/api/library");
+  expect((await library.json()).templates).toHaveLength(0);
+  expect((await library.json()).palettes).toHaveLength(0);
+  expect((await page.request.get("/api/sessions/" + before)).ok()).toBe(true);
+  await page.locator('[data-view="layout"]').click();
+  const footer = page.locator("#footerInput");
+  await footer.uncheck();
+  await footer.focus();
+  await footer.press("Space");
+  await expect(footer).toBeChecked();
+  expect(await page.evaluate(() => documentState.layout.footer)).toBe(true);
 });
 
 test("Enter never creates rows, while final-cell Tab adds exactly one", async ({ page }) => {

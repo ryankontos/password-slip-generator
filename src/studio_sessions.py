@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -24,13 +25,18 @@ class SessionConflictError(RuntimeError):
         self.recovery = recovery
 
 
+class LibraryConflictError(RuntimeError):
+    def __init__(self, library: dict[str, Any]) -> None:
+        super().__init__("This item changed in another browser. Review it before deleting it.")
+        self.library = library
+
+
 class StudioSessionStore:
     """Small JSON store with atomic writes and conflict recovery."""
 
-    def __init__(self, path: Path, limit: int = 30) -> None:
+    def __init__(self, path: Path) -> None:
         self.path = path
         self.backup_path = path.with_suffix(path.suffix + ".bak")
-        self.limit = max(5, limit)
         self._lock = threading.RLock()
 
     @staticmethod
@@ -59,8 +65,11 @@ class StudioSessionStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
             try:
-                self.backup_path.write_bytes(self.path.read_bytes())
-            except OSError:
+                previous = self.path.read_bytes()
+                parsed = json.loads(previous)
+                if isinstance(parsed, dict) and isinstance(parsed.get("sessions"), list):
+                    self.backup_path.write_bytes(previous)
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
                 pass
         data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         with tempfile.NamedTemporaryFile(dir=self.path.parent, prefix=".sessions-", suffix=".tmp", delete=False) as handle:
@@ -119,6 +128,98 @@ class StudioSessionStore:
                 raise SessionNotFoundError(session_id)
             return deepcopy(record)
 
+    @staticmethod
+    def _validate_library_item(kind: str, record: Any) -> None:
+        if kind not in {"templates", "palettes"} or not isinstance(record, dict):
+            raise ValueError("Choose a template or palette to save.")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", str(record.get("id") or "")) or not str(record.get("name") or "").strip():
+            raise ValueError("The saved item needs a name and identifier.")
+        if len(str(record["name"])) > 160:
+            raise ValueError("The saved item name is too long.")
+        if kind == "palettes":
+            colors = record.get("colors")
+            if not isinstance(colors, dict) or not all(re.fullmatch(r"#[0-9a-fA-F]{6}", str(colors.get(key, ""))) for key in ("accent", "ink", "paperColor", "borderColor")):
+                raise ValueError("The palette contains an invalid colour.")
+        else:
+            document = record.get("document")
+            if not isinstance(document, dict) or not isinstance(document.get("columns"), list) or not isinstance(document.get("rows"), list):
+                raise ValueError("The template does not contain valid fields and rows.")
+
+    def _ensure_library(self, payload: dict[str, Any]) -> dict[str, Any]:
+        library = payload.get("library")
+        if isinstance(library, dict) and library.get("id") and isinstance(library.get("templates"), list) and isinstance(library.get("palettes"), list):
+            return library
+        library = {"id": uuid.uuid4().hex, "revision": 1, "templates": [], "palettes": []}
+        # Upgrade older installations without losing palettes in saved sessions.
+        for session in sorted(payload["sessions"], key=lambda item: str(item.get("updated_at") or ""), reverse=True):
+            palettes = session.get("workspace", {}).get("palettes", [])
+            if not isinstance(palettes, list):
+                continue
+            for palette in palettes:
+                try:
+                    self._validate_library_item("palettes", palette)
+                except ValueError:
+                    continue
+                if not any(item["id"] == palette["id"] for item in library["palettes"]):
+                    library["palettes"].append(deepcopy(palette))
+        payload["library"] = library
+        self._write(payload)
+        return library
+
+    def library(self) -> dict[str, Any]:
+        with self._lock:
+            return deepcopy(self._ensure_library(self._read()))
+
+    def update_library(self, operation: dict[str, Any]) -> dict[str, Any]:
+        """Change one item, not an entire browser's potentially stale list."""
+        kind, action = operation.get("kind"), operation.get("action")
+        if kind not in {"templates", "palettes"} or action not in {"save", "import", "delete"}:
+            raise ValueError("The library change was invalid.")
+        with self._lock:
+            payload = self._read()
+            library = self._ensure_library(payload)
+            items = library[kind]
+            operation_id = str(operation.get("operationId") or "")
+            receipts = library.setdefault("receipts", {})
+            if operation_id and operation_id in receipts:
+                receipt = receipts[operation_id]
+                saved = next((item for item in items if item.get("id") == receipt.get("id")), None)
+                return {"library": deepcopy(library), "record": deepcopy(saved), "recovered": receipt.get("recovered", False)}
+            record = deepcopy(operation.get("record"))
+            item_id = operation.get("id") if action == "delete" else (record.get("id") if isinstance(record, dict) else None)
+            current = next((item for item in items if item.get("id") == item_id), None)
+            recovered = False
+            if action == "delete":
+                if not current:
+                    return {"library": deepcopy(library)}
+                if current.get("savedAt") != operation.get("expectedSavedAt"):
+                    raise LibraryConflictError(deepcopy(library))
+                items.remove(current)
+            else:
+                self._validate_library_item(kind, record)
+                if kind == "templates" and record.get("includeData") is False:
+                    record["document"]["rows"] = []
+                if action == "import" and current:
+                    return {"library": deepcopy(library), "record": deepcopy(current)}
+                if current == record:
+                    return {"library": deepcopy(library), "record": deepcopy(current)}
+                same_name = next((item for item in items if str(item.get("name", "")).strip().casefold() == str(record["name"]).strip().casefold()), None)
+                if (current and current.get("savedAt") != operation.get("expectedSavedAt")) or (same_name and same_name is not current):
+                    # Preserve both versions rather than overwrite unseen changes.
+                    record["id"] = uuid.uuid4().hex
+                    record["name"] = f"{str(record['name'])[:130]} (copy)"
+                    record["savedAt"] = self._now()
+                    recovered = True
+                elif current:
+                    items.remove(current)
+                items.insert(0, record)
+            library["revision"] = int(library.get("revision", 0)) + 1
+            if operation_id:
+                receipts[operation_id] = {"id": record.get("id") if isinstance(record, dict) else None, "recovered": recovered}
+                library["receipts"] = dict(list(receipts.items())[-500:])
+            self._write(payload)
+            return {"library": deepcopy(library), "record": record, "recovered": recovered}
+
     def create(self, workspace: dict[str, Any], *, recovered: bool = False) -> dict[str, Any]:
         if not isinstance(workspace, dict):
             raise ValueError("The session workspace was missing.")
@@ -138,7 +239,7 @@ class StudioSessionStore:
                 "workspace": deepcopy(workspace),
             }
             payload["sessions"].insert(0, record)
-            payload["sessions"] = sorted(payload["sessions"], key=lambda item: str(item.get("updated_at") or ""), reverse=True)[: self.limit]
+            payload["sessions"] = sorted(payload["sessions"], key=lambda item: str(item.get("updated_at") or ""), reverse=True)
             self._write(payload)
             return deepcopy(record)
 
@@ -166,6 +267,6 @@ class StudioSessionStore:
             record["recovered"] = False
             # Keep the latest save first even for older, second-resolution dates.
             payload["sessions"] = [record, *[item for item in payload["sessions"] if item["id"] != record["id"]]]
-            payload["sessions"] = sorted(payload["sessions"], key=lambda item: str(item.get("updated_at") or ""), reverse=True)[: self.limit]
+            payload["sessions"] = sorted(payload["sessions"], key=lambda item: str(item.get("updated_at") or ""), reverse=True)
             self._write(payload)
             return deepcopy(record)

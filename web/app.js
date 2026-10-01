@@ -60,14 +60,15 @@ const initialPreferences = loadStudioPreferences();
 
 const COLOR_KEYS = ["accent", "ink", "paperColor", "borderColor"];
 const PALETTE_STORAGE_KEY = "pss-color-palettes";
-const MAX_COLOR_PALETTES = 20;
 const TEMPLATE_STORAGE_KEY = "pss-saved-templates";
-const MAX_SAVED_TEMPLATES = 12;
+const LIBRARY_PENDING_KEY = "pss-library-pending:";
+const LIBRARY_ID_KEY = "pss-library-id";
 
 function loadColorPalettes() {
+  if (librarySync.cache) return librarySync.cache.palettes;
   try {
     const parsed = JSON.parse(localStorage.getItem(PALETTE_STORAGE_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((palette) => palette && palette.id && String(palette.name || "").trim() && palette.colors && COLOR_KEYS.every((key) => /^#[0-9a-f]{6}$/i.test(palette.colors[key]))).slice(0, MAX_COLOR_PALETTES) : [];
+    return Array.isArray(parsed) ? parsed.filter((palette) => palette && palette.id && String(palette.name || "").trim() && palette.colors && COLOR_KEYS.every((key) => /^#[0-9a-f]{6}$/i.test(palette.colors[key]))) : [];
   } catch (_) {
     return [];
   }
@@ -75,7 +76,7 @@ function loadColorPalettes() {
 
 function saveColorPalettes(palettes) {
   try {
-    localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(palettes.slice(0, MAX_COLOR_PALETTES)));
+    localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(palettes));
     renderColorPalettes();
     return true;
   } catch (_) {
@@ -97,19 +98,17 @@ function renderColorPalettes() {
   $("#deletePaletteButton").disabled = !select.value;
 }
 
-function saveCurrentColorPalette() {
+async function saveCurrentColorPalette() {
   const name = $("#paletteNameInput").value.trim();
   if (!name) { toast("Give the palette a name first", "error"); $("#paletteNameInput").focus(); return; }
   const existing = loadColorPalettes().find((palette) => palette.name.trim().toLowerCase() === name.toLowerCase());
+  if (existing && !await confirmAction("Replace palette?", `Replace “${existing.name}” with the current colours?`, "Replace palette")) return;
   const record = { id: existing?.id || uid("palette"), name, savedAt: new Date().toISOString(), colors: currentColorPalette() };
-  if (!saveColorPalettes([record, ...loadColorPalettes().filter((palette) => palette.id !== record.id && palette.name.trim().toLowerCase() !== name.toLowerCase())])) {
-    toast("The palette could not be saved in this browser", "error");
-    return;
-  }
-  $("#paletteSelect").value = record.id;
-  $("#paletteNameInput").value = record.name;
+  const stored = await changeLibrary({ kind: "palettes", action: "save", record, expectedSavedAt: existing?.savedAt });
+  $("#paletteSelect").value = stored.record?.id || record.id;
+  $("#paletteNameInput").value = stored.record?.name || record.name;
   renderColorPalettes();
-  toast(`Palette “${name}” saved`);
+  librarySaveToast(stored, "Palette saved");
 }
 
 function applySelectedColorPalette() {
@@ -124,15 +123,16 @@ async function deleteSelectedColorPalette() {
   const palette = loadColorPalettes().find((item) => item.id === id);
   if (!palette) return;
   if (!await confirmAction("Delete palette?", `Remove “${palette.name}” from saved palettes?`, "Delete palette")) return;
-  saveColorPalettes(loadColorPalettes().filter((item) => item.id !== id));
+  const stored = await changeLibrary({ kind: "palettes", action: "delete", id, expectedSavedAt: palette.savedAt });
   $("#paletteNameInput").value = "";
-  toast("Palette deleted");
+  librarySaveToast(stored, "Palette deleted");
 }
 
 function loadSavedTemplates() {
+  if (librarySync.cache) return librarySync.cache.templates;
   try {
     const parsed = JSON.parse(localStorage.getItem(TEMPLATE_STORAGE_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((item) => item && item.document && Array.isArray(item.document.columns) && Array.isArray(item.document.rows)).slice(0, MAX_SAVED_TEMPLATES) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => item && item.document && Array.isArray(item.document.columns) && Array.isArray(item.document.rows)) : [];
   } catch (_) {
     return [];
   }
@@ -140,10 +140,166 @@ function loadSavedTemplates() {
 
 function saveSavedTemplates(templates) {
   try {
-    localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates.slice(0, MAX_SAVED_TEMPLATES)));
+    localStorage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(templates));
     return true;
   } catch (_) {
     return false;
+  }
+}
+
+// The server owns the shared library. Browser storage is a cache and a durable
+// outbox, so a temporary service outage does not discard a save or deletion.
+const librarySync = { ready: false, snapshot: null, cache: null, pending: [], saving: null, initializing: null };
+
+function readLibraryOutbox() {
+  const pending = new Map(librarySync.pending.map(item => [item.operationId, item]));
+  try {
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(LIBRARY_PENDING_KEY)) continue;
+      const item = JSON.parse(localStorage.getItem(key));
+      if (item?.operationId && ["templates", "palettes"].includes(item.kind)) pending.set(item.operationId, item);
+    }
+  } catch (_) {}
+  librarySync.pending = [...pending.values()].sort((left, right) => String(left.queuedAt || left.record?.savedAt || "").localeCompare(String(right.queuedAt || right.record?.savedAt || "")));
+}
+readLibraryOutbox();
+
+function rememberLibraryOutbox() {
+  try {
+    librarySync.pending.forEach(item => localStorage.setItem(LIBRARY_PENDING_KEY + item.operationId, JSON.stringify(item)));
+    return true;
+  }
+  catch (_) { return false; }
+}
+
+function acknowledgeLibraryOperation(operation) {
+  librarySync.pending = librarySync.pending.filter(item => item.operationId !== operation.operationId);
+  try { localStorage.removeItem(LIBRARY_PENDING_KEY + operation.operationId); } catch (_) {}
+}
+
+function applySharedLibrary(library) {
+  librarySync.snapshot = library;
+  const lists = { templates: clone(library.templates || []), palettes: clone(library.palettes || []) };
+  librarySync.pending.forEach(operation => {
+    const items = lists[operation.kind];
+    const id = operation.id || operation.record?.id;
+    const index = items.findIndex(item => item.id === id);
+    if (operation.action === "import" && index >= 0) return;
+    if (index >= 0) items.splice(index, 1);
+    if (operation.action !== "delete" && operation.record) items.unshift(operation.record);
+  });
+  librarySync.cache = lists;
+  saveColorPalettes(lists.palettes);
+  saveSavedTemplates(lists.templates);
+  renderTemplateList();
+}
+
+async function libraryRequest(operation) {
+  const response = await fetch("/api/library", {
+    method: operation ? "POST" : "GET", cache: "no-store",
+    headers: operation ? { "Content-Type": "application/json" } : {},
+    body: operation ? JSON.stringify(operation) : undefined,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.error || "Saved templates and palettes are temporarily unavailable.");
+    error.status = response.status; error.library = result.library;
+    throw error;
+  }
+  return result;
+}
+
+async function drainLibraryOutbox() {
+  if (librarySync.saving) return librarySync.saving;
+  librarySync.saving = (async () => {
+    const results = new Map();
+    readLibraryOutbox();
+    while (librarySync.pending.length) {
+      const operation = librarySync.pending[0];
+      try {
+        const result = await libraryRequest(operation);
+        acknowledgeLibraryOperation(operation);
+        applySharedLibrary(result.library);
+        results.set(operation.operationId, { ...result, saved: true });
+        if (result.recovered) toast("Another browser changed this item. Both versions were kept; yours is saved as a copy.", "info");
+      } catch (error) {
+        if ([400, 409].includes(error.status)) {
+          acknowledgeLibraryOperation(operation);
+          if (error.library) applySharedLibrary(error.library);
+          else if (librarySync.snapshot) applySharedLibrary(librarySync.snapshot);
+          toast(error.message, "error");
+          results.set(operation.operationId, { failed: true });
+          continue;
+        }
+        break; // Keep the durable outbox for the next retry.
+      }
+    }
+    return results;
+  })().finally(() => { librarySync.saving = null; });
+  return librarySync.saving;
+}
+
+async function initializeSharedLibrary() {
+  if (librarySync.initializing) return librarySync.initializing;
+  librarySync.initializing = (async () => {
+    readLibraryOutbox();
+    const local = { templates: loadSavedTemplates(), palettes: loadColorPalettes() };
+    try {
+      const library = await libraryRequest();
+      if (localStorage.getItem(LIBRARY_ID_KEY) !== library.id) {
+        for (const kind of ["templates", "palettes"]) for (const record of local[kind]) {
+          if (!librarySync.pending.some(item => item.kind === kind && (item.id || item.record?.id) === record.id)) {
+            librarySync.pending.push({ operationId: uid("library"), kind, action: "import", record });
+          }
+        }
+        if (!rememberLibraryOutbox()) throw new Error("Browser storage is full.");
+        localStorage.setItem(LIBRARY_ID_KEY, library.id);
+      }
+      librarySync.ready = true;
+      applySharedLibrary(library);
+      return await drainLibraryOutbox();
+    } catch (_) { librarySync.ready = false; }
+  })().finally(() => { librarySync.initializing = null; });
+  return librarySync.initializing;
+}
+
+async function changeLibrary(operation) {
+  const baseline = librarySync.snapshot || { templates: loadSavedTemplates(), palettes: loadColorPalettes() };
+  operation = { ...operation, operationId: uid("library"), queuedAt: new Date().toISOString() };
+  librarySync.pending.push(operation);
+  if (!rememberLibraryOutbox()) {
+    librarySync.pending.pop();
+    toast("Browser storage is full. This item was not saved. Save a workspace file to keep a backup.", "error");
+    return { failed: true };
+  }
+  applySharedLibrary(baseline);
+  const initialized = !librarySync.ready ? await initializeSharedLibrary() : null;
+  const results = await drainLibraryOutbox();
+  return results.get(operation.operationId) || initialized?.get(operation.operationId) || { saved: !librarySync.pending.some(item => item.operationId === operation.operationId) };
+}
+
+function librarySaveToast(result, message) {
+  if (result.failed || result.recovered) return;
+  toast(result.saved ? message : "Saved in this browser. Will sync when Studio reconnects.", result.saved ? "" : "info");
+}
+
+async function pollSharedLibrary() {
+  if (librarySync.saving || librarySync.initializing) return;
+  readLibraryOutbox();
+  if (!librarySync.ready) { await initializeSharedLibrary(); return; }
+  if (librarySync.pending.length) { await drainLibraryOutbox(); return; }
+  const before = librarySync.snapshot;
+  try {
+    const library = await libraryRequest();
+    if (!librarySync.saving && !librarySync.pending.length && librarySync.snapshot === before &&
+        (library.id !== before?.id || library.revision !== before?.revision)) applySharedLibrary(library);
+  } catch (_) {}
+}
+
+async function mergeWorkspacePalettes(palettes) {
+  for (const record of palettes || []) {
+    if (!loadColorPalettes().some(item => item.id === record.id)) await changeLibrary({ kind: "palettes", action: "import", record });
   }
 }
 
@@ -489,7 +645,7 @@ function applySessionWorkspace(record, { notify = false } = {}) {
   const incoming = workspace?.document;
   if (!incoming || !Array.isArray(incoming.columns) || !Array.isArray(incoming.rows)) throw new Error("This saved session is not valid.");
   documentState = normaliseDocument(incoming);
-  if (Array.isArray(workspace.palettes)) saveColorPalettes(workspace.palettes);
+  // Palettes and templates are a shared library, not session-owned snapshots.
   if (workspace.importPreferences) restoreImportPreferences(workspace.importPreferences);
   applyWorkspacePreferences(workspace.preferences, true);
   resetWorkspaceUi();
@@ -1828,7 +1984,7 @@ async function applyOpenedDocument(incoming, palettes, message, preferences = nu
   ui.sessionReady = false;
   pushHistory();
   documentState = normaliseDocument(incoming);
-  if (Array.isArray(palettes)) saveColorPalettes(palettes);
+  if (Array.isArray(palettes)) await mergeWorkspacePalettes(palettes);
   if (importPreferences) restoreImportPreferences(importPreferences);
   applyWorkspacePreferences(preferences, restoreView);
   clearRowSelection();
@@ -1940,8 +2096,8 @@ function templateRecordFromDocument(document, name, includeData) {
 }
 
 function storeTemplateRecord(record) {
-  const templates = loadSavedTemplates().filter((item) => item.id !== record.id && String(item.name || "").trim().toLowerCase() !== record.name.trim().toLowerCase());
-  return saveSavedTemplates([record, ...templates]);
+  const existing = loadSavedTemplates().find(item => item.id === record.id);
+  return changeLibrary({ kind: "templates", action: "save", record, expectedSavedAt: existing?.savedAt });
 }
 
 function formatTemplateDate(value) {
@@ -1956,7 +2112,8 @@ function renderTemplateList() {
   list.innerHTML = templates.length ? templates.map((template) => {
     const rowCount = template.document.rows.length;
     const dataLabel = template.includeData ? `${rowCount} row${rowCount === 1 ? "" : "s"} included` : "No data included";
-    return `<article class="template-item" data-template-id="${escapeHtml(template.id)}"><div class="template-item-info"><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(formatTemplateDate(template.savedAt))} · ${escapeHtml(dataLabel)}</small></div><div class="template-item-actions"><button class="button quiet compact" type="button" data-template-action="open">Open</button><button class="button quiet compact danger" type="button" data-template-action="delete">Delete</button></div></article>`;
+    const pending = librarySync.pending.some(item => item.kind === "templates" && item.record?.id === template.id);
+    return `<article class="template-item" data-template-id="${escapeHtml(template.id)}"><div class="template-item-info"><strong>${escapeHtml(template.name)}</strong><small>${pending ? "Waiting to sync" : escapeHtml(formatTemplateDate(template.savedAt))} · ${escapeHtml(dataLabel)}</small></div><div class="template-item-actions"><button class="button quiet compact" type="button" data-template-action="open">Open</button><button class="button quiet compact danger" type="button" data-template-action="delete">Delete</button></div></article>`;
   }).join("") : `<div class="template-empty">No saved templates yet. Save the current fields and layout above.</div>`;
 }
 
@@ -1965,15 +2122,23 @@ function openTemplates() {
   $("#templateIncludeDataInput").checked = false;
   renderTemplateList();
   $("#templatesDialog").showModal();
-  requestAnimationFrame(() => $("#templateNameInput").focus());
+  $("#templateNameInput").focus();
+  void pollSharedLibrary();
 }
 
-function saveTemplateFromDialog() {
-  const name = $("#templateNameInput").value.trim() || documentState.name || "Password slip template";
-  const record = templateRecordFromDocument(documentState, name, $("#templateIncludeDataInput").checked);
-  const stored = storeTemplateRecord(record);
-  renderTemplateList();
-  toast(stored ? `Template “${name}” saved` : "Could not save the template. Storage may be full.", stored ? "" : "error");
+async function saveTemplateFromDialog() {
+  const button = $("#saveTemplateButton");
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const name = $("#templateNameInput").value.trim() || documentState.name || "Password slip template";
+    const existing = loadSavedTemplates().find(item => item.name.trim().toLowerCase() === name.toLowerCase());
+    if (existing && !await confirmAction("Replace template?", `Replace “${existing.name}” with the current fields, rules and layout?`, "Replace template")) return;
+    const record = templateRecordFromDocument(documentState, name, $("#templateIncludeDataInput").checked);
+    const stored = await storeTemplateRecord(record);
+    renderTemplateList();
+    librarySaveToast(stored, "Template saved");
+  } finally { button.disabled = false; }
 }
 
 async function openTemplateRecord(record) {
@@ -2002,7 +2167,9 @@ async function loadTemplateFile(file) {
       preferences: payload.preferences || null,
       importPreferences: payload.importPreferences || {},
     };
-    storeTemplateRecord(record);
+    const stored = await storeTemplateRecord(record);
+    if (stored.failed) return;
+    librarySaveToast(stored, "Template imported");
     await openTemplateRecord(record);
   } catch (error) {
     toast(error.message || "The template could not be opened.", "error");
@@ -2478,7 +2645,12 @@ async function clearAllData() {
 }
 
 async function resetEverything() {
-  if (!await confirmAction("Reset everything?", "Start a blank session and remove saved palettes, templates and remembered import settings? Your current work will remain available in Recent.", "Reset everything")) return;
+  if (!await confirmAction("Reset everything?", "Start a blank session and remove saved palettes and templates from this Mac, plus remembered import settings? Your current work will remain available in Recent.", "Reset everything")) return;
+  await initializeSharedLibrary();
+  for (const kind of ["templates", "palettes"]) {
+    const records = kind === "templates" ? loadSavedTemplates() : loadColorPalettes();
+    for (const record of [...records]) await changeLibrary({ kind, action: "delete", id: record.id, expectedSavedAt: record.savedAt });
+  }
   flushPersistence();
   await waitForSessionAutosave();
   ui.sessionReady = false;
@@ -2496,7 +2668,7 @@ async function resetEverything() {
   document.documentElement.dataset.theme = PREFERENCE_DEFAULTS.theme;
   setPreviewWidth(ui.previewWidth, false);
   try {
-    [DOCUMENT_STORAGE_KEY, PREFERENCES_STORAGE_KEY, IMPORT_PREFERENCES_STORAGE_KEY, PALETTE_STORAGE_KEY, TEMPLATE_STORAGE_KEY, "pss-theme", "pss-last-import-sheet", "pss-preview-width"].forEach((key) => localStorage.removeItem(key));
+    [DOCUMENT_STORAGE_KEY, PREFERENCES_STORAGE_KEY, IMPORT_PREFERENCES_STORAGE_KEY, "pss-theme", "pss-last-import-sheet", "pss-preview-width"].forEach((key) => localStorage.removeItem(key));
   } catch (_) {}
   changed();
   renderAll();
@@ -3212,9 +3384,9 @@ function installEvents() {
     if (!record) return;
     if (action === "open") await openTemplateRecord(record);
     if (action === "delete" && await confirmAction("Delete template?", `Remove “${record.name}” from saved templates?`, "Delete template")) {
-      saveSavedTemplates(loadSavedTemplates().filter((template) => template.id !== record.id));
+      const stored = await changeLibrary({ kind: "templates", action: "delete", id: record.id, expectedSavedAt: record.savedAt });
       renderTemplateList();
-      toast("Template deleted");
+      librarySaveToast(stored, "Template deleted");
     }
   });
   $("#deleteRowsButton").addEventListener("click", async () => {
@@ -3462,8 +3634,10 @@ renderAll();
 showView(ui.view);
 refreshServiceStatus();
 void initializeSessionStorage();
+void initializeSharedLibrary();
 window.setInterval(() => {
   if (serviceRestartPending || $("#appSettingsDialog").open) refreshServiceStatus();
 }, 2500);
 window.setInterval(refreshServiceStatus, 15000);
 window.setInterval(pollCurrentSession, 4000);
+window.setInterval(pollSharedLibrary, 4000);

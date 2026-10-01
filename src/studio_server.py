@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from studio_core import StudioError, parse_workbook, render_pdf
-from studio_sessions import SessionConflictError, SessionNotFoundError, StudioSessionStore
+from studio_sessions import LibraryConflictError, SessionConflictError, SessionNotFoundError, StudioSessionStore
 from studio_service import ROOT, StudioService, git_text
 
 
@@ -91,6 +91,9 @@ class StudioHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/sessions":
             self._json({"sessions": self.server.sessions.list()})
             return
+        if parsed.path == "/api/library":
+            self._json(self.server.sessions.library())
+            return
         session_match = re.fullmatch(r"/api/sessions/([a-f0-9]{32})", parsed.path)
         if session_match:
             try:
@@ -118,6 +121,12 @@ class StudioHandler(BaseHTTPRequestHandler):
         try:
             payload = self._request_json()
             path = urlparse(self.path).path
+            if path == "/api/library":
+                try:
+                    self._json(self.server.sessions.update_library(payload))
+                except LibraryConflictError as exc:
+                    self._json({"error": str(exc), "library": exc.library}, 409)
+                return
             if path == "/api/import":
                 filename = str(payload.get("filename", "workbook.xlsx"))[:240]
                 try:
